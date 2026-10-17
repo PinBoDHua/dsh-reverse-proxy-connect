@@ -82,6 +82,7 @@ test('宿主入口：注册四个 provider，status v6 与诊断接口可用', a
 
   const handlers = {}
   const disposers = []
+  let registeredAdapter
   const attachments = {
     async readImageRequest() {
       return { mediaType: 'image/png', data: Buffer.from('png'), bytes: 3, width: 1, height: 1 }
@@ -124,8 +125,9 @@ test('宿主入口：注册四个 provider，status v6 与诊断接口可用', a
       return dispose
     },
     llm: {
-      registerAdapter(ids) {
+      registerAdapter(ids, adapter) {
         assert.deepEqual(ids, ['workbuddy', 'workbuddy-ai', 'qoder', 'qoder-global'])
+        registeredAdapter = adapter
         return () => {}
       },
     },
@@ -148,6 +150,10 @@ test('宿主入口：注册四个 provider，status v6 与诊断接口可用', a
     assert.equal(full.body.plugin.version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version)
     assert.equal(full.body.providers.length, 4)
     assert.equal(full.body.host.images, true, '注入了附件服务后应声明图片可用')
+    // 适配器门面必须把 canAcceptImages 透给 runtime；漏掉时模型会永远只声明
+    // text 模态，宿主在附件准入阶段就会拒绝图片。
+    assert.equal(typeof registeredAdapter.runtime.canAcceptImages, 'function')
+    assert.equal(registeredAdapter.runtime.canAcceptImages(), true)
     assert.equal(full.body.providers[0].credential.status, 'disabled')
     assert.equal(full.body.settings.advanced.idleTimeoutMs, 180_000)
     assert.equal(full.body.settings.alerts.enabled, true)

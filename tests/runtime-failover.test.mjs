@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { Runtime } from '../lib/runtime.js'
+import { Stats } from '../lib/stats.js'
 import { defaults } from '../lib/settings.js'
 
 /** 一条最小 SSE 响应。 */
@@ -137,6 +138,45 @@ test('429 限流：只有一个账号时保留上游错误，不伪造成功', a
       )
     } finally {
       runtime.flushCaches()
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('正常完成：宿主收到 finish 后立即停止消费，统计仍记 stop 而不是中断', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-finish-'))
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => sseResponse('done')
+  try {
+    const settings = settingsWithAccounts()
+    settings.accounts.workbuddy = [settings.accounts.workbuddy[0]]
+    settings.activeAccount.workbuddy = 'a'
+    const stats = new Stats({ filePath: join(dir, 'stats.json'), enabled: true })
+    const runtime = new Runtime({ settings: () => settings, dataDir: dir, logger: {}, stats })
+    try {
+      const opened = await runtime.openStream('workbuddy', {
+        model: 'hy3',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+        signal: AbortSignal.timeout(5000),
+      })
+      let kind
+      for await (const event of opened.events) {
+        // 模拟宿主：拿到终态就立刻结束迭代，不再向生成器要下一个事件。
+        if (event.type === 'finish') {
+          kind = event.kind
+          break
+        }
+      }
+      assert.equal(kind, 'stop')
+      const recent = stats.snapshot().recent[0]
+      assert.equal(recent.provider, 'workbuddy')
+      assert.equal(recent.kind, 'stop', '正常结束不能被记成 incomplete')
+      assert.ok(recent.totalTokens > 0)
+    } finally {
+      runtime.flushCaches()
+      stats.stop()
     }
   } finally {
     globalThis.fetch = originalFetch

@@ -1,5 +1,25 @@
 # 更新记录
 
+## 1.3.1 — 2026-10-18
+
+两处回归修复，没有新增依赖。
+
+### 修复：正常完成的请求被统计成「中断」
+
+`runtime.openStream()` 之前把 `#record()` 写在 `yield finish` 之后。宿主收到
+finish 就停止拉取，生成器在 `yield` 处被 `return()`，后面的记录代码不会执行，
+`finally` 便按「没记过」补记 `incomplete`。于是每一次正常回答都会在设置卡片
+的「最近请求」里显示「中断」，尽管回复已经完整到达。现在先记录终态再
+`yield`。
+
+### 修复：WorkBuddy / Qoder 模型无法接收图片
+
+`lib/index.js` 传给 `ReverseProxyAdapter` 的 runtime 门面漏了
+`canAcceptImages`，适配器因此永远把 `inputModalities` 声明成 `['text']`。
+DSH 在附件准入阶段就会以 `MODEL_DOES_NOT_SUPPORT_IMAGES` 拒绝图片（界面提示
+「当前模型不支持图片」）—— 即使附件服务已经接上、上游目录也标了
+`supportsImages: true`。现在门面转发 `runtime.canAcceptImages()`。
+
 ## 1.3.0 — 2026-10-18
 
 这一版的主题是「把 1.2.0 的 Qoder Free 修复补完整，并修掉流式终态、统计串台、
