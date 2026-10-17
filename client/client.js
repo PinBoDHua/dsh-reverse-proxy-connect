@@ -125,7 +125,7 @@ window.__ModuleLoader__.load({
       secAccounts: '账号',
       autoSwitch: '额度用完自动切换',
       accountsHintPat: '可以为同一个 provider 添加多个 PAT；当前账号积分用完后会按上面的开关自动切换。',
-      accountsHintDesktop: '桌面账号从本机登录文件读取。多个账号请填各自的登录文件路径。',
+      accountsHintDesktop: '桌面账号用上面的「浏览器登录新增账号」添加；本机已有登录会自动读取。',
       accountLabel: '账号名称',
       accountPat: '粘贴个人访问令牌（PAT）',
       accountAuthFile: '登录文件路径（留空 = 读本机登录）',
@@ -294,7 +294,7 @@ window.__ModuleLoader__.load({
       secAccounts: 'Accounts',
       autoSwitch: 'Switch when out of credits',
       accountsHintPat: 'Add more than one PAT per provider; when the current account runs out, it switches automatically.',
-      accountsHintDesktop: 'Desktop accounts are read from local sign-in files; give each extra account its own file path.',
+      accountsHintDesktop: 'Add desktop accounts with “Add account via browser login” above; an existing local sign-in is picked up automatically.',
       accountLabel: 'Account name',
       accountPat: 'Paste a personal access token',
       accountAuthFile: 'Sign-in file path (blank = local sign-in)',
@@ -1615,30 +1615,35 @@ window.__ModuleLoader__.load({
                     }, bind(t, 'loginCancel'))
                   : null),
           h('ul', { key: 'list', style: S.modelList }, accountItems),
-          h('div', { key: 'add', style: S.stack },
-            h('div', { key: 'row', style: S.row },
-              h('input', {
-                style: Object.assign({}, S.input, { flex: '1 1 140px', width: 'auto' }),
-                type: 'text',
-                value: accLabel,
-                placeholder: bind(t, 'accountLabel'),
-                onChange: function (event) { setAccLabel(event.target.value) },
-              }),
-              h('button', {
-                type: 'button',
-                style: S.button,
-                disabled: busy === 'accounts' || (isPatProvider && accSecret.trim() === ''),
-                onClick: addAccount,
-              }, bind(t, 'addAccount'))),
-            h('input', {
-              key: 'secret',
-              style: S.input,
-              type: isPatProvider ? 'password' : 'text',
-              value: accSecret,
-              placeholder: bind(t, isPatProvider ? 'accountPat' : 'accountAuthFile'),
-              onChange: function (event) { setAccSecret(event.target.value) },
-            }),
-            h('span', { key: 'sec', style: S.hintTiny }, bind(t, 'accountSecretHint'))),
+          // 桌面 provider 的新增账号只有「浏览器登录」这一条路 —— 手动填登录文件
+          // 路径既容易和本机自动发现重复，也会让用户以为需要自己找文件。
+          // Qoder 没有浏览器登录，仍然保留「名称 + PAT」的手动添加。
+          isPatProvider
+            ? h('div', { key: 'add', style: S.stack },
+                h('div', { key: 'row', style: S.row },
+                  h('input', {
+                    style: Object.assign({}, S.input, { flex: '1 1 140px', width: 'auto' }),
+                    type: 'text',
+                    value: accLabel,
+                    placeholder: bind(t, 'accountLabel'),
+                    onChange: function (event) { setAccLabel(event.target.value) },
+                  }),
+                  h('button', {
+                    type: 'button',
+                    style: S.button,
+                    disabled: busy === 'accounts' || accSecret.trim() === '',
+                    onClick: addAccount,
+                  }, bind(t, 'addAccount'))),
+                h('input', {
+                  key: 'secret',
+                  style: S.input,
+                  type: 'password',
+                  value: accSecret,
+                  placeholder: bind(t, 'accountPat'),
+                  onChange: function (event) { setAccSecret(event.target.value) },
+                }),
+                h('span', { key: 'sec', style: S.hintTiny }, bind(t, 'accountSecretHint')))
+            : null,
         ),
       )
 

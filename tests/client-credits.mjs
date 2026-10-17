@@ -300,6 +300,10 @@ for (const value of ['WorkBuddy', '675', 'WorkBuddy AI', '99']) {
 }
 // 模型列表要渲染出模型行（auto）
 if (!cardText.includes('auto')) throw new Error('模型列表没有渲染')
+// 桌面 provider 的新增账号只走浏览器登录，不再显示手填登录文件路径的添加框。
+if (find(cardTree, (node) => node.type === 'input' && node.props.placeholder === 'accountLabel') !== undefined) {
+  throw new Error('桌面 provider 不应再有手动添加账号输入框')
+}
 console.log('✓ 卡片分组、总览与模型列表都渲染出来了')
 
 // 账号区：能列出两个账号，并且「使用」会发 activeAccount 补丁
@@ -566,6 +570,13 @@ qoderTab.props.onClick()
 cardTree = await render(card, { t: (key) => key })
 const patInput = find(cardTree, (node) => node.type === 'input' && node.props.type === 'password' && String(node.props.placeholder).includes('patConfigured'))
 if (patInput === undefined) throw new Error('找不到 PAT 输入框')
+// Qoder 没有浏览器登录，仍然保留「名称 + PAT」的手动添加。
+if (find(cardTree, (node) => node.type === 'input' && node.props.placeholder === 'accountLabel') === undefined) {
+  throw new Error('PAT provider 缺少手动添加账号输入框')
+}
+if (find(cardTree, (node) => node.type === 'input' && node.props.placeholder === 'accountPat') === undefined) {
+  throw new Error('PAT provider 缺少 PAT 输入框')
+}
 patInput.props.onChange({ target: { value: 'pt-123' } })
 // 简化版 hooks 每次渲染都会重跑 effect；跳过一轮，模拟 React 里
 // 「依赖没变就不重置输入草稿」的行为。
