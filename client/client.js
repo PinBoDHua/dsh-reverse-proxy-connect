@@ -134,6 +134,9 @@ window.__ModuleLoader__.load({
       checkinInactive: '当前账号没有签到活动',
       checkinFailed: '签到失败：{reason}',
       checkinLastAt: '上次 {time}',
+      loginAdd: '打开 WorkBuddy 登录新增账号',
+      loginOpening: '正在打开…',
+      loginCancel: '取消',
     }
     var en = {
       nav: 'Reverse proxy',
@@ -232,6 +235,9 @@ window.__ModuleLoader__.load({
       checkinInactive: 'No check-in activity for this account',
       checkinFailed: 'Check-in failed: {reason}',
       checkinLastAt: 'Last run {time}',
+      loginAdd: 'Open WorkBuddy to add an account',
+      loginOpening: 'Opening…',
+      loginCancel: 'Cancel',
     }
 
     function bind(t, key, vars) {
@@ -758,8 +764,54 @@ window.__ModuleLoader__.load({
         mutate({ providers: providersPatch })
       }
 
-      /** 手动签到：只跑当前 provider，避免一次点全平台。 */
-      var runCheckin = function (provider) {
+      /**
+       * 打开 App 登录并导入账号。
+       *
+       * 宿主那边会拉起 WorkBuddy 窗口并轮询登录文件；导入完成后 `/status` 里
+       * 就多了一个账号。所以这里只负责「发一次请求 + 轮询状态」。
+       */
+      var startLogin = function (provider) {
+        if (status === undefined) return
+        setBusy('login')
+        postJson(ACTION_PATH, { action: 'login-start', provider: provider }, status.key)
+          .then(function (document) {
+            setBusy(undefined)
+            if (document.status !== undefined) setStatus(document.status)
+            setError(undefined)
+            pollLogin(provider, 0)
+          })
+          .catch(function (failure) {
+            setBusy(undefined)
+            setError(String(failure && failure.message ? failure.message : failure))
+          })
+      }
+
+      /** 轮询登录进度，直到 done / failed / cancelled。 */
+      var pollLogin = function (provider, attempt) {
+        if (status === undefined || attempt > 150) return
+        setTimeout(function () {
+          fetchStatus()
+            .then(function (document) {
+              setStatus(document)
+              var entry = (document.providers || []).find(function (item) { return item.provider === provider })
+              var job = entry === undefined ? undefined : entry.login
+              if (job === undefined) return
+              if (job.phase === 'waiting' || job.phase === 'starting') {
+                pollLogin(provider, attempt + 1)
+              }
+            })
+            .catch(function () {})
+        }, 2000)
+      }
+
+      var cancelLogin = function (provider) {
+        if (status === undefined) return
+        postJson(ACTION_PATH, { action: 'login-cancel', provider: provider }, status.key)
+          .then(function (document) { setStatus(document) })
+          .catch(function () {})
+      }
+
+      /** 手动签到：只跑当前 provider，避免一次点全平台。 */      var runCheckin = function (provider) {
         if (status === undefined) return
         setBusy('checkin')
         postJson(ACTION_PATH, { action: 'checkin', provider: provider }, status.key)
@@ -990,6 +1042,7 @@ window.__ModuleLoader__.load({
       // 这里只做「增删与选定」，PAT 本身从不回传给浏览器（状态文档里没有）。
       var accountRows = Array.isArray(active.accounts) ? active.accounts : []
       var isPatProvider = active.kind === 'pat'
+      var loginJob = active.login
       var accountItems = accountRows.map(function (account, index) {
         var snapshot = account.credits || { state: 'none' }
         return h('li', {
@@ -1125,6 +1178,28 @@ window.__ModuleLoader__.load({
               ? h('span', { style: S.modelMeta }, bind(t, 'checkinLastAt', { time: formatTime(checkin.lastRunAt) }))
               : null),
           h('p', { key: 'hint', style: S.hintTiny }, bind(t, isPatProvider ? 'accountsHintPat' : 'accountsHintDesktop')),
+          // 桌面 provider：一键打开 App 登录，登录成功后自动导入账号。
+          isPatProvider
+            ? null
+            : h('div', { key: 'login', style: S.row },
+                h('button', {
+                  type: 'button',
+                  style: S.button,
+                  disabled: busy === 'login',
+                  onClick: function () { startLogin(active.provider) },
+                }, busy === 'login' ? bind(t, 'loginOpening') : bind(t, 'loginAdd')),
+                loginJob === undefined
+                  ? null
+                  : h('span', {
+                      style: loginJob.phase === 'failed' ? S.hintWarn : S.hintTiny,
+                    }, loginJob.message),
+                loginJob !== undefined && (loginJob.phase === 'waiting' || loginJob.phase === 'starting')
+                  ? h('button', {
+                      type: 'button',
+                      style: S.buttonGhost,
+                      onClick: function () { cancelLogin(active.provider) },
+                    }, bind(t, 'loginCancel'))
+                  : null),
           h('ul', { key: 'list', style: S.modelList }, accountItems),
           h('div', { key: 'add', style: S.stack },
             h('div', { key: 'row', style: S.row },
