@@ -5,6 +5,7 @@ import {
   accountsFor,
   activeAccountFor,
   isAccountUsable,
+  isBelowThreshold,
   isExhausted,
   mergeAccountSecrets,
   newAccountId,
@@ -71,6 +72,25 @@ test('activeAccount 钉住优先，否则取第一个启用的', () => {
 
   settings.activeAccount[QG] = 'c'
   assert.equal(activeAccountFor(QG, settings).id, 'a', '钉住的账号被禁用时让位给第一个启用的账号（禁用是更强的信号）')
+})
+
+test('低于阈值提前换号：不会切到另一个同样低的账号', () => {
+  assert.equal(isBelowThreshold({ state: 'ok', remain: 10, total: 100 }, 0.15), true)
+  assert.equal(isBelowThreshold({ state: 'ok', remain: 20, total: 100 }, 0.15), false)
+  assert.equal(isBelowThreshold({ state: 'ok', remain: 0, total: 0 }, 0.15), false)
+  assert.equal(isBelowThreshold({ state: 'ok', remain: 1, total: 100, stale: true }, 0.15), false)
+  assert.equal(isBelowThreshold({ state: 'ok', remain: 1, total: 100 }, 0), false)
+
+  const settings = settingsWith({
+    accounts: { [QG]: [{ id: 'a', pat: 'p1' }, { id: 'b', pat: 'p2' }, { id: 'c', pat: 'p3' }] },
+  })
+  const credits = {
+    a: { state: 'ok', remain: 10, total: 100 },
+    b: { state: 'ok', remain: 10, total: 100 },
+    c: { state: 'ok', remain: 90, total: 100 },
+  }
+  const target = pickSwitchTarget(QG, settings, 'a', (id) => credits[id], { minRatio: 0.15 })
+  assert.equal(target.id, 'c', 'b 也低于阈值，不应该切过去')
 })
 
 test('请求失败换号：排除刚失败的账号，优先额度明确可用的', () => {

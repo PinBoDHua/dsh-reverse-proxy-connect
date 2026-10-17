@@ -95,12 +95,12 @@ const STATUS = {
       modelCount: 1,
       images: true,
       accounts: [
-        { id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: true, source: 'desktop', credits: { state: 'ok', remain: 675, total: 1200, unit: 'credits', items: [] } },
-        { id: 'acc-2', label: '备用账号', active: false, kind: 'desktop', configured: true, source: 'browser-login', credits: { state: 'ok', remain: 0, total: 0, unit: 'credits' } },
+        { id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: true, source: 'desktop', credits: { state: 'ok', remain: 675, total: 1200, unit: 'credits', items: [], trend: { sampleCount: 12, spentToday: 24, spent7d: 96, burnPerHour: 6, etaMs: 7200000, points: [{ at: 1792230000000, remain: 720 }, { at: 1792233600000, remain: 699 }, { at: 1792234000000, remain: 675 }] } } },
+        { id: 'acc-2', label: '备用账号', active: false, kind: 'desktop', configured: true, source: 'browser-login', credits: { state: 'ok', remain: 0, total: 0, unit: 'credits' }, cooldownUntil: Date.now() + 60000, lastTest: { ok: false, latencyMs: 120, error: 'HTTP 429' } },
       ],
       checkin: { enabled: true, lastRunAt: 1792234000000, result: { provider: 'workbuddy', claimed: 0, credit: 0, outcomes: [{ accountId: 'default', kind: 'already' }] } },
       autoSwitch: true,
-      credits: { state: 'ok', remain: 675, total: 1200, unit: 'credits', resetAtMs: 1793900000000, fetchedAt: 1792234000000, items: [] },
+      credits: { state: 'ok', remain: 675, total: 1200, unit: 'credits', resetAtMs: 1793900000000, fetchedAt: 1792234000000, items: [], trend: { sampleCount: 12, spentToday: 24, spent7d: 96, burnPerHour: 6, etaMs: 7200000, points: [{ at: 1792230000000, remain: 720 }, { at: 1792233600000, remain: 699 }, { at: 1792234000000, remain: 675 }] } },
       credential: { status: 'signed-in', uid: 'u' },
     },
     {
@@ -110,7 +110,7 @@ const STATUS = {
       usage: { requests: 2, ok: 1, failed: 1, totalTokens: 40, avgDurationMs: 800, successRate: 0.5, today: { requests: 1, totalTokens: 20 } },
       models: [{ id: 'glm-5.3', name: 'GLM-5.3', contextWindow: 1000000, maxTokens: 48000, supportsImages: true, reasoningEfforts: ['low'], credits: 'x0.79', disabled: false }],
       modelCount: 1,
-      credits: { state: 'ok', remain: 99, total: 100, unit: 'credits', resetAtMs: 1793500000000, items: [], fetchedAt: 1792234000000 },
+      credits: { state: 'ok', remain: 99, total: 100, unit: 'credits', resetAtMs: 1793500000000, items: [], fetchedAt: 1792234000000, trend: { sampleCount: 4, spentToday: 1, spent7d: 1, burnPerHour: 1, etaMs: 3600000, points: [{ at: 1792230000000, remain: 100 }, { at: 1792234000000, remain: 99 }] } },
       credential: { status: 'signed-in', uid: 'u2' },
     },
     {
@@ -131,7 +131,8 @@ const STATUS = {
     qoder: { qoder: { configured: false }, 'qoder-global': { configured: true } },
     showRateInModelName: true,
     showUsageInSidebar: true,
-    autoSwitch: true,
+    autoSwitch: { enabled: true, thresholdRatio: 0.05 },
+    alerts: { enabled: true, lowRatio: 0.15 },
     checkin: true,
     probe: true,
     advanced: { idleTimeoutMs: 180000, catalogRefreshMs: 600000, creditsRefreshMs: 120000, stats: true, catalogCache: true },
@@ -145,7 +146,18 @@ const STATUS = {
     providers: {},
     providerToday: {},
     accounts: {},
-    models: {},
+    models: {
+      'workbuddy::auto': { requests: 8, totalTokens: 400, avgDurationMs: 1200 },
+      'workbuddy::glm-5.3': { requests: 2, totalTokens: 80, avgDurationMs: 900 },
+      'qoder-global::qfmodel': { requests: 1, totalTokens: 10, avgDurationMs: 300 },
+    },
+    daily: [
+      { date: '2026-10-15', requests: 1, totalTokens: 10 },
+      { date: '2026-10-16', requests: 2, totalTokens: 40 },
+      { date: '2026-10-17', requests: 4, totalTokens: 120 },
+      { date: '2026-10-18', requests: 4, totalTokens: 100 },
+    ],
+    currentSession: { id: 's1', requests: 2, totalTokens: 30, avgDurationMs: 500, successRate: 1 },
     health: {},
     recent: [
       { at: 1792234000000, provider: 'workbuddy', accountId: 'default', model: 'auto', kind: 'stop', durationMs: 1000, totalTokens: 20 },
@@ -561,6 +573,9 @@ const advancedCall = calls[calls.length - 1]
 if (calls.length === beforeAdvanced || !String(advancedCall.body).includes('advanced')) {
   throw new Error('保存高级设置没有发出 advanced 补丁')
 }
+if (!String(advancedCall.body).includes('"alerts"') || !String(advancedCall.body).includes('thresholdRatio')) {
+  throw new Error(`高级设置没有带上预警/换号阈值：${String(advancedCall.body).slice(0, 240)}`)
+}
 console.log('✓ 高级设置会发 advanced 补丁')
 
 // ---------- 8. PAT 保存要写进当前账号（而不是被忽略的旧字段） ----------
@@ -638,7 +653,83 @@ try {
   STATUS.providers[1] = aiProvider
 }
 
-// ---------- 11. 长错误不重复：状态区一次，签到区只留短原因 ----------
+// ---------- 12. 1.1.0：额度趋势、预警、账号测试与用量历史 ----------
+cardTree = await mount(card, { t: (key) => key })
+const trendCardText = textOf(cardTree)
+if (!trendCardText.includes('alertBannerExhausted') && !trendCardText.includes('alertBannerLow')) {
+  throw new Error('额度为 0 时没有渲染预警横幅')
+}
+if (!trendCardText.includes('trend') || !trendCardText.includes('trendToday')) {
+  throw new Error('额度区块没有渲染趋势')
+}
+if (!trendCardText.includes('trendEta')) throw new Error('没有渲染耗尽预估')
+if (find(cardTree, (node) => node.type === 'polyline') === undefined) {
+  throw new Error('额度趋势没有折线')
+}
+for (const label of ['usageSession', 'usageHeatmap', 'usageTopModels', 'usageShowInSidebar']) {
+  if (!trendCardText.includes(label)) throw new Error(`用量区块缺少 ${label}`)
+}
+if (!trendCardText.includes('testAccount') || !trendCardText.includes('cooldown')) {
+  throw new Error('账号行缺少测试按钮或冷却标记')
+}
+console.log('✓ 额度趋势、预警、账号测试与用量历史都渲染出来了')
+
+// 账号「测试」会走 /action test-account，并带 accountId。
+const testButtons = findAll(cardTree, (node) => node.type === 'button' && textOf(node) === 'testAccount')
+if (testButtons.length !== 2) throw new Error(`应有 2 个账号测试按钮，实际 ${testButtons.length}`)
+const beforeTest = calls.length
+testButtons[0].props.onClick()
+await new Promise((resolve) => setTimeout(resolve, 10))
+const testCall = calls[calls.length - 1]
+if (calls.length === beforeTest || !String(testCall.body).includes('test-account') || !String(testCall.body).includes('"accountId":"default"')) {
+  throw new Error(`账号测试请求不对：${String(testCall?.body).slice(0, 160)}`)
+}
+console.log('✓ 账号测试按钮会发 action=test-account')
+
+// 侧栏显示今日用量开关会发 display 补丁。
+const usageLabel = find(cardTree, (node) => node.type === 'label' && textOf(node) === 'usageShowInSidebar')
+if (usageLabel === undefined) throw new Error('找不到「侧栏显示今日用量」开关')
+const usageInput = find(usageLabel, (node) => node.type === 'input')
+if (usageInput === undefined) throw new Error('侧栏用量开关没有 checkbox')
+const beforeUsageToggle = calls.length
+usageInput.props.onChange({ target: { checked: false } })
+await new Promise((resolve) => setTimeout(resolve, 10))
+const usageCall = calls[calls.length - 1]
+if (calls.length === beforeUsageToggle || !String(usageCall.body).includes('showUsageInSidebar')) {
+  throw new Error(`切换侧栏用量没有发 display 补丁：${String(usageCall?.body).slice(0, 160)}`)
+}
+console.log('✓ 侧栏用量开关可切换并会发 display 补丁')
+
+// ---------- 13. 侧栏面板显示趋势；关闭后今日用量徽标消失 ----------
+hookStates = []
+let trendPill = await mount(pill, { t: (key) => key, wide: true })
+let trendToggle = find(trendPill, (node) => node.type === 'button' && node.props?.['aria-expanded'] !== undefined)
+trendToggle.props.onClick({ preventDefault() {} })
+trendPill = await render(pill, { t: (key) => key, wide: true })
+const trendPillText = textOf(trendPill)
+if (!trendPillText.includes('trendToday') || !trendPillText.includes('trendEta')) {
+  throw new Error('侧栏面板没有显示今日消耗与耗尽预估')
+}
+if (find(trendPill, (node) => node.type === 'polyline') === undefined) {
+  throw new Error('侧栏面板没有趋势折线')
+}
+console.log('✓ 侧栏面板显示今日消耗、耗尽预估与趋势折线')
+
+STATUS.settings.showUsageInSidebar = false
+try {
+  hookStates = []
+  let noUsagePill = await mount(pill, { t: (key) => key, wide: true })
+  const noUsageToggle = find(noUsagePill, (node) => node.type === 'button' && node.props?.['aria-expanded'] !== undefined)
+  noUsageToggle.props.onClick({ preventDefault() {} })
+  noUsagePill = await render(pill, { t: (key) => key, wide: true })
+  if (textOf(noUsagePill).includes('creditsToday')) {
+    throw new Error('关闭「侧栏显示今日用量」后仍然渲染了今日用量徽标')
+  }
+  console.log('✓ 关闭开关后侧栏不再显示今日用量')
+} finally {
+  STATUS.settings.showUsageInSidebar = true
+}
+
 const wbaiSnapshot = STATUS.providers[1]
 STATUS.providers[1] = {
   ...wbaiSnapshot,

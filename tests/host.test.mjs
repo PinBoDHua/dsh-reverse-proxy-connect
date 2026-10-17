@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { apply } from '../lib/index.js'
-import { ACTION_PATH, DATA_DIR_NAME, SETTINGS_PATH, STATUS_PATH } from '../lib/protocol.js'
+import { ACTION_PATH, DATA_DIR_NAME, DIAGNOSTICS_PATH, SETTINGS_PATH, STATUS_PATH } from '../lib/protocol.js'
 
 /** 一个只记录路由的 webServer。 */
 function fakeWebServer(handlers) {
@@ -66,7 +66,7 @@ async function post(handler, url, key, payload) {
   return { status: res.status, body: JSON.parse(res.body) }
 }
 
-test('宿主入口：注册四个 provider，status v4 与轻量状态可用', async () => {
+test('宿主入口：注册四个 provider，status v5 与诊断接口可用', async () => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-host-'))
   const dataDir = join(root, DATA_DIR_NAME)
   mkdirSync(dataDir, { recursive: true })
@@ -140,25 +140,55 @@ test('宿主入口：注册四个 provider，status v4 与轻量状态可用', a
     assert.equal(typeof handlers[STATUS_PATH], 'function')
     assert.equal(typeof handlers[SETTINGS_PATH], 'function')
     assert.equal(typeof handlers[ACTION_PATH], 'function')
+    assert.equal(typeof handlers[DIAGNOSTICS_PATH], 'function')
 
     const full = await get(handlers[STATUS_PATH], STATUS_PATH)
     assert.equal(full.status, 200)
-    assert.equal(full.body.version, 4)
+    assert.equal(full.body.version, 5)
     assert.equal(full.body.plugin.version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version)
     assert.equal(full.body.providers.length, 4)
     assert.equal(full.body.host.images, true, '注入了附件服务后应声明图片可用')
     assert.equal(full.body.providers[0].credential.status, 'disabled')
     assert.equal(full.body.settings.advanced.idleTimeoutMs, 180_000)
+    assert.equal(full.body.settings.alerts.enabled, true)
+    assert.equal(full.body.settings.alerts.lowRatio, 0.15)
     assert.match(full.body.key, /^[0-9a-f]{48}$/)
+    assert.equal(full.body.providers[0].credits.trend.spentToday, 0)
 
     const light = await get(handlers[STATUS_PATH], `${STATUS_PATH}?light=1`)
     assert.equal(light.status, 200)
     assert.equal(light.body.providers[0].models, undefined, '轻量状态不带模型清单')
     assert.equal(light.body.providers[0].usage.today.requests, 0)
+    assert.ok(Array.isArray(light.body.stats.daily), '轻量状态带最近 14 天用量')
+
+    const diagnostics = await get(handlers[DIAGNOSTICS_PATH], DIAGNOSTICS_PATH)
+    assert.equal(diagnostics.status, 200)
+    assert.equal(diagnostics.body.plugin.version, full.body.plugin.version)
+    assert.equal(diagnostics.body.key, undefined)
+    assert.equal(diagnostics.body.providers.length, 4)
+    assert.ok(!JSON.stringify(diagnostics.body).includes(full.body.key), '诊断里不能带控制密钥')
 
     const reset = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, { action: 'stats-reset' })
     assert.equal(reset.status, 200)
-    assert.equal(reset.body.version, 4)
+    assert.equal(reset.body.version, 5)
+
+    // 账号测试在没有模型时给出明确错误，而不是伪造成功。
+    const tested = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, {
+      action: 'test-account',
+      provider: 'workbuddy',
+      accountId: 'default',
+    })
+    assert.equal(tested.status, 200)
+    assert.equal(tested.body.test.ok, false)
+    assert.equal(tested.body.test.code, 'NO_MODEL')
+
+    const cooled = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, {
+      action: 'reset-account',
+      provider: 'workbuddy',
+      accountId: 'default',
+    })
+    assert.equal(cooled.status, 200)
+    assert.equal(cooled.body.providers[0].accounts[0].cooldownUntil, 0)
 
     const patched = await post(handlers[SETTINGS_PATH], SETTINGS_PATH, full.body.key, {
       advanced: { idleTimeoutMs: 60_000, stats: false },

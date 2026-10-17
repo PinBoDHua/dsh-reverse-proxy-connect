@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -128,4 +128,76 @@ test('健康状态：无记录是 unknown，单次失败近期降级，久远失
   assert.equal(healthOf({ lastOkAt: now - 5000, lastErrorAt: now - 1000, consecutiveFailures: 1 }, now).state, 'degraded')
   assert.equal(healthOf({ lastOkAt: now - 5000, lastErrorAt: now - 10_000_000, consecutiveFailures: 1 }, now).state, 'ok')
   assert.equal(healthOf({ consecutiveFailures: 4 }, now).state, 'down')
+})
+
+test('统计：每日历史与当前会话分开累计', () => {
+  const dir = tempDir()
+  try {
+    let now = new Date(2026, 9, 18, 10, 0, 0).getTime()
+    const stats = new Stats({ filePath: statsPathOf(dir), enabled: () => true, now: () => now })
+    stats.record({ provider: 'workbuddy', accountId: 'a', sessionId: 's1', model: 'auto', kind: 'stop', durationMs: 10, usage: { inputTokens: 10, outputTokens: 20 } })
+    stats.record({ provider: 'workbuddy', accountId: 'a', sessionId: 's1', model: 'auto', kind: 'stop', durationMs: 20, usage: { inputTokens: 1, outputTokens: 2 } })
+    now += 24 * 3600_000
+    stats.record({ provider: 'qoder', accountId: 'b', sessionId: 's2', model: 'qf', kind: 'stop', durationMs: 30, usage: { inputTokens: 3, outputTokens: 4 } })
+    const snapshot = stats.snapshot()
+    assert.equal(snapshot.daily.length, 2)
+    assert.equal(snapshot.daily[0].date, '2026-10-18')
+    assert.equal(snapshot.daily[0].requests, 2)
+    assert.equal(snapshot.daily[0].totalTokens, 33)
+    assert.equal(snapshot.daily[1].requests, 1)
+    assert.equal(snapshot.sessions.s1.requests, 2)
+    assert.equal(snapshot.sessions.s2.requests, 1)
+    assert.equal(snapshot.currentSession.id, 's2')
+    assert.equal(snapshot.currentSession.totalTokens, 7)
+    assert.equal(snapshot.recent[0].sessionId, 's2')
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：v1 文件升级后保留累计，今日补成第一条每日历史', () => {
+  const dir = tempDir()
+  try {
+    const filePath = statsPathOf(dir)
+    const now = new Date(2026, 9, 18, 12, 0, 0).getTime()
+    writeFileSync(filePath, JSON.stringify({
+      version: 1,
+      since: now - 1000,
+      totals: { requests: 7, ok: 7, inputTokens: 10, outputTokens: 20, durationMs: 70 },
+      today: { requests: 2, ok: 2, date: dayKey(now), inputTokens: 1, outputTokens: 2, durationMs: 20 },
+      providers: {},
+      providerToday: {},
+      accounts: {},
+      models: {},
+      recent: [],
+    }))
+    const stats = new Stats({ filePath, enabled: () => true, now: () => now })
+    const snapshot = stats.snapshot()
+    assert.equal(snapshot.totals.requests, 7)
+    assert.equal(snapshot.today.requests, 2)
+    assert.equal(snapshot.daily.length, 1)
+    assert.equal(snapshot.daily[0].date, dayKey(now))
+    assert.equal(snapshot.daily[0].requests, 2)
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：每日历史最多保留 30 天', () => {
+  const dir = tempDir()
+  try {
+    let now = new Date(2026, 8, 1, 12, 0, 0).getTime()
+    const stats = new Stats({ filePath: statsPathOf(dir), enabled: () => true, now: () => now })
+    for (let day = 0; day < 40; day++) {
+      stats.record({ provider: 'qoder', accountId: 'a', model: 'm', kind: 'stop' })
+      now += 24 * 3600_000
+    }
+    assert.equal(stats.snapshot().daily.length, 30)
+    assert.equal(stats.snapshot().daily[0].date, dayKey(now - 30 * 24 * 3600_000))
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })

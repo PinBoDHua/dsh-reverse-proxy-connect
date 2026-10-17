@@ -113,8 +113,8 @@ test('失败分类：HTTP 状态、凭证码、超时与取消', () => {
 
   assert.equal(isFailoverCode('AUTH'), true)
   assert.equal(isFailoverCode('QUOTA'), true)
+  assert.equal(isFailoverCode('RATE_LIMIT'), true)
   assert.equal(isFailoverCode('SERVER'), false)
-  assert.equal(isFailoverCode('RATE_LIMIT'), false)
 })
 
 /** 造一条按给定间隔产出事件的流。 */

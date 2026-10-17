@@ -16,6 +16,7 @@ window.__ModuleLoader__.load({
     var STATUS_PATH = '/plugins/dsh-reverse-proxy-connect/status'
     var SETTINGS_PATH = '/plugins/dsh-reverse-proxy-connect/settings'
     var ACTION_PATH = '/plugins/dsh-reverse-proxy-connect/action'
+    var DIAGNOSTICS_PATH = '/plugins/dsh-reverse-proxy-connect/diagnostics'
 
     var SHARED_SECTION_SLOT = 'settings.section'
     var SHARED_SECTION_ID = 'plugin-settings'
@@ -205,6 +206,35 @@ window.__ModuleLoader__.load({
       accountSourceDesktop: '桌面登录',
       accountSourcePat: 'PAT',
       lastErrorAt: '最近失败 {time}',
+      // 1.1.0：额度趋势、预警与账号测试
+      trend: '额度趋势',
+      trendToday: '今日消耗 {value}',
+      trendWeek: '近 7 天 {value}',
+      trendRate: '约 {value}/小时',
+      trendEta: '预计还能用 {duration}',
+      trendEtaUnknown: '样本不足，暂不估算',
+      trendTopup: '今日补充 {value}',
+      trendHint: '按最近成功读取的额度估算，充值不会算进消耗。',
+      alertLow: '额度偏低',
+      alertExhausted: '额度已用尽',
+      alertBannerLow: '额度偏低：{names}。建议切换账号或等待重置。',
+      alertBannerExhausted: '额度已用尽：{names}。',
+      testAccount: '测试',
+      testing: '测试中…',
+      testOk: '正常 {ms}',
+      testFailed: '失败：{reason}',
+      cooldown: '冷却至 {time}',
+      resetCooldown: '解除冷却',
+      usageSession: '当前会话',
+      usageHeatmap: '近 14 天',
+      usageTopModels: '模型用量',
+      usageModelCalls: '请求',
+      usageModelTokens: 'tokens',
+      usageShowInSidebar: '侧栏显示今日用量',
+      advancedAlert: '额度预警阈值（%）',
+      advancedAlertHint: '剩余低于该比例时，侧栏与卡片亮警示色。',
+      advancedSwitch: '低于该比例自动换号（%）',
+      advancedSwitchHint: '0 = 只在额度用尽时切换；换号只发生在还有其它可用账号时。',
     }
     var en = {
       nav: 'Reverse proxy',
@@ -374,6 +404,35 @@ window.__ModuleLoader__.load({
       accountSourceDesktop: 'Desktop login',
       accountSourcePat: 'PAT',
       lastErrorAt: 'Last failure {time}',
+      // 1.1.0: credit trend, alerts, account tests
+      trend: 'Credit trend',
+      trendToday: 'Today {value}',
+      trendWeek: 'Last 7 days {value}',
+      trendRate: '~{value}/hour',
+      trendEta: '~{duration} left',
+      trendEtaUnknown: 'Not enough samples yet',
+      trendTopup: 'Added today {value}',
+      trendHint: 'Estimated from successful credit reads; top-ups are not counted as spend.',
+      alertLow: 'Low credits',
+      alertExhausted: 'Out of credits',
+      alertBannerLow: 'Low credits: {names}. Switch accounts or wait for a reset.',
+      alertBannerExhausted: 'Out of credits: {names}.',
+      testAccount: 'Test',
+      testing: 'Testing…',
+      testOk: 'OK {ms}',
+      testFailed: 'Failed: {reason}',
+      cooldown: 'Cooling down until {time}',
+      resetCooldown: 'Clear cooldown',
+      usageSession: 'This session',
+      usageHeatmap: 'Last 14 days',
+      usageTopModels: 'Model usage',
+      usageModelCalls: 'Requests',
+      usageModelTokens: 'tokens',
+      usageShowInSidebar: 'Show today’s usage in the sidebar',
+      advancedAlert: 'Low-credit warning threshold (%)',
+      advancedAlertHint: 'The sidebar and card turn amber below this remaining ratio.',
+      advancedSwitch: 'Switch accounts below (%)',
+      advancedSwitchHint: '0 = switch only when exhausted; switching requires another usable account.',
     }
 
     function bind(t, key, vars) {
@@ -427,14 +486,88 @@ window.__ModuleLoader__.load({
      * @param credits - 额度快照。
      * @returns 是否警示。
      */
-    function isCreditsLow(credits) {
+    function isCreditsLow(credits, ratio) {
+      var threshold = typeof ratio === 'number' && ratio > 0 && ratio < 1 ? ratio : LOW_CREDITS_RATIO
       if (credits.unlimited === true) return false
       if (credits.exceeded === true) return true
       if (typeof credits.remain === 'number' && credits.remain <= 0) return true
       if (typeof credits.total === 'number' && credits.total > 0 && typeof credits.remain === 'number') {
-        return credits.remain / credits.total < LOW_CREDITS_RATIO
+        return credits.remain / credits.total <= threshold
       }
       return false
+    }
+
+    /** 额度预警等级：优先用宿主算好的，老宿主没有就按同一套规则补。 */
+    function alertOfCredits(credits, ratio) {
+      if (credits === undefined || credits === null || credits.state !== 'ok') return undefined
+      if (credits.alert === 'low' || credits.alert === 'exhausted') return credits.alert
+      if (credits.unlimited === true) return undefined
+      if (credits.exceeded === true || (typeof credits.remain === 'number' && credits.remain <= 0)) return 'exhausted'
+      if (typeof credits.total === 'number' && credits.total > 0 && typeof credits.remain === 'number') {
+        var threshold = typeof ratio === 'number' && ratio > 0 && ratio < 1 ? ratio : LOW_CREDITS_RATIO
+        if (credits.remain / credits.total <= threshold) return 'low'
+      }
+      return undefined
+    }
+
+    /** 毫秒 → 紧凑时长（45m / 3h 20m / 2d 4h）。 */
+    function formatCompactDuration(ms) {
+      if (typeof ms !== 'number' || !isFinite(ms) || ms <= 0) return '—'
+      var minutes = Math.max(1, Math.round(ms / 60000))
+      if (minutes < 60) return String(minutes) + 'm'
+      var hours = Math.floor(minutes / 60)
+      var restMinutes = minutes % 60
+      if (hours < 24) return String(hours) + 'h' + (restMinutes > 0 ? ' ' + String(restMinutes) + 'm' : '')
+      var days = Math.floor(hours / 24)
+      var restHours = hours % 24
+      return String(days) + 'd' + (restHours > 0 ? ' ' + String(restHours) + 'h' : '')
+    }
+
+    /** 百分比整数。 */
+    function ratioPercent(ratio) {
+      if (typeof ratio !== 'number' || !isFinite(ratio)) return '—'
+      return String(Math.round(ratio * 100)) + '%'
+    }
+
+    /**
+     * 一条极简折线。额度趋势不需要坐标轴，只要「在涨还是在跌」。
+     *
+     * @param points - `[{at, remain}]`。
+     * @param color - 线色。
+     * @returns SVG 节点，或 undefined（少于两个点）。
+     */
+    function sparkline(points, color) {
+      var valid = (Array.isArray(points) ? points : []).filter(function (point) {
+        return point !== null && typeof point === 'object' && typeof point.remain === 'number' && isFinite(point.remain)
+      })
+      if (valid.length < 2) return undefined
+      var min = valid[0].remain
+      var max = valid[0].remain
+      for (var index = 1; index < valid.length; index++) {
+        if (valid[index].remain < min) min = valid[index].remain
+        if (valid[index].remain > max) max = valid[index].remain
+      }
+      var span = max - min
+      var coordinates = valid.map(function (point, index) {
+        var x = valid.length === 1 ? 50 : (index / (valid.length - 1)) * 100
+        var y = span <= 0 ? 12 : 22 - ((point.remain - min) / span) * 20
+        return String(Math.round(x * 10) / 10) + ',' + String(Math.round(y * 10) / 10)
+      })
+      return h('svg', {
+        viewBox: '0 0 100 24',
+        preserveAspectRatio: 'none',
+        'aria-hidden': 'true',
+        focusable: 'false',
+        style: { display: 'block', width: '100%', height: 22, overflow: 'visible' },
+      }, h('polyline', {
+        points: coordinates.join(' '),
+        fill: 'none',
+        stroke: color === undefined ? 'currentColor' : color,
+        strokeWidth: 1.6,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+        vectorEffect: 'non-scaling-stroke',
+      }))
     }
 
     /** 额度百分比（读不到 / 不限量 / 没有总量时返回 undefined）。 */
@@ -827,6 +960,14 @@ window.__ModuleLoader__.load({
       })
     }
 
+    /** 拉取脱敏后的诊断文本；失败时由调用方回退。 */
+    function fetchDiagnosticsText() {
+      return fetch(DIAGNOSTICS_PATH + '?format=text', { headers: { Accept: 'text/plain' } }).then(function (response) {
+        if (!response.ok) throw new Error('diagnostics ' + response.status)
+        return response.text()
+      })
+    }
+
     function formatTime(ms) {
       if (ms === undefined || ms === null || ms === 0) return '—'
       try {
@@ -933,6 +1074,13 @@ window.__ModuleLoader__.load({
       var advSavedState = useState(false)
       var advSaved = advSavedState[0]
       var setAdvSaved = advSavedState[1]
+      // 1.1.0：两个比例阈值（预警 / 自动换号），以百分数展示。
+      var advAlertState = useState('')
+      var advAlert = advAlertState[0]
+      var setAdvAlert = advAlertState[1]
+      var advSwitchState = useState('')
+      var advSwitch = advSwitchState[0]
+      var setAdvSwitch = advSwitchState[1]
 
       var load = useCallback(
         function () {
@@ -980,6 +1128,13 @@ window.__ModuleLoader__.load({
           if (typeof advanced.creditsRefreshMs === 'number') setAdvCredits(String(Math.round(advanced.creditsRefreshMs / 1000)))
           setAdvStats(advanced.stats !== false)
           setAdvCache(advanced.catalogCache !== false)
+          var alerts = status.settings.alerts || {}
+          setAdvAlert(typeof alerts.lowRatio === 'number' ? String(Math.round(alerts.lowRatio * 100)) : '15')
+          var auto = status.settings.autoSwitch
+          var switchRatio = auto !== null && typeof auto === 'object' && typeof auto.thresholdRatio === 'number'
+            ? auto.thresholdRatio
+            : 0
+          setAdvSwitch(String(Math.round(switchRatio * 100)))
         }
         setPatDraft('')
       }, [activeTab, status === undefined])
@@ -1140,6 +1295,38 @@ window.__ModuleLoader__.load({
           })
       }
 
+      /** 真发一次 1-token 请求，验证某个账号现在能不能用。 */
+      var testAccount = function (provider, accountId) {
+        if (status === undefined) return
+        setBusy('test:' + accountId)
+        postJson(ACTION_PATH, { action: 'test-account', provider: provider, accountId: accountId }, status.key)
+          .then(function (document) {
+            setStatus(document.status !== undefined ? document.status : document)
+            setBusy(undefined)
+            setError(undefined)
+          })
+          .catch(function (failure) {
+            setBusy(undefined)
+            setError(String(failure && failure.message ? failure.message : failure))
+          })
+      }
+
+      /** 清除一个账号的失败冷却。 */
+      var resetCooldown = function (provider, accountId) {
+        if (status === undefined) return
+        setBusy('reset:' + accountId)
+        postJson(ACTION_PATH, { action: 'reset-account', provider: provider, accountId: accountId }, status.key)
+          .then(function (document) {
+            setStatus(document)
+            setBusy(undefined)
+            setError(undefined)
+          })
+          .catch(function (failure) {
+            setBusy(undefined)
+            setError(String(failure && failure.message ? failure.message : failure))
+          })
+      }
+
       /** 被用户强制显示的模型数量。 */
       var forcedCount = function (entry) {
         return (entry.models || []).filter(function (row) {
@@ -1172,6 +1359,11 @@ window.__ModuleLoader__.load({
           return Math.round(parsed * 1000)
         }
         var current = (status.settings && status.settings.advanced) || {}
+        var toPercent = function (value, fallback) {
+          var parsed = Number(String(value).trim())
+          if (!isFinite(parsed) || parsed < 0) return fallback
+          return Math.max(0, Math.min(95, Math.round(parsed))) / 100
+        }
         setBusy('advanced')
         postJson(SETTINGS_PATH, {
           advanced: {
@@ -1180,6 +1372,13 @@ window.__ModuleLoader__.load({
             creditsRefreshMs: toMs(advCredits, current.creditsRefreshMs || 120000),
             stats: advStats !== false,
             catalogCache: advCache !== false,
+          },
+          alerts: { lowRatio: toPercent(advAlert, 0.15) },
+          autoSwitch: {
+            enabled: (status.settings && status.settings.autoSwitch && typeof status.settings.autoSwitch === 'object')
+              ? status.settings.autoSwitch.enabled !== false
+              : true,
+            thresholdRatio: toPercent(advSwitch, 0),
           },
         }, status.key)
           .then(function (document) {
@@ -1277,13 +1476,25 @@ window.__ModuleLoader__.load({
       }
 
       var copyDiagnostics = function () {
-        var text = JSON.stringify(status === undefined ? { error: error } : status, null, 2)
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(text).then(function () {
-            setCopied(true)
-            setTimeout(function () { setCopied(false) }, 1500)
-          }, function () {})
+        var write = function (text) {
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function () {
+              setCopied(true)
+              setTimeout(function () { setCopied(false) }, 1500)
+            }, function () {})
+          }
         }
+        if (status !== undefined) {
+          // 新版宿主提供脱敏后的纯文本诊断；旧宿主没有这条路由时退回精简 JSON
+          // （至少先删掉控制密钥，不能把写接口的钥匙复制出去）。
+          fetchDiagnosticsText().then(write, function () {
+            var safe = Object.assign({}, status)
+            delete safe.key
+            write(JSON.stringify(safe, null, 2))
+          })
+          return
+        }
+        write(JSON.stringify({ error: error }, null, 2))
       }
 
       if (status === undefined) {
@@ -1293,6 +1504,11 @@ window.__ModuleLoader__.load({
           h('p', { style: error === undefined ? S.hint : S.hintError }, error === undefined ? bind(t, 'loading') : bind(t, 'error') + '：' + error),
         )
       }
+
+      // 预警阈值由宿主下发；老宿主没有 alerts 时沿用 15%。
+      var alertSettings = (status.settings && status.settings.alerts) || {}
+      var alertRatio = typeof alertSettings.lowRatio === 'number' ? alertSettings.lowRatio : LOW_CREDITS_RATIO
+      var alertsEnabled = alertSettings.enabled !== false
 
       var tabs = providers.map(function (entry) {
         var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
@@ -1324,7 +1540,7 @@ window.__ModuleLoader__.load({
         var today = (entry.usage && entry.usage.today) || {}
         var selected = entry.provider === activeTab
         var accent = PROVIDER_ACCENT[entry.provider] || 'currentColor'
-        var low = credits.state === 'ok' && isCreditsLow(credits)
+        var low = credits.state === 'ok' && isCreditsLow(credits, alertRatio)
         var valueText = credits.state === 'ok'
           ? credits.unlimited === true ? '∞' : compactNumber(credits.remain)
           : '—'
@@ -1384,6 +1600,42 @@ window.__ModuleLoader__.load({
         )
       })
 
+      // 额度预警：只提醒，不改变行为。真正换号由 autoSwitch.thresholdRatio 控制。
+      var alertProviders = alertsEnabled
+        ? providers.filter(function (entry) {
+            return entry.enabled !== false && alertOfCredits(entry.credits, alertRatio) !== undefined
+          })
+        : []
+      var exhaustedNames = alertProviders
+        .filter(function (entry) { return alertOfCredits(entry.credits, alertRatio) === 'exhausted' })
+        .map(function (entry) { return entry.displayName })
+      var lowNames = alertProviders
+        .filter(function (entry) { return alertOfCredits(entry.credits, alertRatio) === 'low' })
+        .map(function (entry) { return entry.displayName })
+      var alertLines = []
+      if (exhaustedNames.length > 0) alertLines.push(bind(t, 'alertBannerExhausted', { names: exhaustedNames.join('、') }))
+      if (lowNames.length > 0) alertLines.push(bind(t, 'alertBannerLow', { names: lowNames.join('、') }))
+      var alertBanner = alertLines.length === 0
+        ? null
+        : h('div', {
+            key: 'alert',
+            role: 'status',
+            style: {
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 7,
+              padding: '7px 10px',
+              borderRadius: 8,
+              border: '0.5px solid var(--dsw-alias-state-warning-primary, #b26b00)',
+              background: 'color-mix(in srgb, var(--dsw-alias-state-warning-primary, #b26b00) 9%, transparent)',
+              color: 'var(--dsw-alias-state-warning-primary, #b26b00)',
+              fontSize: TEXT.body,
+              lineHeight: '19px',
+            },
+          },
+          h('span', { style: { fontWeight: 700, flex: '0 0 auto' } }, '!'),
+          h('span', { style: { minWidth: 0 } }, alertLines.join(' ')))
+
       var sections = [
         h('div', { key: 'head', style: S.header },
           h('h3', { style: S.title }, bind(t, 'title')),
@@ -1404,6 +1656,7 @@ window.__ModuleLoader__.load({
             onClick: function () { setShowDiag(!showDiag) },
           }, bind(t, 'diagnostics'))),
         error === undefined ? null : h('p', { key: 'err', style: S.hintError }, bind(t, 'error') + '：' + error),
+        alertBanner,
         summaryCards.length === 0
           ? null
           : h('div', { key: 'summary', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 } }, summaryCards),
@@ -1486,6 +1739,10 @@ window.__ModuleLoader__.load({
       var loginJob = active.login
       var accountItems = accountRows.map(function (account, index) {
         var snapshot = account.credits || { state: 'none' }
+        var cooling = typeof account.cooldownUntil === 'number' && account.cooldownUntil > Date.now()
+        var lastTest = account.lastTest
+        var testKey = 'test:' + account.id
+        var resetKey = 'reset:' + account.id
         return h('li', {
           key: account.id,
           style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
@@ -1499,8 +1756,37 @@ window.__ModuleLoader__.load({
           title: account.label,
         }, account.label),
         account.active ? h('span', { style: S.badgeSoft }, bind(t, 'currentAccount')) : null,
+        cooling
+          ? h('span', {
+              style: S.badgeWarn,
+              title: bind(t, 'cooldown', { time: formatTime(account.cooldownUntil) }),
+            }, bind(t, 'cooldown', { time: formatShortTime(account.cooldownUntil) }))
+          : null,
         h('span', { style: S.grow }),
+        lastTest !== undefined && lastTest !== null
+          ? h('span', {
+              style: Object.assign({}, S.modelMeta, { color: lastTest.ok ? healthColor('ok') : healthColor('degraded') }),
+              title: lastTest.error === undefined ? '' : String(lastTest.error),
+            }, lastTest.ok
+              ? bind(t, 'testOk', { ms: String(lastTest.latencyMs || 0) + 'ms' })
+              : bind(t, 'testFailed', { reason: shortErrorMessage(lastTest.error, t) }))
+          : null,
         h('span', { style: S.modelMeta }, creditsText(snapshot)),
+        cooling
+          ? h('button', {
+              type: 'button',
+              style: S.buttonGhost,
+              disabled: busy === resetKey,
+              onClick: function () { resetCooldown(active.provider, account.id) },
+            }, bind(t, 'resetCooldown'))
+          : null,
+        h('button', {
+          type: 'button',
+          style: S.buttonGhost,
+          disabled: busy === testKey,
+          title: bind(t, 'testAccount'),
+          onClick: function () { testAccount(active.provider, account.id) },
+        }, busy === testKey ? bind(t, 'testing') : bind(t, 'testAccount')),
         account.active
           ? null
           : h('button', {
@@ -1683,7 +1969,7 @@ window.__ModuleLoader__.load({
 
       // ── 积分 ────────────────────────────────────────────────────
       var credits = active.credits || { state: 'none' }
-      var creditsLow = credits.state === 'ok' && isCreditsLow(credits)
+      var creditsLow = credits.state === 'ok' && isCreditsLow(credits, alertRatio)
       var creditsHead = h('div', { key: 'h', style: S.sectionHead },
         h('span', { style: S.sectionTitle }, bind(t, 'credits')),
         h('span', { style: S.grow }),
@@ -1748,6 +2034,36 @@ window.__ModuleLoader__.load({
         }
         if (credits.resetAtMs > 0) {
           creditsBody.push(h('p', { key: 'reset', style: S.hintTiny }, bind(t, 'creditsReset') + ' ' + formatTime(credits.resetAtMs)))
+        }
+
+        // 额度趋势：今日/7 天花费、消耗速度与耗尽预估。
+        var trend = credits.trend
+        if (trend !== null && typeof trend === 'object' && (trend.sampleCount > 0 || (trend.points || []).length > 1)) {
+          var trendChips = []
+          trendChips.push(h('span', { key: 'td', style: microChip() }, bind(t, 'trendToday', { value: formatNumber(trend.spentToday || 0) })))
+          if (trend.spent7d > 0) {
+            trendChips.push(h('span', { key: 'tw', style: microChip() }, bind(t, 'trendWeek', { value: formatNumber(trend.spent7d) })))
+          }
+          if (trend.topupToday > 0) {
+            trendChips.push(h('span', { key: 'tu', style: microChip() }, bind(t, 'trendTopup', { value: formatNumber(trend.topupToday) })))
+          }
+          if (typeof trend.burnPerHour === 'number' && trend.burnPerHour > 0) {
+            trendChips.push(h('span', { key: 'tr', style: microChip() }, bind(t, 'trendRate', { value: formatNumber(trend.burnPerHour) })))
+          }
+          if (typeof trend.etaMs === 'number' && trend.etaMs > 0) {
+            trendChips.push(h('span', { key: 'te', style: microChip(creditsLow ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : undefined) }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) })))
+          }
+          creditsBody.push(
+            h('div', { key: 'trend', style: { display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 7, borderTop: '0.5px solid var(--dsw-alias-border-l2)' } },
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+                h('span', { style: S.label }, bind(t, 'trend')),
+                h('span', { style: S.grow }),
+                ...trendChips),
+              sparkline(trend.points, creditsLow ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : (PROVIDER_ACCENT[active.provider] || 'currentColor')),
+              typeof trend.etaMs !== 'number'
+                ? h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)' } }, bind(t, 'trendEtaUnknown'))
+                : null),
+          )
         }
       } else if (credits.state === 'error') {
         creditsBody.push(h('p', { key: 'flat', style: S.hintError }, creditsText(credits)))
@@ -1875,10 +2191,28 @@ window.__ModuleLoader__.load({
               rateOf(providerUsage),
               formatDuration(providerUsage.avgDurationMs),
               formatNumber(providerUsage.totalTokens || 0),
-            ], true)),
+            ], true),
+            typeof statsDoc.currentSession === 'object' && statsDoc.currentSession !== null && statsDoc.currentSession.requests > 0
+              ? usageRow('session', bind(t, 'usageSession'), [
+                  formatNumber(statsDoc.currentSession.requests || 0),
+                  rateOf(statsDoc.currentSession),
+                  formatDuration(statsDoc.currentSession.avgDurationMs),
+                  formatNumber(statsDoc.currentSession.totalTokens || 0),
+                ], true)
+              : null),
         )
         usageBody.push(
-          h('div', { key: 'resetrow', style: { display: 'flex', alignItems: 'center', gap: 8 } },
+          h('div', { key: 'resetrow', style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+            h('label', { style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+              h('input', {
+                type: 'checkbox',
+                checked: !(status.settings && status.settings.showUsageInSidebar === false),
+                onChange: function () {
+                  var on = !(status.settings && status.settings.showUsageInSidebar === false)
+                  mutate({ display: { showUsageInSidebar: !on } })
+                },
+              }),
+              h('span', { style: S.hintTiny }, bind(t, 'usageShowInSidebar'))),
             h('span', { style: S.grow }),
             h('button', {
               type: 'button',
@@ -1890,6 +2224,79 @@ window.__ModuleLoader__.load({
         if (statsDoc.since > 0) {
           usageBody.push(h('p', { key: 'since', style: S.hintTiny }, bind(t, 'usageSince', { time: formatTime(statsDoc.since) })))
         }
+
+        // 最近 14 天用量：14 根柱子，高度按当天 token 归一化。
+        // 不画坐标轴 —— 它回答的是「哪天用得猛」，不是精确读数。
+        var daily = Array.isArray(statsDoc.daily) ? statsDoc.daily.slice(-14) : []
+        if (daily.length > 0) {
+          var maxDailyTokens = 1
+          daily.forEach(function (day) {
+            if (typeof day.totalTokens === 'number' && day.totalTokens > maxDailyTokens) maxDailyTokens = day.totalTokens
+          })
+          usageBody.push(
+            h('div', { key: 'heat', style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+                h('span', { style: S.sectionTitle }, bind(t, 'usageHeatmap')),
+                h('span', { style: S.grow }),
+                h('span', { style: S.hintTiny }, daily.length + 'd')),
+              h('div', { style: { display: 'flex', alignItems: 'flex-end', gap: 3, height: 28 } },
+                daily.map(function (day) {
+                  var tokens = typeof day.totalTokens === 'number' ? day.totalTokens : 0
+                  var height = Math.max(3, Math.round((tokens / maxDailyTokens) * 26))
+                  return h('div', {
+                    key: 'd' + day.date,
+                    title: day.date + ' · ' + formatNumber(day.requests || 0) + ' 次 · ' + formatNumber(tokens) + ' tok',
+                    style: {
+                      flex: '1 1 0',
+                      minWidth: 2,
+                      height: height,
+                      borderRadius: 2,
+                      background: tokens > 0
+                        ? (PROVIDER_ACCENT[active.provider] || 'var(--dsw-alias-state-business-primary, #2f6fed)')
+                        : 'var(--dsw-alias-border-l2)',
+                      opacity: tokens > 0 ? 0.5 + Math.min(0.5, tokens / maxDailyTokens / 2) : 0.5,
+                    },
+                  })
+                }))),
+          )
+        }
+
+        // 模型用量：stats.models 的键是 `provider::model`。
+        var modelStats = []
+        if (statsDoc.models !== null && typeof statsDoc.models === 'object') {
+          Object.keys(statsDoc.models).forEach(function (key) {
+            if (key.indexOf(active.provider + '::') !== 0) return
+            var counters = statsDoc.models[key]
+            if (counters === null || typeof counters !== 'object' || !(counters.requests > 0)) return
+            modelStats.push({ model: key.slice(active.provider.length + 2), counters: counters })
+          })
+        }
+        modelStats.sort(function (a, b) { return b.counters.requests - a.counters.requests })
+        modelStats = modelStats.slice(0, 5)
+        if (modelStats.length > 0) {
+          var modelColumns = 'minmax(110px, 1.6fr) minmax(46px, .7fr) minmax(68px, .9fr) minmax(56px, .8fr)'
+          usageBody.push(
+            h('div', { key: 'topmodels', style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+              h('span', { style: S.sectionTitle }, bind(t, 'usageTopModels')),
+              h('div', { style: usageTableFrame },
+                h('div', { style: { display: 'grid', gridTemplateColumns: modelColumns } },
+                  usageHead('m0', bind(t, 'usageModel')),
+                  usageHead('m1', bind(t, 'usageModelCalls'), true),
+                  usageHead('m2', bind(t, 'usageModelTokens'), true),
+                  usageHead('m3', bind(t, 'usageAvg'), true)),
+                modelStats.map(function (entry, index) {
+                  return h('div', {
+                    key: 'm' + index,
+                    style: Object.assign({ display: 'grid', gridTemplateColumns: modelColumns, alignItems: 'center' }, index > 0 ? usageRowLine : {}),
+                  },
+                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-primary)' }), title: entry.model }, entry.model || '—'),
+                  h('span', { style: usageNumberCell }, formatNumber(entry.counters.requests || 0)),
+                  h('span', { style: usageNumberCell }, formatNumber(entry.counters.totalTokens || 0)),
+                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatDuration(entry.counters.avgDurationMs)))
+                }))),
+          )
+        }
+
         usageBody.push(h('div', { key: 'recenthead', style: Object.assign({}, S.sectionTitle, { marginTop: 2 }) }, bind(t, 'usageRecent')))
         if (recentRequests.length === 0) {
           usageBody.push(h('p', { key: 'empty', style: S.hintTiny }, bind(t, 'usageEmpty')))
@@ -2039,6 +2446,29 @@ window.__ModuleLoader__.load({
                   value: advCredits,
                   onChange: function (event) { setAdvCredits(event.target.value) },
                 }))),
+            h('div', { key: 'thresholds', style: S.row },
+              h('div', { style: Object.assign({}, S.field, { flex: '1 1 140px' }) },
+                h('span', { style: S.label }, bind(t, 'advancedAlert')),
+                h('input', {
+                  style: S.input,
+                  type: 'number',
+                  min: 1,
+                  max: 95,
+                  value: advAlert,
+                  onChange: function (event) { setAdvAlert(event.target.value) },
+                }),
+                h('span', { style: S.hintTiny }, bind(t, 'advancedAlertHint'))),
+              h('div', { style: Object.assign({}, S.field, { flex: '1 1 140px' }) },
+                h('span', { style: S.label }, bind(t, 'advancedSwitch')),
+                h('input', {
+                  style: S.input,
+                  type: 'number',
+                  min: 0,
+                  max: 50,
+                  value: advSwitch,
+                  onChange: function (event) { setAdvSwitch(event.target.value) },
+                }),
+                h('span', { style: S.hintTiny }, bind(t, 'advancedSwitchHint')))),
             h('label', { key: 'stats', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
               h('input', {
                 type: 'checkbox',
@@ -2397,6 +2827,9 @@ window.__ModuleLoader__.load({
         }
 
         var providers = status && Array.isArray(status.providers) ? status.providers : []
+        var sidebarAlertSettings = (status && status.settings && status.settings.alerts) || {}
+        var sidebarAlertRatio = typeof sidebarAlertSettings.lowRatio === 'number' ? sidebarAlertSettings.lowRatio : LOW_CREDITS_RATIO
+        var sidebarShowUsage = !(status && status.settings && status.settings.showUsageInSidebar === false)
         var rows = []
         for (var index = 0; index < providers.length; index++) {
           var entry = providers[index]
@@ -2462,7 +2895,7 @@ window.__ModuleLoader__.load({
         var segments = rows.map(function (row, position) {
           var snapshot = row.credits
           var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
-          var warn = isCreditsLow(snapshot)
+          var warn = isCreditsLow(snapshot, sidebarAlertRatio)
           var stale = snapshot.stale === true
           var dotColor = warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent
           var label = row.entry.displayName + ' ' + formatCreditsText(snapshot, t) + (stale ? ' · ' + bind(t, 'creditsCached') : '')
@@ -2645,7 +3078,8 @@ window.__ModuleLoader__.load({
           ),
           rows.map(function (row, index) {
             var snapshot = row.credits
-            var warn = isCreditsLow(snapshot)
+            var warn = isCreditsLow(snapshot, sidebarAlertRatio)
+            var alert = alertOfCredits(snapshot, sidebarAlertRatio)
             var exhausted = snapshot.state === 'ok' && (snapshot.exceeded === true || (typeof snapshot.remain === 'number' && snapshot.remain <= 0))
             var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
             var percent = creditsPercentOf(snapshot)
@@ -2671,8 +3105,19 @@ window.__ModuleLoader__.load({
             if (percent !== undefined) meta.push(h('span', { key: 'pct', style: microChip(warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent) }, bind(t, 'creditsPercent', { percent: percent })))
             if (activeAccount !== undefined && problem === undefined) meta.push(h('span', { key: 'acc', style: { fontSize: 10.5, opacity: 0.6, maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bind(t, 'creditsCurrent', { label: activeAccount.label })))
             if (snapshot.resetAtMs > 0) meta.push(h('span', { key: 'reset', style: { fontSize: 10.5, opacity: 0.55, whiteSpace: 'nowrap' } }, bind(t, 'creditsResetShort', { date: formatShortDate(snapshot.resetAtMs) })))
-            if (todayUsage !== undefined && todayUsage.requests > 0) meta.push(h('span', { key: 'today', style: { fontSize: 10.5, opacity: 0.55, whiteSpace: 'nowrap' } }, bind(t, 'creditsToday', { count: todayUsage.requests, tokens: formatNumber(todayUsage.totalTokens || 0) })))
+            if (sidebarShowUsage && todayUsage !== undefined && todayUsage.requests > 0) meta.push(h('span', { key: 'today', style: { fontSize: 10.5, opacity: 0.55, whiteSpace: 'nowrap' } }, bind(t, 'creditsToday', { count: todayUsage.requests, tokens: formatNumber(todayUsage.totalTokens || 0) })))
             if (snapshot.stale === true) meta.push(h('span', { key: 'cached', style: microChip() }, bind(t, 'creditsCached')))
+            var trend = snapshot.trend
+            var hasTrend = trend !== null && typeof trend === 'object' && trend.sampleCount > 0
+            var trendLine = hasTrend
+              ? h('div', { key: 'trend', style: { display: 'flex', alignItems: 'center', gap: 7, marginTop: 5, minWidth: 0 } },
+                  h('span', { style: { fontSize: 10.5, opacity: 0.6, whiteSpace: 'nowrap' } }, bind(t, 'trendToday', { value: formatNumber(trend.spentToday || 0) })),
+                  typeof trend.etaMs === 'number' && trend.etaMs > 0
+                    ? h('span', { style: { fontSize: 10.5, opacity: 0.6, whiteSpace: 'nowrap', color: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : undefined } }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) }))
+                    : null,
+                  h('span', { style: { flex: '1 1 40px', minWidth: 24, display: 'flex', alignItems: 'center' } },
+                    sparkline(trend.points, warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent)))
+              : null
             return h(
               'div',
               {
@@ -2699,6 +3144,7 @@ window.__ModuleLoader__.load({
                 }),
                 h('span', { style: { fontSize: 12, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.entry.displayName),
                 exhausted ? h('span', { style: microChip('var(--dsw-alias-state-warning-primary, #b26b00)') }, bind(t, 'creditsExhausted')) : null,
+                alert === 'low' ? h('span', { style: microChip('var(--dsw-alias-state-warning-primary, #b26b00)') }, bind(t, 'alertLow')) : null,
                 h('span', { style: { flex: 1, minWidth: 4 } }),
                 h(
                   'span',
@@ -2730,6 +3176,7 @@ window.__ModuleLoader__.load({
               meta.length === 0
                 ? null
                 : h('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, marginTop: 5 } }, ...meta),
+              trendLine,
             )
           }),
           h(

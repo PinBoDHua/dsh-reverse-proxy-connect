@@ -10,10 +10,21 @@ import {
   translateMessages,
   translateTools,
 } from '../lib/qoder/transport.js'
-import { prepareChatBody, parseCatalog as parseWorkBuddyCatalog } from '../lib/workbuddy/upstream.js'
-import { openAiFinishKind, normalizeOpenAiUsage, toOpenAiMessages, toOpenAiTools, accountLimitation } from '../lib/runtime.js'
+import { prepareChatBody, parseCatalog as parseWorkBuddyCatalog, parseRetryAfter } from '../lib/workbuddy/upstream.js'
+import { openAiFinishKind, normalizeOpenAiUsage, parseOpenAiSse, toOpenAiMessages, toOpenAiTools, accountLimitation } from '../lib/runtime.js'
 import { toModelInfo, toResolvedModelInfo, failureCode, stableFailureCode } from '../lib/adapter.js'
 import { defaults, normalize, providerOptions, isModelVisible } from '../lib/settings.js'
+
+test('Retry-After：秒数与 HTTP 日期都能解析，且夹到 10 分钟', () => {
+  const now = Date.parse('2026-10-18T12:00:00Z')
+  assert.equal(parseRetryAfter('30', now), 30_000)
+  assert.equal(parseRetryAfter('600', now), 600_000)
+  assert.equal(parseRetryAfter('99999', now), 600_000)
+  assert.equal(parseRetryAfter('Sun, 18 Oct 2026 12:01:00 GMT', now), 60_000)
+  assert.equal(parseRetryAfter('Sun, 18 Oct 2026 11:59:00 GMT', now), 0)
+  assert.equal(parseRetryAfter('', now), undefined)
+  assert.equal(parseRetryAfter('soon', now), undefined)
+})
 
 test('WAF 编码可逆且长度为 4 的倍数', () => {
   const encoded = encodeBody('{"a":1}')
@@ -206,6 +217,26 @@ test('OpenAI SSE 终态与 usage 归一化', () => {
   assert.equal(usage.inputTokens, 30)
   assert.equal(usage.cacheReadTokens, 20)
   assert.equal(usage.reasoningTokens, 4)
+})
+
+test('OpenAI SSE：finish_reason 之后的 usage 不会丢失，finish 永远在最后', async () => {
+  const encoder = new TextEncoder()
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"hi"}}]}\n\n'))
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'))
+      // OpenAI 的 include_usage 就是这样：finish_reason 之后再单独发 usage。
+      controller.enqueue(encoder.encode('data: {"choices":[],"usage":{"prompt_tokens":10,"completion_tokens":4}}\n\n'))
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+      controller.close()
+    },
+  })
+  const events = []
+  for await (const event of parseOpenAiSse(body)) events.push(event)
+  const kinds = events.map((event) => event.type)
+  assert.deepEqual(kinds, ['text', 'usage', 'finish'])
+  assert.equal(events[1].usage.inputTokens, 10)
+  assert.equal(events[2].kind, 'stop')
 })
 
 test('DSH 消息 → OpenAI 消息：tool-call 合成 tool_calls，tool 角色带 id', () => {
