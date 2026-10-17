@@ -456,6 +456,10 @@ toggle.props.onClick({ preventDefault() {} })
 tree = await render(pill, { t: (key) => key, wide: true })
 const expandedText = textOf(tree)
 if (!expandedText.includes('creditsRefresh')) throw new Error('展开后没有渲染面板')
+// 面板的层级信息：provider 数量、百分比、今日用量、已用尽徽标、更新时间。
+for (const label of ['creditsSources', 'creditsPercent', 'creditsToday', 'creditsExhausted', 'creditsFetchedAt']) {
+  if (!expandedText.includes(label)) throw new Error(`展开面板缺少 ${label}`)
+}
 console.log('✓ 点击胶囊展开面板')
 
 // ---------- 4. 面板必须是内嵌（宽度 100%），不能是 fixed ----------

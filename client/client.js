@@ -106,6 +106,14 @@ window.__ModuleLoader__.load({
       searchEmpty: '没有匹配的模型。',
       pillHint: '数据每 2 分钟自动刷新',
       creditsStale: '上次结果，正在刷新…',
+      creditsCachedHint: '显示上次结果 · 可手动刷新',
+      creditsCached: '缓存数据',
+      creditsSources: '{count} 家',
+      creditsPercent: '{percent}%',
+      creditsToday: '今日 {count} 次 · {tokens} tok',
+      creditsCurrent: '当前 {label}',
+      creditsNoData: '未读取',
+      creditsUnreadable: '读取失败',
       catalogBuiltin: '内置兜底列表（上游不可达且没有存档）',
       summary: '账号总览',
       secStatus: '状态',
@@ -265,6 +273,14 @@ window.__ModuleLoader__.load({
       searchEmpty: 'No model matches.',
       pillHint: 'Refreshes every 2 minutes',
       creditsStale: 'Last known — refreshing…',
+      creditsCachedHint: 'Showing the last result · refresh manually',
+      creditsCached: 'Cached',
+      creditsSources: '{count} providers',
+      creditsPercent: '{percent}%',
+      creditsToday: 'Today {count} calls · {tokens} tok',
+      creditsCurrent: 'Current: {label}',
+      creditsNoData: 'Not read yet',
+      creditsUnreadable: 'Read failed',
       catalogBuiltin: 'Built-in fallback list (upstream unreachable, no saved catalog)',
       summary: 'Accounts',
       secStatus: 'Status',
@@ -415,6 +431,53 @@ window.__ModuleLoader__.load({
         return credits.remain / credits.total < LOW_CREDITS_RATIO
       }
       return false
+    }
+
+    /** 额度百分比（读不到 / 不限量 / 没有总量时返回 undefined）。 */
+    function creditsPercentOf(credits) {
+      if (credits === undefined || credits.state !== 'ok') return undefined
+      if (credits.unlimited === true) return undefined
+      if (!(credits.total > 0)) return undefined
+      return Math.max(0, Math.min(100, Math.round((credits.remain / credits.total) * 100)))
+    }
+
+    /**
+     * 把额度拆成「大数字 + 小分母 + 单位」，给侧栏面板做层级。
+     *
+     * 旧版把「775 / 1,300 积分」塞进一个 12.5px 的粗体串里，三个数字一样重，
+     * 一眼看不出重点是「还剩多少」。
+     */
+    function creditsValueParts(credits, t) {
+      if (credits === undefined || credits.state !== 'ok') {
+        return {
+          big: '—',
+          small: credits !== undefined && credits.state === 'none' ? bind(t, 'creditsNoData') : bind(t, 'creditsUnreadable'),
+          unit: '',
+        }
+      }
+      if (credits.unlimited === true) return { big: '∞', small: '', unit: bind(t, 'creditsUnit') }
+      return {
+        big: formatNumber(credits.remain),
+        small: credits.total > 0 ? '/ ' + formatNumber(credits.total) : '',
+        unit: bind(t, 'creditsUnit'),
+      }
+    }
+
+    /** 侧栏面板里的小徽标。 */
+    function microChip(color) {
+      return {
+        display: 'inline-flex',
+        alignItems: 'center',
+        padding: '0 5px',
+        borderRadius: 999,
+        fontSize: 10,
+        lineHeight: '15px',
+        fontWeight: 500,
+        color: color === undefined ? 'var(--dsw-alias-label-tertiary)' : color,
+        background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))',
+        whiteSpace: 'nowrap',
+        flex: '0 0 auto',
+      }
     }
 
     /**
@@ -2332,43 +2395,62 @@ window.__ModuleLoader__.load({
             refresh(event)
             return
           }
-          setExpanded(!expanded)
+          var next = !expanded
+          setExpanded(next)
+          // 展开时如果还是缓存数据，顺手拉一次；面板会立刻显示「刷新中」。
+          if (next && busy !== true && rows.some(function (row) { return row.credits.stale === true })) {
+            setTimeout(function () { refresh() }, 0)
+          }
         }
 
         var segments = rows.map(function (row, position) {
           var snapshot = row.credits
           var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
           var warn = isCreditsLow(snapshot)
+          var stale = snapshot.stale === true
+          var dotColor = warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent
+          var label = row.entry.displayName + ' ' + formatCreditsText(snapshot, t) + (stale ? ' · ' + bind(t, 'creditsCached') : '')
           return h(
             'span',
             {
               key: row.entry.provider,
-              style: { display: 'inline-flex', alignItems: 'baseline', gap: 4 },
+              title: label,
+              style: {
+                display: 'inline-flex',
+                alignItems: 'baseline',
+                gap: 4,
+                minWidth: 0,
+                paddingLeft: position > 0 ? 8 : 0,
+                borderLeft: position > 0 ? '0.5px solid var(--dsw-alias-border-l2)' : 'none',
+              },
             },
             position === 0 || wide
               ? h('span', {
-                  style: {
+                  style: Object.assign({
                     width: 6,
                     height: 6,
                     borderRadius: 999,
                     alignSelf: 'center',
-                    background: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent,
+                    background: dotColor,
                     opacity: 0.9,
                     flex: '0 0 auto',
-                  },
+                  }, stale
+                    ? { background: 'transparent', boxShadow: 'inset 0 0 0 1.5px ' + dotColor }
+                    : {}),
                 })
               : null,
-            h('span', { style: { fontSize: 11, letterSpacing: '.02em', opacity: 0.62 } }, shortProviderName(row.entry.provider)),
+            h('span', { style: { fontSize: 10.5, letterSpacing: '.02em', opacity: stale ? 0.45 : 0.62 } }, shortProviderName(row.entry.provider)),
             h(
               'span',
               {
                 style: {
-                  fontWeight: 600,
+                  fontWeight: 650,
                   fontSize: 13,
+                  fontVariantNumeric: 'tabular-nums',
                   color: warn
                     ? 'var(--dsw-alias-state-warning-primary, #b26b00)'
                     : 'var(--dsw-alias-label-primary, inherit)',
-                  opacity: snapshot.stale === true ? 0.6 : 1,
+                  opacity: stale ? 0.65 : 1,
                 },
               },
               snapshot.unlimited === true ? '∞' : compactNumber(snapshot.remain),
@@ -2431,11 +2513,11 @@ window.__ModuleLoader__.load({
               // 收起时也走外层容器（见下方 return），否则按钮会缩成内容宽度。
               width: wide ? '100%' : 'auto',
               justifyContent: wide ? 'space-between' : 'center',
-              gap: 10,
+              gap: wide ? 6 : 10,
               boxSizing: 'border-box',
               maxWidth: '100%',
               minWidth: 0,
-              padding: wide ? '4px 11px' : '4px 7px',
+              padding: wide ? '4px 10px' : '4px 7px',
               lineHeight: '18px',
               cursor: 'pointer',
               borderRadius: 999,
@@ -2465,6 +2547,13 @@ window.__ModuleLoader__.load({
 
         // 收起时也套一层满宽容器：直接在 `footerActions`（横向 flex）里返回按钮，
         // 按钮会缩成内容宽度，看起来就比展开时窄一截。
+        var latestFetched = 0
+        var anyStale = false
+        rows.forEach(function (row) {
+          if (typeof row.credits.fetchedAt === 'number' && row.credits.fetchedAt > latestFetched) latestFetched = row.credits.fetchedAt
+          if (row.credits.stale === true) anyStale = true
+        })
+
         var panel = (expanded !== true || !wide) ? null : h(
           'div',
           {
@@ -2477,109 +2566,122 @@ window.__ModuleLoader__.load({
               boxSizing: 'border-box',
               border: '0.5px solid var(--dsw-alias-border-l2)',
               borderRadius: 10,
-              padding: '10px 12px',
+              padding: '10px 12px 9px',
               background: 'var(--dsw-alias-bg-l1, transparent)',
-              maxHeight: '46vh',
+              boxShadow: '0 8px 24px rgba(0,0,0,.10)',
+              maxHeight: '48vh',
               overflowY: 'auto',
               color: 'var(--dsw-alias-label-primary)',
               fontSize: 13,
               lineHeight: '20px',
             },
           },
-          h('div', { style: { fontSize: 11.5, opacity: 0.6, marginBottom: 6 } }, bind(t, 'credits')),
-          rows.map(function (row) {
+          // 头部：标题 + provider 数量 + 最近更新时间。
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 6, borderBottom: '0.5px solid var(--dsw-alias-border-l2)' } },
+            h('span', { style: { fontSize: 10.5, fontWeight: 600, letterSpacing: '.08em', opacity: 0.6 } }, bind(t, 'credits')),
+            h('span', { style: microChip() }, bind(t, 'creditsSources', { count: rows.length })),
+            h('span', { style: { flex: 1 } }),
+            latestFetched > 0
+              ? h('span', { style: { fontSize: 10, opacity: 0.45, whiteSpace: 'nowrap' } }, bind(t, 'creditsFetchedAt', { time: formatShortTime(latestFetched) }))
+              : null,
+          ),
+          rows.map(function (row, index) {
             var snapshot = row.credits
             var warn = isCreditsLow(snapshot)
+            var exhausted = snapshot.state === 'ok' && (snapshot.exceeded === true || (typeof snapshot.remain === 'number' && snapshot.remain <= 0))
+            var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
+            var percent = creditsPercentOf(snapshot)
+            var parts = creditsValueParts(snapshot, t)
             var ratio
-            if (snapshot.unlimited === true) ratio = undefined
-            else if (typeof snapshot.total === 'number' && snapshot.total > 0) {
+            if (snapshot.unlimited !== true && typeof snapshot.total === 'number' && snapshot.total > 0 && typeof snapshot.remain === 'number') {
               ratio = Math.max(0, Math.min(1, snapshot.remain / snapshot.total))
             }
-            var note = []
-            if (snapshot.planName !== undefined && snapshot.planName !== '') note.push(snapshot.planName)
-            if (snapshot.resetAtMs > 0) note.push(bind(t, 'creditsReset') + ' ' + formatTime(snapshot.resetAtMs))
             var todayUsage = row.entry.usage && row.entry.usage.today
-            if (todayUsage !== undefined && todayUsage.requests > 0) {
-              note.push(String(todayUsage.requests) + ' req · ' + compactNumber(todayUsage.totalTokens || 0) + ' tok')
-            }
+            var activeAccount = (row.entry.accounts || []).filter(function (account) { return account.active === true })[0]
+            var meta = []
+            if (snapshot.planName !== undefined && snapshot.planName !== '') meta.push(h('span', { key: 'plan', style: microChip() }, snapshot.planName))
+            if (percent !== undefined) meta.push(h('span', { key: 'pct', style: microChip(warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent) }, bind(t, 'creditsPercent', { percent: percent })))
+            if (activeAccount !== undefined) meta.push(h('span', { key: 'acc', style: { fontSize: 10.5, opacity: 0.6, maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bind(t, 'creditsCurrent', { label: activeAccount.label })))
+            if (snapshot.resetAtMs > 0) meta.push(h('span', { key: 'reset', style: { fontSize: 10.5, opacity: 0.55, whiteSpace: 'nowrap' } }, bind(t, 'creditsReset') + ' ' + formatTime(snapshot.resetAtMs)))
+            if (todayUsage !== undefined && todayUsage.requests > 0) meta.push(h('span', { key: 'today', style: { fontSize: 10.5, opacity: 0.55, whiteSpace: 'nowrap' } }, bind(t, 'creditsToday', { count: todayUsage.requests, tokens: formatNumber(todayUsage.totalTokens || 0) })))
             return h(
               'div',
-              { key: row.entry.provider, style: { marginBottom: 8 } },
+              {
+                key: row.entry.provider,
+                style: {
+                  padding: '9px 0',
+                  borderTop: index > 0 ? '0.5px solid var(--dsw-alias-border-l2)' : 'none',
+                  opacity: snapshot.stale === true ? 0.82 : 1,
+                },
+              },
               h(
                 'div',
-                { style: { display: 'flex', alignItems: 'baseline', gap: 6 } },
+                { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
                 h('span', {
-                  style: {
-                    width: 6,
-                    height: 6,
+                  style: Object.assign({
+                    width: 7,
+                    height: 7,
                     borderRadius: 999,
-                    alignSelf: 'center',
                     flex: '0 0 auto',
-                    background: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : (PROVIDER_ACCENT[row.entry.provider] || 'currentColor'),
-                  },
+                    background: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent,
+                  }, snapshot.stale === true
+                    ? { background: 'transparent', boxShadow: 'inset 0 0 0 1.5px ' + (warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent) }
+                    : {}),
                 }),
-                h('span', { style: { fontSize: 11.5, opacity: 0.7, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.entry.displayName),
+                h('span', { style: { fontSize: 12, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.entry.displayName),
+                exhausted ? h('span', { style: microChip('var(--dsw-alias-state-warning-primary, #b26b00)') }, bind(t, 'creditsExhausted')) : null,
+                snapshot.stale === true ? h('span', { style: microChip() }, bind(t, 'creditsCached')) : null,
                 h('span', { style: { flex: 1, minWidth: 4 } }),
-                h('span', {
-                  style: {
-                    fontWeight: 600,
-                    fontSize: 12.5,
-                    fontVariantNumeric: 'tabular-nums',
-                    whiteSpace: 'nowrap',
-                    color: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : 'var(--dsw-alias-label-primary)',
-                    opacity: snapshot.stale === true ? 0.7 : 1,
+                h(
+                  'span',
+                  {
+                    title: formatCreditsText(snapshot, t),
+                    style: { display: 'inline-flex', alignItems: 'baseline', gap: 4, whiteSpace: 'nowrap', flex: '0 0 auto' },
                   },
-                }, formatCreditsText(snapshot, t)),
+                  h('span', { style: { fontSize: 19, lineHeight: '22px', fontWeight: 650, fontVariantNumeric: 'tabular-nums', color: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : 'var(--dsw-alias-label-primary)' } }, parts.big),
+                  parts.small !== '' ? h('span', { style: { fontSize: 10.5, opacity: 0.55 } }, parts.small) : null,
+                  parts.unit !== '' ? h('span', { style: { fontSize: 10.5, opacity: 0.55 } }, parts.unit) : null,
+                ),
               ),
               ratio === undefined
                 ? null
                 : h(
                     'div',
-                    {
-                      style: {
-                        marginTop: 4,
-                        height: 3,
-                        borderRadius: 999,
-                        background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.16))',
-                        overflow: 'hidden',
-                      },
-                    },
+                    { style: { marginTop: 6, height: 4, borderRadius: 999, background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.16))', overflow: 'hidden' } },
                     h('div', {
                       style: {
                         width: Math.round(ratio * 100) + '%',
                         height: '100%',
                         borderRadius: 999,
-                        background: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : (PROVIDER_ACCENT[row.entry.provider] || 'currentColor'),
-                        opacity: 0.85,
+                        background: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent,
+                        opacity: 0.9,
+                        transition: 'width .3s ease',
                       },
                     }),
                   ),
-              note.length === 0
+              meta.length === 0
                 ? null
-                : h('div', { style: { fontSize: 11, opacity: 0.55, marginTop: 2 } }, note.join(' · ')),
+                : h('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, marginTop: 5 } }, ...meta),
+              snapshot.error !== undefined && typeof snapshot.error === 'string'
+                ? h('div', { style: { fontSize: 10.5, lineHeight: '15px', color: 'var(--dsw-alias-state-warning-primary, #b26b00)', marginTop: 3 } }, bind(t, 'creditsFailed', { message: snapshot.error }))
+                : null,
             )
           }),
           h(
             'div',
-            {
-              style: {
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                borderTop: '0.5px solid var(--dsw-alias-border-l2)',
-                paddingTop: 7,
-                marginTop: 2,
-              },
-            },
-            h('span', { style: { fontSize: 11, opacity: 0.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-              rows.some(function (row) { return row.credits.stale === true }) ? bind(t, 'creditsStale') : bind(t, 'pillHint')),
+            { style: { display: 'flex', alignItems: 'center', gap: 8, borderTop: '0.5px solid var(--dsw-alias-border-l2)', paddingTop: 7, marginTop: 2 } },
+            h('span', { style: { fontSize: 10.5, opacity: 0.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+              anyStale ? bind(t, 'creditsCachedHint') : bind(t, 'pillHint')),
             h('span', { style: { flex: 1 } }),
             h('button', {
               type: 'button',
               onClick: refresh,
+              disabled: busy === true,
               style: {
                 font: 'inherit',
-                fontSize: 11.5,
+                fontSize: 11,
                 padding: '2px 9px',
                 borderRadius: 999,
                 cursor: 'pointer',
