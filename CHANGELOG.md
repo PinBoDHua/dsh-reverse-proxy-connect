@@ -1,5 +1,35 @@
 # 更新记录
 
+## 1.0.6 — 2026-10-18
+
+### 修复：凭证错误里同一个文件名出现两次
+
+截图里那条「已找：`C:\Users\…\Local\…\workbuddy-desktop-ai.info` /
+`C:\Users\…\Roaming\…\workbuddy-desktop-ai.info`」并不是重复渲染，而是
+WorkBuddy 会同时查 `%LOCALAPPDATA%` 与 `%APPDATA%` 两个目录，两个候选文件名相同。
+但把两条完整绝对路径并排放在界面里，看起来就是复制了一遍。
+
+现在：
+
+- 错误文案只展示**主路径**，后面跟「等 N 个位置」；
+- 路径用 `%LOCALAPPDATA%` / `%APPDATA%` / `~` 缩写，不再展开完整用户目录；
+- 结尾补一句「或在连接设置里指定登录文件」，给出手动兜底；
+- 诊断 JSON / 日志里仍然是原始路径，排障信息没有丢。
+
+展示示例：
+
+```text
+没有找到 workbuddy-ai 的登录文件（已查找
+%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth\workbuddy-desktop-ai.info 等 2 个位置）。
+请先打开 WorkBuddy AI 并登录，或在连接设置里指定登录文件。
+```
+
+### 测试
+
+- 新增 `tests/credentials-message.test.mjs`（2 条）：环境变量缩写、主路径 +
+  「等 N 个位置」、只传一个候选时不加后缀、空输入返回空串。
+- 共 101 条 `node --test` 用例。
+
 ## 1.0.5 — 2026-10-18
 
 ### 修复：同一段凭证错误在卡片里显示两次
