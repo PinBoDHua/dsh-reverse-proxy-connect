@@ -210,6 +210,8 @@ window.__ModuleLoader__.load({
     var pillHover = {
       visible: false,
       rect: undefined,
+      /** 侧栏（气泡可用宽度）的边界，`{left, right, width}`；量不到时为 undefined。 */
+      bounds: undefined,
       rows: [],
       hint: '',
       listeners: new Set(),
@@ -253,6 +255,7 @@ window.__ModuleLoader__.load({
     function setPillHover(next) {
       pillHover.visible = next.visible === true
       pillHover.rect = next.rect
+      pillHover.bounds = next.bounds
       pillHover.rows = next.rows === undefined ? [] : next.rows
       pillHover.hint = next.hint === undefined ? '' : next.hint
       pillHover.listeners.forEach(function (listener) {
@@ -263,6 +266,9 @@ window.__ModuleLoader__.load({
         }
       })
     }
+
+    /** 气泡偏好的宽度；侧栏更窄时会自动收敛到侧栏宽度。 */
+    var PREFERRED_BUBBLE_WIDTH = 300
 
     /** 各 provider 的强调色（与 DSH 主题变量兼容，取不到就用兜底色）。 */
     var PROVIDER_ACCENT = {
@@ -1241,13 +1247,29 @@ window.__ModuleLoader__.load({
           setHovered(true)
           var node = event !== undefined ? event.currentTarget : undefined
           var rect
+          var bounds
           if (node !== undefined && typeof node.getBoundingClientRect === 'function') {
             var box = node.getBoundingClientRect()
             rect = { left: box.left, top: box.top, right: box.right, bottom: box.bottom, width: box.width }
+            // 侧栏有多宽？往上找一层有实际宽度的祖先量出来。
+            //
+            // 这一步是为了让气泡**不越出侧栏**：早先把宽度写死 296px，
+            // 在窄侧栏（实测约 290px）里直接压到对话区去了。
+            var ancestor = node.parentElement
+            for (var depth = 0; depth < 4 && ancestor !== null && ancestor !== undefined; depth++) {
+              if (typeof ancestor.getBoundingClientRect !== 'function') break
+              var outer = ancestor.getBoundingClientRect()
+              if (outer.width > 60) {
+                bounds = { left: outer.left, right: outer.right, width: outer.width }
+                break
+              }
+              ancestor = ancestor.parentElement
+            }
           }
           setPillHover({
             visible: true,
             rect: rect,
+            bounds: bounds,
             rows: rows.map(function (row) {
               var snapshot = row.credits
               var ratio
@@ -1404,9 +1426,17 @@ window.__ModuleLoader__.load({
         if (rect === undefined) return null
         var rows = pillHover.rows
 
-        var viewportWidth = typeof window.innerWidth === 'number' ? window.innerWidth : 1024
-        var width = 296
-        var left = Math.max(8, Math.min(rect.left, viewportWidth - width - 8))
+        // 先按侧栏实际宽度收敛：气泡绝不能越到对话区去。
+        // 量不到侧栏（没有 DOM 的近似环境）就退回视口。
+        var bounds = pillHover.bounds
+        var limitLeft = bounds === undefined ? 8 : Math.max(8, bounds.left + 8)
+        var limitRight = bounds === undefined
+          ? (typeof window.innerWidth === 'number' ? window.innerWidth : 1024) - 8
+          : bounds.right - 8
+
+        var available = Math.max(180, limitRight - limitLeft)
+        var width = Math.min(PREFERRED_BUBBLE_WIDTH, available)
+        var left = Math.min(Math.max(rect.left, limitLeft), Math.max(limitLeft, limitRight - width))
 
         return h(
           'div',

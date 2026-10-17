@@ -244,7 +244,13 @@ if (warned.some((text) => text.includes('675') || text.includes('99'))) {
 console.log('✓ 只有余额为 0 的账号亮警示色')
 
 button.props.onMouseEnter({
-  currentTarget: { getBoundingClientRect: () => ({ left: 12, top: 700, right: 150, bottom: 724, width: 138 }) },
+  currentTarget: {
+    getBoundingClientRect: () => ({ left: 12, top: 700, right: 150, bottom: 724, width: 138 }),
+    // 侧栏只有 289px 宽 —— 气泡必须收敛进这个范围，不能压到对话区。
+    parentElement: {
+      getBoundingClientRect: () => ({ left: 0, top: 0, right: 289, bottom: 800, width: 289 }),
+    },
+  },
 })
 
 // 关键断言：必须是**气泡自己**被要求重渲染。
@@ -267,6 +273,18 @@ for (let pass = 0; pass < 4; pass++) {
 if (bubbleTree === null || bubbleTree === undefined) throw new Error('气泡没有渲染')
 // 气泡里有可点的按钮，语义上是 dialog 而不是 tooltip。
 if (bubbleTree.props?.role !== 'dialog') throw new Error('气泡缺少 role=dialog')
+
+// 气泡必须整个待在侧栏里（侧栏 0–289，留 8px 边距 → 右边最多 281）。
+// 曾经的 bug：宽度写死 296px，在窄侧栏里直接压到对话区。
+const bubbleStyle = bubbleTree.props?.style ?? {}
+const bubbleLeft = Number(bubbleStyle.left)
+const bubbleWidth = Number(bubbleStyle.width)
+if (!(bubbleWidth > 0) || !(bubbleLeft >= 0)) throw new Error(`气泡定位异常：left=${String(bubbleStyle.left)} width=${String(bubbleStyle.width)}`)
+if (bubbleLeft + bubbleWidth > 289 - 8 + 0.5) {
+  throw new Error(`气泡越出侧栏：left=${bubbleLeft} + width=${bubbleWidth} = ${bubbleLeft + bubbleWidth} > 281`)
+}
+if (bubbleLeft < 8) throw new Error(`气泡贴边太近：left=${bubbleLeft}`)
+console.log(`✓ 气泡收敛在侧栏内（left=${bubbleLeft}, width=${bubbleWidth}）`)
 
 const text = []
 ;(function walk(node) {

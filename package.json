@@ -1,6 +1,6 @@
 {
   "name": "dsh-reverse-proxy-connect",
-  "version": "0.4.5",
+  "version": "0.4.6",
   "description": "把 WorkBuddy（国内版 / 国际版）与 Qoder（全球版 / 国内版）账号里的模型接入 DeepSeek Harness。Bring WorkBuddy and Qoder account models into DeepSeek Harness.",
   "type": "module",
   "main": "lib/index.js",

@@ -10,6 +10,8 @@
 | `qoder` | Qoder | 个人访问令牌（PAT，qoder.com.cn） | 视账号 | — |
 | `qoder-global` | Qoder Global | 个人访问令牌（PAT，qoder.com） | 视账号 | 0（Free） |
 
+> **0.4.6 重点**：气泡按侧栏实际宽度收敛（不再越到对话区），位置与边距都做了夹紧。
+>
 > **0.4.5 重点**：气泡可以点进去刷新了（延迟关闭 + 真正的「刷新额度」按钮）；
 > 修掉胶囊在侧栏里横向溢出（缺 `box-sizing: border-box`）。
 >
