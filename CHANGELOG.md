@@ -1,5 +1,60 @@
 # 更新记录
 
+## 0.9.0 — 2026-10-17
+
+### 重做：改成真正的浏览器登录
+
+0.8.0 做的是「拉起桌面 App 让你在里面登录」。方向错了 —— 那要靠 App 自己写文件，
+既慢又容易失效（App 已在运行、文件被占用、用户根本没装 App，都会失败）。
+
+参考插件里用的其实是 WorkBuddy 自己的**插件登录**端点，全程不需要 App：
+
+```
+POST /v2/plugin/auth/state?platform=ide
+  → { state, authUrl: "https://www.codebuddy.cn/login?platform=ide&state=…" }
+GET  /v2/plugin/auth/token?state=…
+  → { accessToken, refreshToken, expiresIn, domain }
+GET  /v2/plugin/login/account?state=…
+  → { uid, nickname, enterpriseId }
+```
+
+实测两个版本都能拿到登录地址：
+
+```
+workbuddy      → https://www.codebuddy.cn/login?platform=ide&state=a645a4cb…
+workbuddy-ai   → https://www.workbuddy.ai/login?platform=workbuddy-ai&state=605798ae…
+```
+
+所以流程改成：
+
+1. 点「浏览器登录新增账号」→ 申请 `state` + `authUrl`；
+2. **用系统浏览器打开该地址**（`cmd /c start "" <url>`，这样带 `&` 的 URL 不会被拆开）；
+3. 后台每秒轮询 `auth/token`（`11217` = 还没登录完，继续等）；
+4. 拿到令牌后读 `login/account` 拿昵称与 uid；
+5. 把令牌写进账号池并设为当前，立刻刷新模型与额度。
+
+### 令牌怎么存
+
+浏览器登录的令牌直接存进账号（`accounts[provider][n].token`），
+不再依赖任何本机文件；过期时用已有的 `refreshDesktopCredential` 续期，
+**续期成功后由宿主写回账号**，不会每次请求都重刷。
+
+界面上仍然只显示「是否已配置」，令牌不会回传给浏览器。
+
+### 界面
+
+「浏览器登录新增账号」按钮 + 实时状态（`正在申请登录地址…` / `已在浏览器打开…` /
+`登录成功：昵称`），旁边始终有一个「没有自动打开？点这里」的链接兜底，
+以及「取消」。
+
+### 测试
+
+`tests/browser-login.test.mjs`（6 条）：登录目标参数、token 归一化（绝对/相对/JWT 三种
+过期时间）、`openInBrowser` 的参数、`11217` 未就绪的轮询、以及完整的
+「申请 → 打开 → 换 token → 读账号」链路（桩掉 fetch 与 spawn，不会真的开浏览器）。
+
+旧的 `login-flow.js`（拉起 App 那套）已删除。
+
 ## 0.8.0 — 2026-10-17
 
 ### 新增：打开 App 登录即可添加账号

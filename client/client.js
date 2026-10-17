@@ -134,9 +134,10 @@ window.__ModuleLoader__.load({
       checkinInactive: '当前账号没有签到活动',
       checkinFailed: '签到失败：{reason}',
       checkinLastAt: '上次 {time}',
-      loginAdd: '打开 WorkBuddy 登录新增账号',
+      loginAdd: '浏览器登录新增账号',
       loginOpening: '正在打开…',
       loginCancel: '取消',
+      loginOpenManually: '没有自动打开？点这里',
     }
     var en = {
       nav: 'Reverse proxy',
@@ -235,9 +236,10 @@ window.__ModuleLoader__.load({
       checkinInactive: 'No check-in activity for this account',
       checkinFailed: 'Check-in failed: {reason}',
       checkinLastAt: 'Last run {time}',
-      loginAdd: 'Open WorkBuddy to add an account',
+      loginAdd: 'Add account via browser login',
       loginOpening: 'Opening…',
       loginCancel: 'Cancel',
+      loginOpenManually: 'Not opened? Click here',
     }
 
     function bind(t, key, vars) {
@@ -1193,6 +1195,14 @@ window.__ModuleLoader__.load({
                   : h('span', {
                       style: loginJob.phase === 'failed' ? S.hintWarn : S.hintTiny,
                     }, loginJob.message),
+                loginJob !== undefined && typeof loginJob.authUrl === 'string'
+                  ? h('a', {
+                      href: loginJob.authUrl,
+                      target: '_blank',
+                      rel: 'noreferrer',
+                      style: { fontSize: 11.5, color: 'var(--dsw-alias-label-link, var(--dsw-alias-state-business-primary, #2f6fed))' },
+                    }, bind(t, 'loginOpenManually'))
+                  : null,
                 loginJob !== undefined && (loginJob.phase === 'waiting' || loginJob.phase === 'starting')
                   ? h('button', {
                       type: 'button',
