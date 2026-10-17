@@ -33,6 +33,9 @@ window.__ModuleLoader__.load({
     /** 侧栏底部那一排（宿主 `dsh-client-ui-sidebar` 声明）。 */
     var SIDEBAR_FOOTER_SLOT = 'sidebar.footer.action'
 
+    /** 页面级浮层（根作用域），用来画悬停气泡，避开侧栏的裁剪。 */
+    var OVERLAY_SLOT = 'shell.overlay'
+
     // ── 文案 ────────────────────────────────────────────────────────
     var zh = {
       nav: '反代连接器',
@@ -190,6 +193,63 @@ window.__ModuleLoader__.load({
       if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
       var rounded = Math.round(value * 10) / 10
       return String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+    }
+
+    /**
+     * 侧栏小卡的悬停气泡状态。
+     *
+     * 为什么用模块级 store + `shell.overlay`，而不是在小卡里直接渲染一个绝对定位的面板：
+     * 侧栏在收起时会做位移与裁剪（`overflow: hidden`），`absolute` 面板会被切掉；
+     * `fixed` 又会被祖先的 transform 改变定位基准。宿主的 overlay 是页面级根作用域，
+     * 放那里才稳。这也是本机 dsh-balance-pill 处理同类问题的做法。
+     *
+     * 状态只存「已格式化的行」，overlay 组件不依赖小卡的闭包。
+     */
+    var pillHover = {
+      visible: false,
+      rect: undefined,
+      rows: [],
+      hint: '',
+      listeners: new Set(),
+    }
+
+    /** 更新气泡状态并通知订阅者。 */
+    function setPillHover(next) {
+      pillHover.visible = next.visible === true
+      pillHover.rect = next.rect
+      pillHover.rows = next.rows === undefined ? [] : next.rows
+      pillHover.hint = next.hint === undefined ? '' : next.hint
+      pillHover.listeners.forEach(function (listener) {
+        try {
+          listener()
+        } catch (failure) {
+          console.error('[dsh-reverse-proxy-connect] 气泡订阅者报错', failure)
+        }
+      })
+    }
+
+    /** 各 provider 的强调色（与 DSH 主题变量兼容，取不到就用兜底色）。 */
+    var PROVIDER_ACCENT = {
+      workbuddy: '#2f6fed',
+      'workbuddy-ai': '#7a5af8',
+      qoder: '#12a594',
+      'qoder-global': '#0f9d8f',
+    }
+
+    /** 短名，给小卡用。 */
+    function shortProviderName(provider) {
+      if (provider === 'workbuddy') return 'WB'
+      if (provider === 'workbuddy-ai') return 'WBAI'
+      if (provider === 'qoder') return 'QD'
+      if (provider === 'qoder-global') return 'QDG'
+      return provider.slice(0, 4).toUpperCase()
+    }
+
+    /** 紧凑数字：上万折成 k。 */
+    function compactNumber(value) {
+      if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
+      if (value >= 10000) return String(Math.round(value / 100) / 10) + 'k'
+      return String(Math.round(value * 10) / 10)
     }
 
     /**
@@ -987,9 +1047,9 @@ window.__ModuleLoader__.load({
        * 挂 `sidebar.footer.action`（宿主侧栏底部那一排），不用开设置就能看到
        * 各账号还剩多少。点击立刻重读一次额度。
        *
-       * 自带一个 60 秒轮询：与设置卡片的 20 秒轮询彼此独立，但服务端那侧现在
-       * 是零成本的（凭证与额度都有缓存），重复请求无所谓；这样就不必把两张卡片
-       * 耦合成一个共享 store —— 那个重构的风险远大于这点收益。
+       * 视觉上刻意做成「分段胶囊」：每个账号一枚小圆点 + 短名 + 数字，
+       * 而不是一整行纯文本 —— 侧栏底部空间窄，纯文本读起来是一团。
+       * 数字用主文本色加粗，短名用弱化小字，扫一眼先看到钱再看到是谁。
        */
       var CreditsPill = function (props) {
         var useState = React.useState
@@ -1001,6 +1061,9 @@ window.__ModuleLoader__.load({
         var busyState = useState(false)
         var busy = busyState[0]
         var setBusy = busyState[1]
+        var hoverState = useState(false)
+        var hovered = hoverState[0]
+        var setHovered = hoverState[1]
 
         useEffect(function () {
           var disposed = false
@@ -1018,6 +1081,13 @@ window.__ModuleLoader__.load({
           return function () {
             disposed = true
             clearInterval(timer)
+          }
+        }, [])
+
+        // 卸载时把气泡收掉，否则会留在屏幕上没人管。
+        useEffect(function () {
+          return function () {
+            setPillHover({ visible: false, rows: [], hint: '' })
           }
         }, [])
 
@@ -1047,52 +1117,262 @@ window.__ModuleLoader__.load({
         if (rows.length === 0) return null
 
         var wide = props.wide !== false
-        var shortName = function (provider) {
-          if (provider === 'workbuddy') return 'WB'
-          if (provider === 'workbuddy-ai') return 'WBAI'
-          if (provider === 'qoder') return 'QD'
-          return 'QDG'
-        }
-        var compact = function (value) {
-          if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
-          if (value >= 10000) return String(Math.round(value / 1000)) + 'k'
-          return String(Math.round(value * 10) / 10)
+
+        /**
+         * 鼠标进/出：把锚点矩形与格式化好的行放进模块级 store，
+         * 由 overlay 里的组件画气泡（侧栏自身会裁剪，画在这里会被切掉）。
+         */
+        var showBubble = function (event) {
+          setHovered(true)
+          var node = event !== undefined ? event.currentTarget : undefined
+          var rect
+          if (node !== undefined && typeof node.getBoundingClientRect === 'function') {
+            var box = node.getBoundingClientRect()
+            rect = { left: box.left, top: box.top, right: box.right, bottom: box.bottom, width: box.width }
+          }
+          setPillHover({
+            visible: true,
+            rect: rect,
+            rows: rows.map(function (row) {
+              var snapshot = row.credits
+              var ratio
+              if (snapshot.unlimited === true) ratio = undefined
+              else if (typeof snapshot.total === 'number' && snapshot.total > 0) {
+                ratio = Math.max(0, Math.min(1, snapshot.remain / snapshot.total))
+              }
+              return {
+                name: row.entry.displayName,
+                provider: row.entry.provider,
+                accent: PROVIDER_ACCENT[row.entry.provider],
+                value: formatCreditsText(snapshot, t),
+                remain: snapshot.remain,
+                total: snapshot.total,
+                ratio: ratio,
+                warn: snapshot.unlimited !== true && (snapshot.remain <= 0 || snapshot.exceeded === true),
+                note: snapshot.planName === undefined ? '' : snapshot.planName,
+                reset: snapshot.resetAtMs > 0 ? formatTime(snapshot.resetAtMs) : '',
+              }
+            }),
+            hint: bind(t, 'pillHint'),
+          })
         }
 
-        var label = rows
-          .map(function (row) {
-            return shortName(row.entry.provider) + ' ' + (row.credits.unlimited === true ? '∞' : compact(row.credits.remain))
-          })
-          .join(' · ')
+        var hideBubble = function () {
+          setHovered(false)
+          setPillHover({ visible: false, rows: [], hint: '' })
+        }
+
+        var segments = rows.map(function (row, position) {
+          var snapshot = row.credits
+          var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
+          var warn = snapshot.unlimited !== true && (snapshot.remain <= 0 || snapshot.exceeded === true)
+          return h(
+            'span',
+            {
+              key: row.entry.provider,
+              style: { display: 'inline-flex', alignItems: 'baseline', gap: 4 },
+            },
+            position === 0 || wide
+              ? h('span', {
+                  style: {
+                    width: 5,
+                    height: 5,
+                    borderRadius: 999,
+                    alignSelf: 'center',
+                    background: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent,
+                    opacity: 0.9,
+                    flex: '0 0 auto',
+                  },
+                })
+              : null,
+            h('span', { style: { fontSize: 9.5, letterSpacing: '.02em', opacity: 0.62 } }, shortProviderName(row.entry.provider)),
+            h(
+              'span',
+              {
+                style: {
+                  fontWeight: 600,
+                  fontSize: 11,
+                  color: warn
+                    ? 'var(--dsw-alias-state-warning-primary, #b26b00)'
+                    : 'var(--dsw-alias-label-primary, inherit)',
+                },
+              },
+              snapshot.unlimited === true ? '∞' : compactNumber(snapshot.remain),
+            ),
+          )
+        })
+
+        var visible = wide ? segments : segments.slice(0, 1)
 
         return h(
           'button',
           {
             type: 'button',
             onClick: refresh,
-            title: rows
+            onMouseEnter: showBubble,
+            onMouseLeave: hideBubble,
+            onFocus: showBubble,
+            onBlur: hideBubble,
+            'aria-label': rows
               .map(function (row) {
-                return row.entry.displayName + '：' + formatCreditsText(row.credits, t)
+                return row.entry.displayName + ' ' + formatCreditsText(row.credits, t)
               })
-              .join('\n') + '\n\n' + bind(t, 'pillHint'),
+              .join('，'),
             style: {
               font: 'inherit',
-              fontSize: wide ? 11 : 10,
-              lineHeight: '16px',
-              padding: wide ? '2px 8px' : '2px 4px',
-              margin: '0 0 4px',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 8,
               maxWidth: '100%',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
+              margin: '0 0 4px',
+              padding: wide ? '3px 9px' : '3px 6px',
               cursor: 'pointer',
               borderRadius: 999,
-              border: '0.5px solid var(--dsw-alias-border-l2)',
-              background: busy ? 'var(--dsw-alias-bg-l2, rgba(0,0,0,.04))' : 'transparent',
+              border: '0.5px solid ' + (hovered ? 'var(--dsw-alias-border-l3, var(--dsw-alias-border-l2))' : 'var(--dsw-alias-border-l2)'),
+              background: hovered
+                ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))'
+                : 'var(--dsw-alias-bg-l1, transparent)',
+              boxShadow: hovered ? '0 1px 4px rgba(0,0,0,.10)' : 'none',
               color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-tertiary))',
+              transition: 'background .12s ease, border-color .12s ease, box-shadow .12s ease',
+              opacity: busy ? 0.72 : 1,
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
             },
           },
-          wide ? label : label.split(' · ')[0],
+          visible,
+        )
+      }
+
+      /**
+       * 气泡本体，挂在 `shell.overlay`（页面级根作用域）。
+       *
+       * 用 `fixed` 定位并贴着触发它的胶囊向上展开 —— 侧栏在底部，向下会出屏。
+       * 没有 `window` 时（比如单测/SSR）直接不渲染。
+       */
+      var CreditsBubble = function () {
+        var useState = React.useState
+        var useEffect = React.useEffect
+
+        var versionState = useState(0)
+        var setVersion = versionState[0]
+        var bump = setVersion[1]
+
+        useEffect(function () {
+          var listener = function () { bump(function (value) { return value + 1 }) }
+          pillHover.listeners.add(listener)
+          return function () {
+            pillHover.listeners.delete(listener)
+          }
+        }, [])
+
+        if (pillHover.visible !== true) return null
+        if (typeof window === 'undefined' || typeof document === 'undefined') return null
+        var rect = pillHover.rect
+        if (rect === undefined) return null
+        var rows = pillHover.rows
+
+        var viewportWidth = typeof window.innerWidth === 'number' ? window.innerWidth : 1024
+        var width = 268
+        var left = Math.max(8, Math.min(rect.left, viewportWidth - width - 8))
+
+        return h(
+          'div',
+          {
+            role: 'tooltip',
+            style: {
+              position: 'fixed',
+              left: left,
+              // 向上展开：胶囊底边离视口底部还有多少，再抬 8px。
+              bottom: Math.max(8, (window.innerHeight || 0) - rect.top + 8),
+              width: width,
+              zIndex: 2147483000,
+              pointerEvents: 'none',
+              borderRadius: 10,
+              padding: '10px 12px',
+              background: 'var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-l1, #fff))',
+              border: '0.5px solid var(--dsw-alias-border-l2)',
+              boxShadow: '0 8px 24px rgba(0,0,0,.18), 0 2px 6px rgba(0,0,0,.10)',
+              color: 'var(--dsw-alias-label-primary)',
+              fontSize: 12,
+              lineHeight: '18px',
+            },
+          },
+          h('div', {
+            style: {
+              fontSize: 11,
+              opacity: 0.6,
+              marginBottom: 6,
+              letterSpacing: '.02em',
+            },
+          }, bind(t, 'credits')),
+          rows.map(function (row) {
+            return h(
+              'div',
+              { key: row.provider, style: { marginBottom: 8 } },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'baseline', gap: 6 } },
+                h('span', {
+                  style: {
+                    width: 6,
+                    height: 6,
+                    borderRadius: 999,
+                    background: row.warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : row.accent,
+                    alignSelf: 'center',
+                    flex: '0 0 auto',
+                  },
+                }),
+                h('span', { style: { fontSize: 11, opacity: 0.7 } }, row.name),
+                h('span', { style: { flex: 1 } }),
+                h('span', {
+                  style: {
+                    fontWeight: 600,
+                    fontVariantNumeric: 'tabular-nums',
+                    color: row.warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : 'var(--dsw-alias-label-primary)',
+                  },
+                }, row.value),
+              ),
+              row.ratio === undefined
+                ? null
+                : h(
+                    'div',
+                    {
+                      style: {
+                        marginTop: 4,
+                        height: 3,
+                        borderRadius: 999,
+                        background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.16))',
+                        overflow: 'hidden',
+                      },
+                    },
+                    h('div', {
+                      style: {
+                        width: Math.round(row.ratio * 100) + '%',
+                        height: '100%',
+                        borderRadius: 999,
+                        background: row.warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : row.accent,
+                        opacity: 0.85,
+                      },
+                    }),
+                  ),
+              row.note === '' && row.reset === ''
+                ? null
+                : h('div', { style: { fontSize: 10.5, opacity: 0.55, marginTop: 2 } },
+                    [row.note, row.reset === '' ? '' : bind(t, 'creditsReset') + ' ' + row.reset]
+                      .filter(function (part) { return part !== '' })
+                      .join(' · ')),
+            )
+          }),
+          h('div', {
+            style: {
+              fontSize: 10.5,
+              opacity: 0.5,
+              borderTop: '0.5px solid var(--dsw-alias-border-l2)',
+              paddingTop: 6,
+              marginTop: 2,
+            },
+          }, pillHover.hint),
         )
       }
 
@@ -1106,6 +1386,20 @@ window.__ModuleLoader__.load({
               inject: function () { return { t: t } },
             },
             CreditsPill,
+          )
+        })
+      }
+
+      var attachCreditsBubble = function () {
+        ctx.slots.inject(OVERLAY_SLOT, function () {
+          return ctx.slots.register(
+            {
+              name: OVERLAY_SLOT,
+              id: 'reverse-proxy-credits-bubble',
+              order: 90,
+              inject: function () { return { t: t } },
+            },
+            CreditsBubble,
           )
         })
       }
@@ -1124,6 +1418,11 @@ window.__ModuleLoader__.load({
         attachSidebarPill()
       } catch (failure) {
         console.error('[dsh-reverse-proxy-connect] 挂载侧栏积分卡失败', failure)
+      }
+      try {
+        attachCreditsBubble()
+      } catch (failure) {
+        console.error('[dsh-reverse-proxy-connect] 挂载积分气泡失败', failure)
       }
     }
 
