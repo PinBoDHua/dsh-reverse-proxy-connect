@@ -178,6 +178,17 @@ test('宿主入口：注册四个 provider，status v6 与诊断接口可用', a
     assert.equal(light.body.providers[0].models, undefined, '轻量状态不带模型清单')
     assert.equal(light.body.providers[0].usage.today.requests, 0)
     assert.ok(Array.isArray(light.body.stats.daily), '轻量状态带最近 14 天用量')
+    // 侧栏小卡只读「当前账号」的 label；账号级额度/用量/冷却全由卡片使用。
+    // 轻量状态里不能带这些字段（占整份响应三分之一以上），但完整状态必须保留。
+    const lightAccount = light.body.providers[0].accounts[0]
+    assert.equal(typeof lightAccount.label, 'string', '轻量账号仍要有 label')
+    assert.equal(typeof lightAccount.active, 'boolean', '轻量账号仍要有 active')
+    assert.equal(lightAccount.credits, undefined, '轻量状态不该带账号级额度')
+    assert.equal(lightAccount.usage, undefined, '轻量状态不该带账号级用量')
+    assert.equal(lightAccount.lastTest, undefined, '轻量状态不该带账号测试结果')
+    const fullAccount = full.body.providers[0].accounts[0]
+    assert.ok(fullAccount.credits !== undefined, '完整状态必须带账号级额度（卡片要用）')
+    assert.ok('cooldownUntil' in fullAccount, '完整状态必须带冷却时间')
 
     const diagnostics = await get(handlers[DIAGNOSTICS_PATH], DIAGNOSTICS_PATH)
     assert.equal(diagnostics.status, 200)
@@ -348,6 +359,127 @@ test('手动「检测账号可用模型」不会被正在跑的后台探测静�
     // 放行后必须补跑一轮：总请求数应当 ≥ 2。
     for (let index = 0; index < 100 && chatRequests < 2; index++) await new Promise((resolve) => setTimeout(resolve, 10))
     assert.ok(chatRequests >= 2, `手动探测应当补跑一轮，实际只发了 ${String(chatRequests)} 个请求`)
+  } finally {
+    globalThis.fetch = originalFetch
+    for (const dispose of disposers) {
+      try {
+        if (typeof dispose === 'function') dispose()
+      } catch {
+        /* 忽略清理失败 */
+      }
+    }
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('手动「立即签到」不会被正在跑的自动签到静默跳过', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-checkin-race-'))
+  const dataDir = join(root, DATA_DIR_NAME)
+  mkdirSync(dataDir, { recursive: true })
+  writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({
+    version: 2,
+    providers: {
+      workbuddy: { enabled: true },
+      'workbuddy-ai': { enabled: false },
+      qoder: { enabled: false },
+      'qoder-global': { enabled: false },
+    },
+    accounts: {
+      workbuddy: [{
+        id: 'a',
+        label: 'A',
+        enabled: true,
+        token: {
+          accessToken: 'tok', refreshToken: '', expiresAtMs: Date.now() + 3600_000,
+          refreshExpiresAtMs: 0, domain: 'codebuddy.cn', uid: 'u', enterpriseId: '',
+        },
+      }],
+    },
+    activeAccount: { workbuddy: 'a' },
+    checkin: { enabled: true, lastRunAt: 0, completedOn: {}, accountIds: {}, lastAttemptAt: {}, results: {} },
+  }))
+
+  const handlers = {}
+  const disposers = []
+  const originalFetch = globalThis.fetch
+  let checkinRequests = 0
+  let releaseFirst
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve })
+
+  globalThis.fetch = async (url) => {
+    const text = String(url)
+    if (text.includes('/checkin-activity-status')) {
+      checkinRequests += 1
+      if (checkinRequests === 1) await firstGate
+      return new Response(JSON.stringify({ code: 0, data: { active: false } }), { status: 200 })
+    }
+    if (text.includes('/v3/config')) {
+      return new Response(JSON.stringify({
+        code: 0,
+        data: { agents: [{ name: 'cli', models: ['auto'] }], models: [{ id: 'auto', maxInputTokens: 8000, maxOutputTokens: 1000 }] },
+      }), { status: 200 })
+    }
+    if (text.includes('/meter/get-user-resource')) {
+      return new Response(JSON.stringify({ code: 0, data: { Response: { Data: { Accounts: [] } } } }), { status: 200 })
+    }
+    return new Response('{}', { status: 200 })
+  }
+
+  const ctx = {
+    get(name) {
+      if (name === 'profileContext') return { dir: root }
+      return undefined
+    },
+    inject(names, callback) {
+      if (names.includes('webServer')) {
+        callback({
+          webServer: fakeWebServer(handlers),
+          effect(fn) {
+            const dispose = fn()
+            disposers.push(dispose)
+            return dispose
+          },
+        })
+      }
+    },
+    effect(fn) {
+      const dispose = fn()
+      disposers.push(dispose)
+      return dispose
+    },
+    llm: { registerAdapter: () => () => {} },
+    emit() {},
+    logger: { info() {}, warn() {} },
+  }
+
+  try {
+    apply(ctx, {})
+    // 等自动那轮签到真的发出请求（并被 gate 卡住）。
+    for (let index = 0; index < 150 && checkinRequests === 0; index++) await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.equal(checkinRequests, 1, '自动签到应当已经发出一个请求')
+
+    const full = await get(handlers[STATUS_PATH], STATUS_PATH)
+    const actionRes = fakeResponse()
+    const req = new EventEmitter()
+    req.method = 'POST'
+    req.url = ACTION_PATH
+    req.headers = { host: '127.0.0.1:65466', 'x-rpc-key': full.body.key }
+    process.nextTick(() => {
+      req.emit('data', Buffer.from(JSON.stringify({ action: 'checkin', provider: 'workbuddy' })))
+      req.emit('end')
+    })
+    handlers[ACTION_PATH](req, actionRes)
+
+    // 手动请求此刻应当还在等自动那一轮，而不是立刻返回空结果。
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    assert.equal(actionRes.status, 0, '手动签到不能在前一轮还没结束时提前返回')
+
+    releaseFirst()
+    await actionRes.done
+    assert.equal(actionRes.status, 200)
+    // 放行后必须补跑一轮：总签到请求数应当 ≥ 2。
+    for (let index = 0; index < 100 && checkinRequests < 2; index++) await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.ok(checkinRequests >= 2, `手动签到应当补跑一轮，实际只发了 ${String(checkinRequests)} 个请求`)
   } finally {
     globalThis.fetch = originalFetch
     for (const dispose of disposers) {
