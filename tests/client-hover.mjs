@@ -80,6 +80,7 @@ const React = {
 // ---------- 假的 /status ----------
 const STATUS = {
   version: 3,
+  plugin: { name: 'dsh-reverse-proxy-connect', version: '9.9.9', host: 'in-process' },
   key: 'k',
   providers: [
     {
@@ -158,8 +159,32 @@ captured.apply(ctx)
 
 const pill = registered.find((entry) => entry.options.name === 'sidebar.footer.action')?.component
 const bubble = registered.find((entry) => entry.options.name === 'shell.overlay')?.component
+const card = registered.find((entry) => entry.options.name === 'plugin-settings.item')?.component
 if (pill === undefined) throw new Error('没有注册 sidebar.footer.action')
 if (bubble === undefined) throw new Error('没有注册 shell.overlay')
+if (card === undefined) throw new Error('没有注册 plugin-settings.item')
+
+// ---------- 设置卡片：版本号必须显示 ----------
+hookStates = []
+let cardTree
+for (let pass = 0; pass < 6; pass++) {
+  beginRender()
+  cardTree = card({ t: (key) => key })
+  for (const effect of effects) effect()
+  await new Promise((resolve) => setTimeout(resolve, 5))
+  if (!rerenderRequested) break
+}
+const cardText = []
+;(function walkCard(node) {
+  if (node === null || node === undefined) return
+  if (typeof node === 'string' || typeof node === 'number') { cardText.push(String(node)); return }
+  if (Array.isArray(node)) { node.forEach(walkCard); return }
+  if (typeof node === 'object') walkCard(node.children)
+})(cardTree)
+if (!cardText.includes('v9.9.9')) {
+  throw new Error(`卡片没有显示版本号，渲染到的是：${JSON.stringify(cardText.slice(0, 8))}`)
+}
+console.log('✓ 卡片显示版本号 v9.9.9')
 
 // ---------- 渲染胶囊 ----------
 hookStates = []
@@ -192,6 +217,31 @@ let button
   if (typeof node === 'object') find(node.children)
 })(pillTree)
 if (button === undefined) throw new Error('胶囊上没有 onMouseEnter')
+
+// 警示色只该落在「真低」的那个账号上：Qoder Global 是 0，
+// WorkBuddy 675/1200、WorkBuddy AI 99/100 都不该变警示色。
+const warned = []
+;(function findWarn(node) {
+  if (node === null || node === undefined) return
+  if (Array.isArray(node)) { node.forEach(findWarn); return }
+  if (typeof node !== 'object') return
+  const color = node.props?.style?.color
+  if (typeof color === 'string' && color.includes('state-warning')) {
+    const text = []
+    ;(function collect(child) {
+      if (typeof child === 'string' || typeof child === 'number') { text.push(String(child)); return }
+      if (Array.isArray(child)) { child.forEach(collect); return }
+      if (child && typeof child === 'object') collect(child.children)
+    })(node.children)
+    warned.push(text.join(''))
+  }
+  findWarn(node.children)
+})(pillTree)
+if (!warned.includes('0')) throw new Error(`余额 0 的账号没有变警示色，命中：${JSON.stringify(warned)}`)
+if (warned.some((text) => text.includes('675') || text.includes('99'))) {
+  throw new Error(`不该警示的账号变红了：${JSON.stringify(warned)}`)
+}
+console.log('✓ 只有余额为 0 的账号亮警示色')
 
 button.props.onMouseEnter({
   currentTarget: { getBoundingClientRect: () => ({ left: 12, top: 700, right: 150, bottom: 724, width: 138 }) },
@@ -233,7 +283,10 @@ const bars = []
 ;(function countBars(node) {
   if (node === null || node === undefined) return
   if (Array.isArray(node)) { node.forEach(countBars); return }
-  if (typeof node === 'object' && node.props?.style?.height === 3) bars.push(node)
+  // 进度条：细长、带圆角与半透明底。按「厚度在 2–6px」认，别写死具体值 ——
+  // 调视觉时（3px → 4px）不该让测试无故变红。
+  const style = node.props?.style
+  if (typeof node === 'object' && style && typeof style.height === 'number' && style.height >= 2 && style.height <= 6 && style.borderRadius === 999) bars.push(node)
   if (typeof node === 'object') countBars(node.children)
 })(bubbleTree)
 if (bars.length < 2) throw new Error(`额度进度条数量不对：${bars.length}`)

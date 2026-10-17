@@ -252,6 +252,28 @@ window.__ModuleLoader__.load({
       return String(Math.round(value * 10) / 10)
     }
 
+    /** 低于这个比例就提前提醒，别等到真的见底。 */
+    var LOW_CREDITS_RATIO = 0.15
+
+    /**
+     * 这份额度是否该亮警示色。
+     *
+     * 三个条件任一成立：已用尽、上游标记超额、或剩余不足 15%。
+     * 第三条是刻意的 —— 等到 0 才变色已经太晚了。
+     *
+     * @param credits - 额度快照。
+     * @returns 是否警示。
+     */
+    function isCreditsLow(credits) {
+      if (credits.unlimited === true) return false
+      if (credits.exceeded === true) return true
+      if (typeof credits.remain === 'number' && credits.remain <= 0) return true
+      if (typeof credits.total === 'number' && credits.total > 0 && typeof credits.remain === 'number') {
+        return credits.remain / credits.total < LOW_CREDITS_RATIO
+      }
+      return false
+    }
+
     /**
      * 一份额度快照的人话描述。
      *
@@ -283,22 +305,30 @@ window.__ModuleLoader__.load({
         background: 'var(--dsw-alias-bg-l1, transparent)',
       },
       header: { display: 'flex', alignItems: 'center', gap: 8 },
-      title: { margin: 0, fontSize: 14, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' },
+      title: { margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' },
       badge: {
-        fontSize: 11,
-        lineHeight: '16px',
+        fontSize: 11.5,
+        lineHeight: '17px',
         padding: '0 6px',
         borderRadius: 999,
         border: '0.5px solid var(--dsw-alias-border-l2)',
         color: 'var(--dsw-alias-label-tertiary)',
       },
       badgeWarn: {
-        fontSize: 11,
-        lineHeight: '16px',
+        fontSize: 11.5,
+        lineHeight: '17px',
         padding: '0 6px',
         borderRadius: 999,
         border: '0.5px solid var(--dsw-alias-state-warning-primary, #b26b00)',
         color: 'var(--dsw-alias-state-warning-primary, #b26b00)',
+      },
+      version: {
+        marginLeft: 'auto',
+        fontSize: 11.5,
+        fontVariantNumeric: 'tabular-nums',
+        color: 'var(--dsw-alias-label-tertiary)',
+        opacity: 0.8,
+        userSelect: 'text',
       },
       creditsValue: {
         fontSize: 13,
@@ -307,12 +337,12 @@ window.__ModuleLoader__.load({
       },
       row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
       grow: { flex: 1, minWidth: 0 },
-      hint: { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-label-tertiary)' },
-      hintWarn: { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-state-warning-primary, #b26b00)' },
-      hintError: { margin: 0, fontSize: 12, lineHeight: '18px', color: 'var(--dsw-alias-state-error-primary, #b3261e)' },
+      hint: { margin: 0, fontSize: 12.5, lineHeight: '19px', color: 'var(--dsw-alias-label-tertiary)' },
+      hintWarn: { margin: 0, fontSize: 12.5, lineHeight: '19px', color: 'var(--dsw-alias-state-warning-primary, #b26b00)' },
+      hintError: { margin: 0, fontSize: 12.5, lineHeight: '19px', color: 'var(--dsw-alias-state-error-primary, #b3261e)' },
       button: {
         font: 'inherit',
-        fontSize: 12,
+        fontSize: 12.5,
         padding: '3px 10px',
         borderRadius: 6,
         cursor: 'pointer',
@@ -322,7 +352,7 @@ window.__ModuleLoader__.load({
       },
       buttonPrimary: {
         font: 'inherit',
-        fontSize: 12,
+        fontSize: 12.5,
         padding: '3px 10px',
         borderRadius: 6,
         cursor: 'pointer',
@@ -332,7 +362,7 @@ window.__ModuleLoader__.load({
       },
       input: {
         font: 'inherit',
-        fontSize: 12,
+        fontSize: 12.5,
         padding: '4px 8px',
         borderRadius: 6,
         border: '0.5px solid var(--dsw-alias-border-l2)',
@@ -345,15 +375,15 @@ window.__ModuleLoader__.load({
         display: 'flex',
         flexDirection: 'column',
         gap: 2,
-        maxHeight: 260,
+        maxHeight: 280,
         overflowY: 'auto',
         margin: 0,
         padding: 0,
         listStyle: 'none',
       },
-      modelRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, lineHeight: '20px' },
+      modelRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, lineHeight: '21px' },
       modelName: { color: 'var(--dsw-alias-label-primary)' },
-      modelMeta: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 11 },
+      modelMeta: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 11.5 },
       divider: { height: 0, borderTop: '0.5px solid var(--dsw-alias-border-l2)', margin: '2px 0' },
       tabs: { display: 'flex', gap: 14, borderBottom: '0.5px solid var(--dsw-alias-border-l2)' },
       pre: {
@@ -361,8 +391,8 @@ window.__ModuleLoader__.load({
         padding: 8,
         borderRadius: 6,
         background: 'var(--dsw-alias-bg-l2, rgba(0,0,0,.04))',
-        fontSize: 11,
-        lineHeight: '16px',
+        fontSize: 11.5,
+        lineHeight: '17px',
         maxHeight: 220,
         overflow: 'auto',
         whiteSpace: 'pre-wrap',
@@ -681,7 +711,10 @@ window.__ModuleLoader__.load({
       })
 
       var sections = [
-        h('div', { key: 'head', style: S.header }, h('h3', { style: S.title }, bind(t, 'title'))),
+        h('div', { key: 'head', style: S.header },
+          h('h3', { style: S.title }, bind(t, 'title')),
+          // 版本号：排查问题时第一件要问的就是「你装的是哪一版」。
+          h('span', { style: S.version }, 'v' + (status.plugin && status.plugin.version ? status.plugin.version : '?'))),
         h('p', { key: 'intro', style: S.hint }, bind(t, 'intro')),
         h('div', { key: 'row', style: S.row },
           h('button', { type: 'button', style: S.button, onClick: refresh, disabled: busy === 'refresh' },
@@ -1064,6 +1097,9 @@ window.__ModuleLoader__.load({
         var hoverState = useState(false)
         var hovered = hoverState[0]
         var setHovered = hoverState[1]
+        var failedState = useState(false)
+        var failed = failedState[0]
+        var setFailed = failedState[1]
 
         useEffect(function () {
           var disposed = false
@@ -1095,13 +1131,18 @@ window.__ModuleLoader__.load({
           if (event !== undefined && event.preventDefault !== undefined) event.preventDefault()
           if (status === undefined || busy === true) return
           setBusy(true)
+          setFailed(false)
           postJson(ACTION_PATH, { action: 'credits' }, status.key)
             .then(function (document) {
               setStatus(document)
               setBusy(false)
             })
             .catch(function () {
+              // 静默失败最气人：点了没反应，也不知道是失败还是没变化。
+              // 用描边闪一下提示，1.6 秒后自动复原。
               setBusy(false)
+              setFailed(true)
+              setTimeout(function () { setFailed(false) }, 1600)
             })
         }
 
@@ -1148,7 +1189,7 @@ window.__ModuleLoader__.load({
                 remain: snapshot.remain,
                 total: snapshot.total,
                 ratio: ratio,
-                warn: snapshot.unlimited !== true && (snapshot.remain <= 0 || snapshot.exceeded === true),
+                warn: isCreditsLow(snapshot),
                 note: snapshot.planName === undefined ? '' : snapshot.planName,
                 reset: snapshot.resetAtMs > 0 ? formatTime(snapshot.resetAtMs) : '',
               }
@@ -1165,7 +1206,7 @@ window.__ModuleLoader__.load({
         var segments = rows.map(function (row, position) {
           var snapshot = row.credits
           var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
-          var warn = snapshot.unlimited !== true && (snapshot.remain <= 0 || snapshot.exceeded === true)
+          var warn = isCreditsLow(snapshot)
           return h(
             'span',
             {
@@ -1175,8 +1216,8 @@ window.__ModuleLoader__.load({
             position === 0 || wide
               ? h('span', {
                   style: {
-                    width: 5,
-                    height: 5,
+                    width: 6,
+                    height: 6,
                     borderRadius: 999,
                     alignSelf: 'center',
                     background: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent,
@@ -1185,13 +1226,13 @@ window.__ModuleLoader__.load({
                   },
                 })
               : null,
-            h('span', { style: { fontSize: 9.5, letterSpacing: '.02em', opacity: 0.62 } }, shortProviderName(row.entry.provider)),
+            h('span', { style: { fontSize: 11, letterSpacing: '.02em', opacity: 0.62 } }, shortProviderName(row.entry.provider)),
             h(
               'span',
               {
                 style: {
                   fontWeight: 600,
-                  fontSize: 11,
+                  fontSize: 13,
                   color: warn
                     ? 'var(--dsw-alias-state-warning-primary, #b26b00)'
                     : 'var(--dsw-alias-label-primary, inherit)',
@@ -1222,13 +1263,20 @@ window.__ModuleLoader__.load({
               font: 'inherit',
               display: 'inline-flex',
               alignItems: 'center',
-              gap: 8,
+              gap: 10,
               maxWidth: '100%',
               margin: '0 0 4px',
-              padding: wide ? '3px 9px' : '3px 6px',
+              padding: wide ? '4px 11px' : '4px 7px',
+              lineHeight: '18px',
               cursor: 'pointer',
               borderRadius: 999,
-              border: '0.5px solid ' + (hovered ? 'var(--dsw-alias-border-l3, var(--dsw-alias-border-l2))' : 'var(--dsw-alias-border-l2)'),
+              border: '0.5px solid ' + (
+                failed
+                  ? 'var(--dsw-alias-state-error-primary, #b3261e)'
+                  : hovered
+                    ? 'var(--dsw-alias-border-l3, var(--dsw-alias-border-l2))'
+                    : 'var(--dsw-alias-border-l2)'
+              ),
               background: hovered
                 ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))'
                 : 'var(--dsw-alias-bg-l1, transparent)',
@@ -1273,7 +1321,7 @@ window.__ModuleLoader__.load({
         var rows = pillHover.rows
 
         var viewportWidth = typeof window.innerWidth === 'number' ? window.innerWidth : 1024
-        var width = 268
+        var width = 296
         var left = Math.max(8, Math.min(rect.left, viewportWidth - width - 8))
 
         return h(
@@ -1289,45 +1337,46 @@ window.__ModuleLoader__.load({
               zIndex: 2147483000,
               pointerEvents: 'none',
               borderRadius: 10,
-              padding: '10px 12px',
+              padding: '12px 14px',
               background: 'var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-l1, #fff))',
               border: '0.5px solid var(--dsw-alias-border-l2)',
               boxShadow: '0 8px 24px rgba(0,0,0,.18), 0 2px 6px rgba(0,0,0,.10)',
               color: 'var(--dsw-alias-label-primary)',
-              fontSize: 12,
-              lineHeight: '18px',
+              fontSize: 13,
+              lineHeight: '20px',
             },
           },
           h('div', {
             style: {
-              fontSize: 11,
+              fontSize: 11.5,
               opacity: 0.6,
-              marginBottom: 6,
+              marginBottom: 7,
               letterSpacing: '.02em',
             },
           }, bind(t, 'credits')),
           rows.map(function (row) {
             return h(
               'div',
-              { key: row.provider, style: { marginBottom: 8 } },
+              { key: row.provider, style: { marginBottom: 10 } },
               h(
                 'div',
-                { style: { display: 'flex', alignItems: 'baseline', gap: 6 } },
+                { style: { display: 'flex', alignItems: 'baseline', gap: 7 } },
                 h('span', {
                   style: {
-                    width: 6,
-                    height: 6,
+                    width: 7,
+                    height: 7,
                     borderRadius: 999,
                     background: row.warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : row.accent,
                     alignSelf: 'center',
                     flex: '0 0 auto',
                   },
                 }),
-                h('span', { style: { fontSize: 11, opacity: 0.7 } }, row.name),
+                h('span', { style: { fontSize: 12.5, opacity: 0.72 } }, row.name),
                 h('span', { style: { flex: 1 } }),
                 h('span', {
                   style: {
                     fontWeight: 600,
+                    fontSize: 13,
                     fontVariantNumeric: 'tabular-nums',
                     color: row.warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : 'var(--dsw-alias-label-primary)',
                   },
@@ -1339,8 +1388,8 @@ window.__ModuleLoader__.load({
                     'div',
                     {
                       style: {
-                        marginTop: 4,
-                        height: 3,
+                        marginTop: 5,
+                        height: 4,
                         borderRadius: 999,
                         background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.16))',
                         overflow: 'hidden',
@@ -1358,7 +1407,7 @@ window.__ModuleLoader__.load({
                   ),
               row.note === '' && row.reset === ''
                 ? null
-                : h('div', { style: { fontSize: 10.5, opacity: 0.55, marginTop: 2 } },
+                : h('div', { style: { fontSize: 11.5, opacity: 0.55, marginTop: 3 } },
                     [row.note, row.reset === '' ? '' : bind(t, 'creditsReset') + ' ' + row.reset]
                       .filter(function (part) { return part !== '' })
                       .join(' · ')),
@@ -1366,10 +1415,10 @@ window.__ModuleLoader__.load({
           }),
           h('div', {
             style: {
-              fontSize: 10.5,
+              fontSize: 11.5,
               opacity: 0.5,
               borderTop: '0.5px solid var(--dsw-alias-border-l2)',
-              paddingTop: 6,
+              paddingTop: 7,
               marginTop: 2,
             },
           }, pillHover.hint),
