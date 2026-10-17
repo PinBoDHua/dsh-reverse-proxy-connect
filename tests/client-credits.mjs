@@ -277,8 +277,16 @@ if (collapsedToggle.props.style?.justifyContent !== 'space-between') {
 console.log('✓ 胶囊收起时也是满宽')
 
 // ---------- 2b. 悬停要有反馈（用户靠这个判断「能点」）----------
-const caretCount = textOf(collapsedToggle).includes('▾')
-if (!caretCount) throw new Error('胶囊上没有展开箭头（▾），用户看不出能点')
+// 箭头必须是内联 SVG 的折线，而不是 `▾` 字符 —— 9px 的字形在侧栏里几乎看不见。
+const caret = find(collapsedToggle, (node) => node.type === 'svg')
+if (caret === undefined) throw new Error('胶囊上没有展开箭头（SVG），用户看不出能点')
+if (Number(caret.props.width) < 12 || Number(caret.props.height) < 12) {
+  throw new Error(`箭头太小：${String(caret.props.width)}x${String(caret.props.height)}（至少 12）`)
+}
+const caretPath = find(caret, (node) => node.type === 'path')
+if (caretPath === undefined) throw new Error('箭头没有折线路径')
+if (Number(caretPath.props.strokeWidth) < 1.5) throw new Error('箭头描边太细，缩放后会糊')
+if (caretPath.props.stroke !== 'currentColor') throw new Error('箭头应跟随文字颜色（currentColor）')
 
 const idleBackground = String(collapsedToggle.props.style?.background)
 collapsedToggle.props.onMouseEnter()

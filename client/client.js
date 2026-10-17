@@ -1481,19 +1481,32 @@ window.__ModuleLoader__.load({
         var visibleSegments = wide ? segments : segments.slice(0, 1)
 
         // 展开指示箭头：常显，悬停时更明显 —— 这是「能点」最直接的暗示。
+        //
+        // 用内联 SVG 而不是 `▾` 字符：9px 的字形在侧栏里几乎看不见，
+        // 而且不同字体的三角形状差别很大。SVG 用描边画折线，尺寸和粗细都可控。
         var caret = wide
-          ? h('span', {
+          ? h('svg', {
               key: 'caret',
+              width: 14,
+              height: 14,
+              viewBox: '0 0 14 14',
+              fill: 'none',
               'aria-hidden': 'true',
+              focusable: 'false',
               style: {
-                fontSize: 9,
-                lineHeight: '12px',
-                opacity: hovered || expanded === true ? 0.85 : 0.45,
+                flex: '0 0 auto',
+                opacity: hovered || expanded === true ? 0.9 : 0.5,
                 transform: expanded === true ? 'rotate(180deg)' : 'none',
                 transition: 'transform .15s ease, opacity .12s ease',
-                flex: '0 0 auto',
               },
-            }, '▾')
+            },
+            h('path', {
+              d: 'M3.5 5.5 L7 9 L10.5 5.5',
+              stroke: 'currentColor',
+              strokeWidth: 2,
+              strokeLinecap: 'round',
+              strokeLinejoin: 'round',
+            }))
           : null
 
         var pill = h(
