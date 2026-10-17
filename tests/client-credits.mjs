@@ -473,7 +473,7 @@ tree = await render(pill, { t: (key) => key, wide: true })
 const expandedText = textOf(tree)
 if (!expandedText.includes('creditsRefresh')) throw new Error('展开后没有渲染面板')
 // 面板的层级信息：provider 数量、百分比、今日用量、已用尽徽标、更新时间。
-for (const label of ['creditsSources', 'creditsPercent', 'creditsToday', 'creditsExhausted', 'creditsFetchedAt']) {
+for (const label of ['creditsSources', 'creditsPercent', 'creditsToday', 'creditsFreeQueue', 'creditsFetchedAt']) {
   if (!expandedText.includes(label)) throw new Error(`展开面板缺少 ${label}`)
 }
 console.log('✓ 点击胶囊展开面板')
@@ -699,6 +699,16 @@ if (calls.length === beforeUsageToggle || !String(usageCall.body).includes('show
   throw new Error(`切换侧栏用量没有发 display 补丁：${String(usageCall?.body).slice(0, 160)}`)
 }
 console.log('✓ 侧栏用量开关可切换并会发 display 补丁')
+
+// Qoder Free：0 付费额度要说明「免费模型排队」，而不是让人以为模型坏了。
+const qoderGlobalTab = findButton(cardTree, 'Qoder Global')
+if (qoderGlobalTab === undefined) throw new Error('找不到 Qoder Global 标签')
+qoderGlobalTab.props.onClick()
+cardTree = await render(card, { t: (key) => key })
+if (!textOf(cardTree).includes('freeModelHint')) {
+  throw new Error('Qoder Free 没有渲染「免费模型排队」说明')
+}
+console.log('✓ Qoder Free 显示免费模型排队说明')
 
 // ---------- 13. 侧栏面板显示趋势；关闭后今日用量徽标消失 ----------
 hookStates = []

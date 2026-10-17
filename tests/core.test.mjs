@@ -11,7 +11,7 @@ import {
   translateTools,
 } from '../lib/qoder/transport.js'
 import { prepareChatBody, parseCatalog as parseWorkBuddyCatalog, parseRetryAfter } from '../lib/workbuddy/upstream.js'
-import { openAiFinishKind, normalizeOpenAiUsage, parseOpenAiSse, toOpenAiMessages, toOpenAiTools, accountLimitation } from '../lib/runtime.js'
+import { openAiFinishKind, normalizeOpenAiUsage, parseOpenAiSse, qoderQueueFailure, toOpenAiMessages, toOpenAiTools, accountLimitation } from '../lib/runtime.js'
 import { toModelInfo, toResolvedModelInfo, failureCode, stableFailureCode } from '../lib/adapter.js'
 import { defaults, normalize, providerOptions, isModelVisible } from '../lib/settings.js'
 
@@ -217,6 +217,16 @@ test('OpenAI SSE 终态与 usage 归一化', () => {
   assert.equal(usage.inputTokens, 30)
   assert.equal(usage.cacheReadTokens, 20)
   assert.equal(usage.reasoningTokens, 4)
+})
+
+test('Qoder 排队超时：给出 RATE_LIMIT 与明确文案，而不是空等两分钟', () => {
+  const error = qoderQueueFailure({ retryAfterMs: 30_000 }, 61_000, 60_000)
+  assert.equal(error.kind, 'soft-rate')
+  assert.equal(error.status, 429)
+  assert.equal(error.retryAfterMs, 30_000)
+  assert.match(error.message, /排队/)
+  assert.match(error.message, /61 秒/)
+  assert.match(error.message, /不是令牌失效/)
 })
 
 test('OpenAI SSE：finish_reason 之后的 usage 不会丢失，finish 永远在最后', async () => {

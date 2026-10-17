@@ -97,6 +97,7 @@ window.__ModuleLoader__.load({
       creditsPlan: '套餐',
       creditsReset: '最近到期',
       creditsExhausted: '额度已用尽',
+      creditsFreeQueue: '免费模型排队',
       creditsPackages: '{count} 个套餐包',
       creditsFailed: '额度暂时读不到：{message}',
       creditsFetchedAt: '更新于 {time}',
@@ -235,6 +236,8 @@ window.__ModuleLoader__.load({
       advancedAlertHint: '剩余低于该比例时，侧栏与卡片亮警示色。',
       advancedSwitch: '低于该比例自动换号（%）',
       advancedSwitchHint: '0 = 只在额度用尽时切换；换号只发生在还有其它可用账号时。',
+      freeModelHint: 'Free 套餐的付费额度为 0；免费模型不扣积分，但高峰期会排队。',
+      usageNoUsage: '上游没有返回 token 统计；这里显示 0 不代表没有消耗。',
     }
     var en = {
       nav: 'Reverse proxy',
@@ -295,6 +298,7 @@ window.__ModuleLoader__.load({
       creditsPlan: 'Plan',
       creditsReset: 'Expires',
       creditsExhausted: 'Quota exhausted',
+      creditsFreeQueue: 'Free model queues',
       creditsPackages: '{count} packages',
       creditsFailed: 'Credits unavailable: {message}',
       creditsFetchedAt: 'Updated {time}',
@@ -433,6 +437,8 @@ window.__ModuleLoader__.load({
       advancedAlertHint: 'The sidebar and card turn amber below this remaining ratio.',
       advancedSwitch: 'Switch accounts below (%)',
       advancedSwitchHint: '0 = switch only when exhausted; switching requires another usable account.',
+      freeModelHint: 'The Free plan has no paid quota; free models cost no credits but may queue at peak times.',
+      usageNoUsage: 'The upstream did not report token usage; 0 here does not mean nothing was consumed.',
     }
 
     function bind(t, key, vars) {
@@ -497,8 +503,18 @@ window.__ModuleLoader__.load({
       return false
     }
 
+    /**
+     * Qoder Free 的 0 付费额度不是「用尽」：免费模型仍可用，只是排队。
+     * 返回 true 时不要把它标成红色/已用尽。
+     */
+    function isQoderFreePlan(provider, credits) {
+      if (typeof provider !== 'string' || provider.indexOf('qoder') !== 0) return false
+      if (credits === undefined || credits === null) return false
+      return credits.planName === 'Free' && !(typeof credits.total === 'number' && credits.total > 0)
+    }
+
     /** 额度预警等级：优先用宿主算好的，老宿主没有就按同一套规则补。 */
-    function alertOfCredits(credits, ratio) {
+    function alertOfCredits(credits, ratio, provider) {
       if (credits === undefined || credits === null || credits.state !== 'ok') return undefined
       if (credits.alert === 'low' || credits.alert === 'exhausted') return credits.alert
       if (credits.unlimited === true) return undefined
@@ -1603,14 +1619,14 @@ window.__ModuleLoader__.load({
       // 额度预警：只提醒，不改变行为。真正换号由 autoSwitch.thresholdRatio 控制。
       var alertProviders = alertsEnabled
         ? providers.filter(function (entry) {
-            return entry.enabled !== false && alertOfCredits(entry.credits, alertRatio) !== undefined
+            return entry.enabled !== false && alertOfCredits(entry.credits, alertRatio, entry.provider) !== undefined
           })
         : []
       var exhaustedNames = alertProviders
-        .filter(function (entry) { return alertOfCredits(entry.credits, alertRatio) === 'exhausted' })
+        .filter(function (entry) { return alertOfCredits(entry.credits, alertRatio, entry.provider) === 'exhausted' })
         .map(function (entry) { return entry.displayName })
       var lowNames = alertProviders
-        .filter(function (entry) { return alertOfCredits(entry.credits, alertRatio) === 'low' })
+        .filter(function (entry) { return alertOfCredits(entry.credits, alertRatio, entry.provider) === 'low' })
         .map(function (entry) { return entry.displayName })
       var alertLines = []
       if (exhaustedNames.length > 0) alertLines.push(bind(t, 'alertBannerExhausted', { names: exhaustedNames.join('、') }))
@@ -1970,6 +1986,7 @@ window.__ModuleLoader__.load({
       // ── 积分 ────────────────────────────────────────────────────
       var credits = active.credits || { state: 'none' }
       var creditsLow = credits.state === 'ok' && isCreditsLow(credits, alertRatio)
+      var qoderFreePlan = isQoderFreePlan(active.provider, credits)
       var creditsHead = h('div', { key: 'h', style: S.sectionHead },
         h('span', { style: S.sectionTitle }, bind(t, 'credits')),
         h('span', { style: S.grow }),
@@ -2004,7 +2021,7 @@ window.__ModuleLoader__.load({
                   '/ ' + formatNumber(credits.total) + ' ' + bind(t, 'creditsUnit'))
               : h('span', { style: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-tertiary)' } }, bind(t, 'creditsUnit')),
             credits.planName ? h('span', { style: S.badge }, credits.planName) : null,
-            credits.exceeded ? h('span', { style: S.badgeWarn }, bind(t, 'creditsExhausted')) : null,
+            credits.exceeded ? h('span', { style: S.badgeWarn }, bind(t, qoderFreePlan ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
             credits.stale === true ? h('span', { style: S.badgeSoft }, bind(t, 'creditsStale')) : null),
         )
         if (creditsRatio !== undefined) {
@@ -2034,6 +2051,9 @@ window.__ModuleLoader__.load({
         }
         if (credits.resetAtMs > 0) {
           creditsBody.push(h('p', { key: 'reset', style: S.hintTiny }, bind(t, 'creditsReset') + ' ' + formatTime(credits.resetAtMs)))
+        }
+        if (qoderFreePlan) {
+          creditsBody.push(h('p', { key: 'freehint', style: S.hintTiny }, bind(t, 'freeModelHint')))
         }
 
         // 额度趋势：今日/7 天花费、消耗速度与耗尽预估。
@@ -2201,6 +2221,9 @@ window.__ModuleLoader__.load({
                 ], true)
               : null),
         )
+        if (active.provider.indexOf('qoder') === 0 && (usageToday.requests || 0) > 0 && (usageToday.totalTokens || 0) === 0) {
+          usageBody.push(h('p', { key: 'noUsage', style: S.hintTiny }, bind(t, 'usageNoUsage')))
+        }
         usageBody.push(
           h('div', { key: 'resetrow', style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
             h('label', { style: Object.assign({}, S.row, { cursor: 'pointer' }) },
@@ -3079,7 +3102,8 @@ window.__ModuleLoader__.load({
           rows.map(function (row, index) {
             var snapshot = row.credits
             var warn = isCreditsLow(snapshot, sidebarAlertRatio)
-            var alert = alertOfCredits(snapshot, sidebarAlertRatio)
+            var alert = alertOfCredits(snapshot, sidebarAlertRatio, row.entry.provider)
+            var qoderFree = isQoderFreePlan(row.entry.provider, snapshot)
             var exhausted = snapshot.state === 'ok' && (snapshot.exceeded === true || (typeof snapshot.remain === 'number' && snapshot.remain <= 0))
             var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
             var percent = creditsPercentOf(snapshot)
@@ -3143,7 +3167,7 @@ window.__ModuleLoader__.load({
                     : {}),
                 }),
                 h('span', { style: { fontSize: 12, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.entry.displayName),
-                exhausted ? h('span', { style: microChip('var(--dsw-alias-state-warning-primary, #b26b00)') }, bind(t, 'creditsExhausted')) : null,
+                exhausted ? h('span', { style: microChip('var(--dsw-alias-state-warning-primary, #b26b00)') }, bind(t, qoderFree ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
                 alert === 'low' ? h('span', { style: microChip('var(--dsw-alias-state-warning-primary, #b26b00)') }, bind(t, 'alertLow')) : null,
                 h('span', { style: { flex: 1, minWidth: 4 } }),
                 h(
