@@ -1245,6 +1245,10 @@ window.__ModuleLoader__.load({
               font: 'inherit',
               display: 'inline-flex',
               alignItems: 'center',
+              // 满宽：把侧栏底部这块横向用满，和展开后的面板对齐。
+              // 收起时也走外层容器（见下方 return），否则按钮会缩成内容宽度。
+              width: wide ? '100%' : 'auto',
+              justifyContent: wide ? 'space-between' : 'center',
               gap: 10,
               boxSizing: 'border-box',
               maxWidth: '100%',
@@ -1273,9 +1277,9 @@ window.__ModuleLoader__.load({
           visibleSegments,
         )
 
-        if (expanded !== true || !wide) return pill
-
-        var panel = h(
+        // 收起时也套一层满宽容器：直接在 `footerActions`（横向 flex）里返回按钮，
+        // 按钮会缩成内容宽度，看起来就比展开时窄一截。
+        var panel = (expanded !== true || !wide) ? null : h(
           'div',
           {
             id: PANEL_ID,

@@ -256,6 +256,16 @@ if (warned.some((value) => value.includes('675') || value.includes('99'))) {
 }
 console.log('✓ 只有余额为 0 的账号亮警示色')
 
+// 胶囊必须满宽：收起时也不能缩成内容宽度（否则比展开时窄一截）。
+const collapsedToggle = find(tree, (node) => node.type === 'button' && node.props?.onClick !== undefined)
+if (collapsedToggle.props.style?.width !== '100%') {
+  throw new Error(`收起时胶囊宽度应为 100%，实际 ${String(collapsedToggle.props.style?.width)}`)
+}
+if (collapsedToggle.props.style?.justifyContent !== 'space-between') {
+  throw new Error('满宽胶囊里的账号应两端对齐铺开')
+}
+console.log('✓ 胶囊收起时也是满宽')
+
 // ---------- 3. 点胶囊展开 ----------
 const toggle = find(tree, (node) => node.type === 'button' && node.props?.onClick !== undefined)
 if (toggle === undefined) throw new Error('胶囊不是可点按钮')
