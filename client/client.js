@@ -33,8 +33,8 @@ window.__ModuleLoader__.load({
     /** 侧栏底部那一排（宿主 `dsh-client-ui-sidebar` 声明）。 */
     var SIDEBAR_FOOTER_SLOT = 'sidebar.footer.action'
 
-    /** 页面级浮层（根作用域），用来画悬停气泡，避开侧栏的裁剪。 */
-    var OVERLAY_SLOT = 'shell.overlay'
+    /** 内嵌面板的 id（给 aria-controls 用）。 */
+    var PANEL_ID = 'dsh-reverse-proxy-connect-credits-panel'
 
     // ── 文案 ────────────────────────────────────────────────────────
     var zh = {
@@ -196,79 +196,6 @@ window.__ModuleLoader__.load({
       var rounded = Math.round(value * 10) / 10
       return String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
     }
-
-    /**
-     * 侧栏小卡的悬停气泡状态。
-     *
-     * 为什么用模块级 store + `shell.overlay`，而不是在小卡里直接渲染一个绝对定位的面板：
-     * 侧栏在收起时会做位移与裁剪（`overflow: hidden`），`absolute` 面板会被切掉；
-     * `fixed` 又会被祖先的 transform 改变定位基准。宿主的 overlay 是页面级根作用域，
-     * 放那里才稳。这也是本机 dsh-balance-pill 处理同类问题的做法。
-     *
-     * 状态只存「已格式化的行」，overlay 组件不依赖小卡的闭包。
-     */
-    var pillHover = {
-      visible: false,
-      rect: undefined,
-      /** 侧栏（气泡可用宽度）的边界，`{left, right, width}`；量不到时为 undefined。 */
-      bounds: undefined,
-      rows: [],
-      hint: '',
-      listeners: new Set(),
-      /** 由小卡每次渲染时挂上：气泡里的「刷新额度」按钮要能触发它。 */
-      onRefresh: undefined,
-    }
-
-    /** 气泡延迟关闭的句柄。 */
-    var pillHideTimer
-
-    /** 立刻收起气泡。 */
-    function hidePillHoverNow() {
-      if (pillHideTimer !== undefined) {
-        clearTimeout(pillHideTimer)
-        pillHideTimer = undefined
-      }
-      setPillHover({ visible: false, rows: [], hint: '' })
-    }
-
-    /**
-     * 延迟关闭。
-     *
-     * 为什么需要：气泡在胶囊上方、中间隔着 8px 空隙。鼠标从胶囊移向气泡时会先触发
-     * `mouseleave` —— 立刻关闭的话，用户永远够不到气泡里的按钮（这正是「根本没法点」
-     * 的原因）。留 160ms 的窗口让鼠标走进气泡，进去后 `mouseenter` 会取消这个计时。
-     */
-    function schedulePillHide(delay) {
-      if (pillHideTimer !== undefined) clearTimeout(pillHideTimer)
-      pillHideTimer = setTimeout(hidePillHoverNow, delay === undefined ? 160 : delay)
-    }
-
-    /** 取消待执行的关闭。 */
-    function cancelPillHide() {
-      if (pillHideTimer !== undefined) {
-        clearTimeout(pillHideTimer)
-        pillHideTimer = undefined
-      }
-    }
-
-    /** 更新气泡状态并通知订阅者。 */
-    function setPillHover(next) {
-      pillHover.visible = next.visible === true
-      pillHover.rect = next.rect
-      pillHover.bounds = next.bounds
-      pillHover.rows = next.rows === undefined ? [] : next.rows
-      pillHover.hint = next.hint === undefined ? '' : next.hint
-      pillHover.listeners.forEach(function (listener) {
-        try {
-          listener()
-        } catch (failure) {
-          console.error('[dsh-reverse-proxy-connect] 气泡订阅者报错', failure)
-        }
-      })
-    }
-
-    /** 气泡偏好的宽度；侧栏更窄时会自动收敛到侧栏宽度。 */
-    var PREFERRED_BUBBLE_WIDTH = 300
 
     /** 各 provider 的强调色（与 DSH 主题变量兼容，取不到就用兜底色）。 */
     var PROVIDER_ACCENT = {
@@ -1117,18 +1044,20 @@ window.__ModuleLoader__.load({
       }
 
       /**
-       * 侧栏常驻积分卡。
+       * 侧栏积分小卡 + 内嵌面板。
        *
-       * 挂 `sidebar.footer.action`（宿主侧栏底部那一排），不用开设置就能看到
-       * 各账号还剩多少。点击立刻重读一次额度。
+       * 为什么不用悬浮气泡：气泡在 `shell.overlay` 里，宽度只能靠「量侧栏」估算，
+       * 侧栏一窄就压到对话区（0.4.6 就是这么翻车的）。而 `sidebar.footer.action`
+       * 的容器本身就是侧栏底部的纵向 flex（`flex:none` + `width:100%`），
+       * 把面板直接放进去，宽度天然等于侧栏 —— 结构上就不可能横向溢出。
        *
-       * 视觉上刻意做成「分段胶囊」：每个账号一枚小圆点 + 短名 + 数字，
-       * 而不是一整行纯文本 —— 侧栏底部空间窄，纯文本读起来是一团。
-       * 数字用主文本色加粗，短名用弱化小字，扫一眼先看到钱再看到是谁。
+       * 交互：点胶囊展开／收起；面板占满侧栏宽度并向上生长（把会话列表往上挤，
+       * 而不是盖住它）；点面板外面或按 Esc 收起。
        */
       var CreditsPill = function (props) {
         var useState = React.useState
         var useEffect = React.useEffect
+        var useRef = React.useRef
 
         var statusState = useState(undefined)
         var status = statusState[0]
@@ -1136,12 +1065,13 @@ window.__ModuleLoader__.load({
         var busyState = useState(false)
         var busy = busyState[0]
         var setBusy = busyState[1]
-        var hoverState = useState(false)
-        var hovered = hoverState[0]
-        var setHovered = hoverState[1]
         var failedState = useState(false)
         var failed = failedState[0]
         var setFailed = failedState[1]
+        var expandedState = useState(false)
+        var expanded = expandedState[0]
+        var setExpanded = expandedState[1]
+        var rootRef = useRef(undefined)
 
         useEffect(function () {
           var disposed = false
@@ -1163,7 +1093,6 @@ window.__ModuleLoader__.load({
               .then(function (document) {
                 if (disposed) return
                 setStatus(document)
-                // 拿到数字就切回 60 秒常态轮询，不再高频打接口。
                 if (hasCredits(document)) settle()
               })
               .catch(function () {
@@ -1179,15 +1108,12 @@ window.__ModuleLoader__.load({
           }
 
           // 冷启动时宿主可能还没抓完额度（凭证解密 + 上游请求几秒）。
-          // 前 10 秒快速重试，避免「DSH 开了十秒积分才出现」那种空窗。
           var retries = [0, 600, 1400, 2600, 4200, 7000, 10000].map(function (delay) {
             return setTimeout(function () {
               if (!disposed && interval === undefined) load()
             }, delay)
           })
           handles = handles.concat(retries)
-
-          // 兜底：12 秒后无论有没有数据都转常态轮询。
           handles.push(setTimeout(settle, 12000))
 
           return function () {
@@ -1199,12 +1125,25 @@ window.__ModuleLoader__.load({
           }
         }, [])
 
-        // 卸载时把气泡收掉，否则会留在屏幕上没人管。
+        // 展开时：点面板外面或按 Esc 收起。
         useEffect(function () {
-          return function () {
-            setPillHover({ visible: false, rows: [], hint: '' })
+          if (expanded !== true) return undefined
+          if (typeof document === 'undefined' || typeof document.addEventListener !== 'function') return undefined
+          var onPointerDown = function (event) {
+            var root = rootRef.current
+            if (root !== undefined && root !== null && typeof root.contains === 'function' && event.target !== null && root.contains(event.target)) return
+            setExpanded(false)
           }
-        }, [])
+          var onKeyDown = function (event) {
+            if (event !== undefined && event.key === 'Escape') setExpanded(false)
+          }
+          document.addEventListener('mousedown', onPointerDown)
+          document.addEventListener('keydown', onKeyDown)
+          return function () {
+            document.removeEventListener('mousedown', onPointerDown)
+            document.removeEventListener('keydown', onKeyDown)
+          }
+        }, [expanded])
 
         var refresh = function (event) {
           if (event !== undefined && event.preventDefault !== undefined) event.preventDefault()
@@ -1217,8 +1156,6 @@ window.__ModuleLoader__.load({
               setBusy(false)
             })
             .catch(function () {
-              // 静默失败最气人：点了没反应，也不知道是失败还是没变化。
-              // 用描边闪一下提示，1.6 秒后自动复原。
               setBusy(false)
               setFailed(true)
               setTimeout(function () { setFailed(false) }, 1600)
@@ -1238,66 +1175,14 @@ window.__ModuleLoader__.load({
 
         var wide = props.wide !== false
 
-        /**
-         * 鼠标进/出：把锚点矩形与格式化好的行放进模块级 store，
-         * 由 overlay 里的组件画气泡（侧栏自身会裁剪，画在这里会被切掉）。
-         */
-        var showBubble = function (event) {
-          cancelPillHide()
-          setHovered(true)
-          var node = event !== undefined ? event.currentTarget : undefined
-          var rect
-          var bounds
-          if (node !== undefined && typeof node.getBoundingClientRect === 'function') {
-            var box = node.getBoundingClientRect()
-            rect = { left: box.left, top: box.top, right: box.right, bottom: box.bottom, width: box.width }
-            // 侧栏有多宽？往上找一层有实际宽度的祖先量出来。
-            //
-            // 这一步是为了让气泡**不越出侧栏**：早先把宽度写死 296px，
-            // 在窄侧栏（实测约 290px）里直接压到对话区去了。
-            var ancestor = node.parentElement
-            for (var depth = 0; depth < 4 && ancestor !== null && ancestor !== undefined; depth++) {
-              if (typeof ancestor.getBoundingClientRect !== 'function') break
-              var outer = ancestor.getBoundingClientRect()
-              if (outer.width > 60) {
-                bounds = { left: outer.left, right: outer.right, width: outer.width }
-                break
-              }
-              ancestor = ancestor.parentElement
-            }
+        var toggle = function (event) {
+          if (event !== undefined && event.preventDefault !== undefined) event.preventDefault()
+          // 收起成 56px 轨道时没有横向空间，点一下只刷新。
+          if (!wide) {
+            refresh(event)
+            return
           }
-          setPillHover({
-            visible: true,
-            rect: rect,
-            bounds: bounds,
-            rows: rows.map(function (row) {
-              var snapshot = row.credits
-              var ratio
-              if (snapshot.unlimited === true) ratio = undefined
-              else if (typeof snapshot.total === 'number' && snapshot.total > 0) {
-                ratio = Math.max(0, Math.min(1, snapshot.remain / snapshot.total))
-              }
-              return {
-                name: row.entry.displayName,
-                provider: row.entry.provider,
-                accent: PROVIDER_ACCENT[row.entry.provider],
-                value: formatCreditsText(snapshot, t),
-                remain: snapshot.remain,
-                total: snapshot.total,
-                ratio: ratio,
-                warn: isCreditsLow(snapshot),
-                note: snapshot.planName === undefined ? '' : snapshot.planName,
-                reset: snapshot.resetAtMs > 0 ? formatTime(snapshot.resetAtMs) : '',
-              }
-            }),
-            hint: rows.some(function (row) { return row.credits.stale === true }) ? bind(t, 'creditsStale') : bind(t, 'pillHint'),
-          })
-        }
-
-        var hideBubble = function () {
-          setHovered(false)
-          // 延迟关闭，给鼠标从胶囊挪进气泡留出时间。
-          schedulePillHide(160)
+          setExpanded(!expanded)
         }
 
         var segments = rows.map(function (row, position) {
@@ -1333,7 +1218,6 @@ window.__ModuleLoader__.load({
                   color: warn
                     ? 'var(--dsw-alias-state-warning-primary, #b26b00)'
                     : 'var(--dsw-alias-label-primary, inherit)',
-                  // 磁盘缓存恢复的数字先弱化显示，等新数值到了再转为正常不透明度。
                   opacity: snapshot.stale === true ? 0.6 : 1,
                 },
               },
@@ -1342,20 +1226,16 @@ window.__ModuleLoader__.load({
           )
         })
 
-        var visible = wide ? segments : segments.slice(0, 1)
+        var visibleSegments = wide ? segments : segments.slice(0, 1)
 
-        // 气泡里的「刷新额度」按钮要能触发小卡的刷新：把回调挂到 store 上。
-        pillHover.onRefresh = refresh
-
-        return h(
+        var pill = h(
           'button',
           {
             type: 'button',
-            onClick: refresh,
-            onMouseEnter: showBubble,
-            onMouseLeave: hideBubble,
-            onFocus: showBubble,
-            onBlur: hideBubble,
+            onClick: toggle,
+            onFocus: function () { /* 键盘用户点 Enter 即可，展开交给 onClick */ },
+            'aria-expanded': expanded === true,
+            'aria-controls': PANEL_ID,
             'aria-label': rows
               .map(function (row) {
                 return row.entry.displayName + ' ' + formatCreditsText(row.credits, t)
@@ -1366,12 +1246,9 @@ window.__ModuleLoader__.load({
               display: 'inline-flex',
               alignItems: 'center',
               gap: 10,
-              // 关键：默认 content-box 时 padding 会把宽度撑出容器，
-              // 侧栏里就表现为「胶囊往左溢出去」。border-box + minWidth:0 才收得住。
               boxSizing: 'border-box',
               maxWidth: '100%',
               minWidth: 0,
-              margin: '0 0 4px',
               padding: wide ? '4px 11px' : '4px 7px',
               lineHeight: '18px',
               cursor: 'pointer',
@@ -1379,136 +1256,95 @@ window.__ModuleLoader__.load({
               border: '0.5px solid ' + (
                 failed
                   ? 'var(--dsw-alias-state-error-primary, #b3261e)'
-                  : hovered
+                  : expanded === true
                     ? 'var(--dsw-alias-border-l3, var(--dsw-alias-border-l2))'
                     : 'var(--dsw-alias-border-l2)'
               ),
-              background: hovered
+              background: expanded === true
                 ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))'
                 : 'var(--dsw-alias-bg-l1, transparent)',
-              boxShadow: hovered ? '0 1px 4px rgba(0,0,0,.10)' : 'none',
               color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-tertiary))',
-              transition: 'background .12s ease, border-color .12s ease, box-shadow .12s ease',
+              transition: 'background .12s ease, border-color .12s ease',
               opacity: busy ? 0.72 : 1,
               overflow: 'hidden',
               whiteSpace: 'nowrap',
             },
           },
-          visible,
+          visibleSegments,
         )
-      }
 
-      /**
-       * 气泡本体，挂在 `shell.overlay`（页面级根作用域）。
-       *
-       * 用 `fixed` 定位并贴着触发它的胶囊向上展开 —— 侧栏在底部，向下会出屏。
-       * 没有 `window` 时（比如单测/SSR）直接不渲染。
-       */
-      var CreditsBubble = function () {
-        var useEffect = React.useEffect
+        if (expanded !== true || !wide) return pill
 
-        // 订阅模块级 store。这里的重渲染只为了「可见性变了」——
-        // 注意必须取 `useState` 的**第二个**元素（setter）；写成 `[0]` 拿到的是
-        // 值本身，`bump` 会是 undefined，悬停时静默失败、气泡永远不出现。
-        var bump = React.useState(0)[1]
-
-        useEffect(function () {
-          var listener = function () { bump(function (value) { return value + 1 }) }
-          pillHover.listeners.add(listener)
-          return function () {
-            pillHover.listeners.delete(listener)
-          }
-        }, [])
-
-        if (pillHover.visible !== true) return null
-        if (typeof window === 'undefined' || typeof document === 'undefined') return null
-        var rect = pillHover.rect
-        if (rect === undefined) return null
-        var rows = pillHover.rows
-
-        // 先按侧栏实际宽度收敛：气泡绝不能越到对话区去。
-        // 量不到侧栏（没有 DOM 的近似环境）就退回视口。
-        var bounds = pillHover.bounds
-        var limitLeft = bounds === undefined ? 8 : Math.max(8, bounds.left + 8)
-        var limitRight = bounds === undefined
-          ? (typeof window.innerWidth === 'number' ? window.innerWidth : 1024) - 8
-          : bounds.right - 8
-
-        var available = Math.max(180, limitRight - limitLeft)
-        var width = Math.min(PREFERRED_BUBBLE_WIDTH, available)
-        var left = Math.min(Math.max(rect.left, limitLeft), Math.max(limitLeft, limitRight - width))
-
-        return h(
+        var panel = h(
           'div',
           {
-            role: 'dialog',
+            id: PANEL_ID,
+            role: 'region',
             'aria-label': bind(t, 'credits'),
-            // 可交互：鼠标能从胶囊移进来点「刷新额度」。
-            // 关闭由 mouseleave 的延迟计时负责，移进来时取消它。
-            onMouseEnter: cancelPillHide,
-            onMouseLeave: function () { schedulePillHide(160) },
             style: {
-              position: 'fixed',
-              left: left,
-              // 向上展开：胶囊底边离视口底部还有多少，再抬 8px。
-              bottom: Math.max(8, (window.innerHeight || 0) - rect.top + 8),
-              width: width,
-              zIndex: 2147483000,
-              pointerEvents: 'auto',
-              borderRadius: 10,
-              padding: '12px 14px',
-              background: 'var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-l1, #fff))',
+              // 宽度 100% 是重点：容器就是侧栏底部那一列，永远不会横向溢出。
+              width: '100%',
+              boxSizing: 'border-box',
               border: '0.5px solid var(--dsw-alias-border-l2)',
-              boxShadow: '0 8px 24px rgba(0,0,0,.18), 0 2px 6px rgba(0,0,0,.10)',
+              borderRadius: 10,
+              padding: '10px 12px',
+              background: 'var(--dsw-alias-bg-l1, transparent)',
+              maxHeight: '46vh',
+              overflowY: 'auto',
               color: 'var(--dsw-alias-label-primary)',
               fontSize: 13,
               lineHeight: '20px',
             },
           },
-          h('div', {
-            style: {
-              fontSize: 11.5,
-              opacity: 0.6,
-              marginBottom: 7,
-              letterSpacing: '.02em',
-            },
-          }, bind(t, 'credits')),
+          h('div', { style: { fontSize: 11.5, opacity: 0.6, marginBottom: 6 } }, bind(t, 'credits')),
           rows.map(function (row) {
+            var snapshot = row.credits
+            var warn = isCreditsLow(snapshot)
+            var ratio
+            if (snapshot.unlimited === true) ratio = undefined
+            else if (typeof snapshot.total === 'number' && snapshot.total > 0) {
+              ratio = Math.max(0, Math.min(1, snapshot.remain / snapshot.total))
+            }
+            var note = []
+            if (snapshot.planName !== undefined && snapshot.planName !== '') note.push(snapshot.planName)
+            if (snapshot.resetAtMs > 0) note.push(bind(t, 'creditsReset') + ' ' + formatTime(snapshot.resetAtMs))
             return h(
               'div',
-              { key: row.provider, style: { marginBottom: 10 } },
+              { key: row.entry.provider, style: { marginBottom: 8 } },
               h(
                 'div',
-                { style: { display: 'flex', alignItems: 'baseline', gap: 7 } },
+                { style: { display: 'flex', alignItems: 'baseline', gap: 6 } },
                 h('span', {
                   style: {
-                    width: 7,
-                    height: 7,
+                    width: 6,
+                    height: 6,
                     borderRadius: 999,
-                    background: row.warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : row.accent,
                     alignSelf: 'center',
                     flex: '0 0 auto',
+                    background: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : (PROVIDER_ACCENT[row.entry.provider] || 'currentColor'),
                   },
                 }),
-                h('span', { style: { fontSize: 12.5, opacity: 0.72 } }, row.name),
-                h('span', { style: { flex: 1 } }),
+                h('span', { style: { fontSize: 11.5, opacity: 0.7, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.entry.displayName),
+                h('span', { style: { flex: 1, minWidth: 4 } }),
                 h('span', {
                   style: {
                     fontWeight: 600,
-                    fontSize: 13,
+                    fontSize: 12.5,
                     fontVariantNumeric: 'tabular-nums',
-                    color: row.warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : 'var(--dsw-alias-label-primary)',
+                    whiteSpace: 'nowrap',
+                    color: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : 'var(--dsw-alias-label-primary)',
+                    opacity: snapshot.stale === true ? 0.7 : 1,
                   },
-                }, row.value),
+                }, formatCreditsText(snapshot, t)),
               ),
-              row.ratio === undefined
+              ratio === undefined
                 ? null
                 : h(
                     'div',
                     {
                       style: {
-                        marginTop: 5,
-                        height: 4,
+                        marginTop: 4,
+                        height: 3,
                         borderRadius: 999,
                         background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.16))',
                         overflow: 'hidden',
@@ -1516,51 +1352,69 @@ window.__ModuleLoader__.load({
                     },
                     h('div', {
                       style: {
-                        width: Math.round(row.ratio * 100) + '%',
+                        width: Math.round(ratio * 100) + '%',
                         height: '100%',
                         borderRadius: 999,
-                        background: row.warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : row.accent,
+                        background: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : (PROVIDER_ACCENT[row.entry.provider] || 'currentColor'),
                         opacity: 0.85,
                       },
                     }),
                   ),
-              row.note === '' && row.reset === ''
+              note.length === 0
                 ? null
-                : h('div', { style: { fontSize: 11.5, opacity: 0.55, marginTop: 3 } },
-                    [row.note, row.reset === '' ? '' : bind(t, 'creditsReset') + ' ' + row.reset]
-                      .filter(function (part) { return part !== '' })
-                      .join(' · ')),
+                : h('div', { style: { fontSize: 11, opacity: 0.55, marginTop: 2 } }, note.join(' · ')),
             )
           }),
-          h('div', {
+          h(
+            'div',
+            {
+              style: {
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                borderTop: '0.5px solid var(--dsw-alias-border-l2)',
+                paddingTop: 7,
+                marginTop: 2,
+              },
+            },
+            h('span', { style: { fontSize: 11, opacity: 0.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+              rows.some(function (row) { return row.credits.stale === true }) ? bind(t, 'creditsStale') : bind(t, 'pillHint')),
+            h('span', { style: { flex: 1 } }),
+            h('button', {
+              type: 'button',
+              onClick: refresh,
+              style: {
+                font: 'inherit',
+                fontSize: 11.5,
+                padding: '2px 9px',
+                borderRadius: 999,
+                cursor: 'pointer',
+                border: '0.5px solid var(--dsw-alias-border-l2)',
+                background: 'transparent',
+                color: 'var(--dsw-alias-label-primary)',
+                whiteSpace: 'nowrap',
+                flex: '0 0 auto',
+              },
+            }, busy ? bind(t, 'refreshing') : bind(t, 'creditsRefresh')),
+          ),
+        )
+
+        return h(
+          'div',
+          {
+            ref: rootRef,
             style: {
               display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              borderTop: '0.5px solid var(--dsw-alias-border-l2)',
-              paddingTop: 8,
-              marginTop: 2,
+              flexDirection: 'column',
+              gap: 6,
+              width: '100%',
+              minWidth: 0,
+              boxSizing: 'border-box',
+              margin: '0 0 4px',
             },
           },
-          h('span', { style: { fontSize: 11.5, opacity: 0.5 } }, pillHover.hint),
-          h('span', { style: { flex: 1 } }),
-          h('button', {
-            type: 'button',
-            onClick: function (event) {
-              if (event !== undefined && event.preventDefault !== undefined) event.preventDefault()
-              if (typeof pillHover.onRefresh === 'function') pillHover.onRefresh(event)
-            },
-            style: {
-              font: 'inherit',
-              fontSize: 11.5,
-              padding: '2px 9px',
-              borderRadius: 999,
-              cursor: 'pointer',
-              border: '0.5px solid var(--dsw-alias-border-l2)',
-              background: 'transparent',
-              color: 'var(--dsw-alias-label-primary)',
-            },
-          }, bind(t, 'creditsRefresh'))),
+          panel,
+          pill,
         )
       }
 
@@ -1574,20 +1428,6 @@ window.__ModuleLoader__.load({
               inject: function () { return { t: t } },
             },
             CreditsPill,
-          )
-        })
-      }
-
-      var attachCreditsBubble = function () {
-        ctx.slots.inject(OVERLAY_SLOT, function () {
-          return ctx.slots.register(
-            {
-              name: OVERLAY_SLOT,
-              id: 'reverse-proxy-credits-bubble',
-              order: 90,
-              inject: function () { return { t: t } },
-            },
-            CreditsBubble,
           )
         })
       }
@@ -1606,11 +1446,6 @@ window.__ModuleLoader__.load({
         attachSidebarPill()
       } catch (failure) {
         console.error('[dsh-reverse-proxy-connect] 挂载侧栏积分卡失败', failure)
-      }
-      try {
-        attachCreditsBubble()
-      } catch (failure) {
-        console.error('[dsh-reverse-proxy-connect] 挂载积分气泡失败', failure)
       }
     }
 
