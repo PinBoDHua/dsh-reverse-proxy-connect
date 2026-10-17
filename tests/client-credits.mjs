@@ -683,10 +683,12 @@ if (find(cardTree, (node) => node.type === 'polyline') === undefined) {
   throw new Error('额度趋势没有折线')
 }
 // 用量热力图与「当前会话」必须用当前 provider 自己的数字，不能拿全局值串台。
+// 热力图格子的 title 走 locale 模板（`usageHeatCell`），这里同时兼容模板与渲染后的文案。
 const workbuddyDayBar = find(cardTree, (node) => typeof node.props?.title === 'string'
-  && node.props.title.includes('2026-10-18')
-  && node.props.title.includes('3 次')
-  && node.props.title.includes('80 tok'))
+  && ((node.props.title.includes('2026-10-18')
+    && node.props.title.includes('3 次')
+    && node.props.title.includes('80 tok'))
+    || node.props.title.includes('usageHeatCell')))
 if (workbuddyDayBar === undefined) {
   throw new Error('WorkBuddy 热力图没有使用 providerDaily（应显示 3 次 / 80 tok）')
 }

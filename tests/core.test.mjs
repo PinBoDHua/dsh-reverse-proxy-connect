@@ -460,6 +460,97 @@ test('适配器：流中途失败也要关掉已经打开的文本/工具块', a
   assert.equal(chunks[5].reason.kind, 'error')
 })
 
+test('适配器：工具块首片等 name 到位，id 与 name 不同步也不会拆成两段', async () => {
+  const adapter = new ReverseProxyAdapter({
+    openStream: async () => ({
+      events: (async function* () {
+        // OpenAI 兼容上游常见顺序：先给 arguments，下一片才补 name。
+        yield { type: 'tool', index: 0, id: 'call_1', name: '', argumentsDelta: '{"city":' }
+        yield { type: 'tool', index: 0, id: '', name: 'get_weather', argumentsDelta: '"Beijing"}' }
+        yield { type: 'finish', kind: 'tool-calls' }
+      })(),
+      close: async () => undefined,
+    }),
+    listModels: async () => [],
+    resolveModel: async () => undefined,
+    canAcceptImages: () => false,
+    showRateInModelName: () => false,
+  })
+  const chunks = []
+  for await (const chunk of adapter.streamWithMeta({ provider: 'workbuddy', model: 'm' }, {
+    id: 'm',
+    name: 'M',
+    contextWindow: 1000,
+    maxTokens: 100,
+    inputModalities: ['text'],
+  })) chunks.push(chunk)
+
+  const deltas = chunks.filter((chunk) => chunk.type === 'tool-call-delta')
+  assert.equal(deltas.length, 1, '整个工具调用只应发一片首片')
+  assert.equal(deltas[0].id, 'call_1')
+  assert.equal(deltas[0].name, 'get_weather', '宿主按 name 认工具块，首片必须带名字')
+  assert.equal(deltas[0].argumentsDelta, '{"city":"Beijing"}', '先到的参数要攒进首片，不能丢')
+  const ends = chunks.filter((chunk) => chunk.type === 'block-end' && chunk.block.type === 'tool-call')
+  assert.equal(ends.length, 1)
+  assert.equal(ends[0].block.arguments, '{"city":"Beijing"}')
+  assert.equal(chunks.at(-1).reason.kind, 'tool-calls')
+})
+
+test('适配器：上游不给 name 时也要在收尾把工具块补出去', async () => {
+  const adapter = new ReverseProxyAdapter({
+    openStream: async () => ({
+      events: (async function* () {
+        yield { type: 'tool', index: 0, id: 'call_x', name: '', argumentsDelta: '{}' }
+        yield { type: 'finish', kind: 'stop' }
+      })(),
+      close: async () => undefined,
+    }),
+    listModels: async () => [],
+    resolveModel: async () => undefined,
+    canAcceptImages: () => false,
+    showRateInModelName: () => false,
+  })
+  const chunks = []
+  for await (const chunk of adapter.streamWithMeta({ provider: 'workbuddy', model: 'm' }, {
+    id: 'm',
+    name: 'M',
+    contextWindow: 1000,
+    maxTokens: 100,
+    inputModalities: ['text'],
+  })) chunks.push(chunk)
+  const deltas = chunks.filter((chunk) => chunk.type === 'tool-call-delta')
+  assert.equal(deltas.length, 1, '残缺响应也要发一片首片，否则宿主看不到工具块')
+  assert.equal(deltas[0].id, 'call_x')
+  assert.equal(chunks.at(-1).reason.kind, 'tool-calls')
+})
+
+test('适配器：断流时 usage 合计也要含缓存 token', async () => {
+  const adapter = new ReverseProxyAdapter({
+    openStream: async () => ({
+      events: (async function* () {
+        yield { type: 'text', text: 'hi' }
+        yield { type: 'usage', usage: { inputTokens: 10, outputTokens: 2, cacheReadTokens: 900 } }
+        // 没有 finish：上游直接断流
+      })(),
+      close: async () => undefined,
+    }),
+    listModels: async () => [],
+    resolveModel: async () => undefined,
+    canAcceptImages: () => false,
+    showRateInModelName: () => false,
+  })
+  const chunks = []
+  for await (const chunk of adapter.streamWithMeta({ provider: 'workbuddy', model: 'm' }, {
+    id: 'm',
+    name: 'M',
+    contextWindow: 1000,
+    maxTokens: 100,
+    inputModalities: ['text'],
+  })) chunks.push(chunk)
+  const usage = chunks.find((chunk) => chunk.type === 'usage')
+  assert.equal(usage.usage.totalTokens, 912, 'input+output+cacheRead 才是真实合计')
+})
+
 test('tools 翻译丢掉 deferLoading 之外的一切无关字段', () => {
   const tools = toOpenAiTools([
     { name: 'a', description: 'A', parameters: { type: 'object' }, deferLoading: true },
@@ -537,6 +628,37 @@ test('模型可见性：用户屏蔽与账号不支持都隐藏，但强制覆�
   assert.equal(isModelVisible(options, 'off-by-user'), false)
   assert.equal(isModelVisible(options, 'not-in-plan'), false)
   assert.equal(isModelVisible(options, 'rescued'), true)
+})
+
+test('模型可见性：探测结论只对探测时的账号生效，切号后不能把能用的模型藏起来', () => {
+  const token = (uid) => ({
+    accessToken: `token-${uid}`,
+    refreshToken: '',
+    expiresAtMs: Date.now() + 3600_000,
+    refreshExpiresAtMs: 0,
+    domain: 'codebuddy.cn',
+    uid,
+    enterpriseId: '',
+  })
+  const value = normalize({
+    accounts: { workbuddy: [
+      { id: 'a', label: 'A', enabled: true, token: token('a') },
+      { id: 'b', label: 'B', enabled: true, token: token('b') },
+    ] },
+    activeAccount: { workbuddy: 'a' },
+    unavailableModels: { workbuddy: ['premium-only'] },
+    probe: { results: { workbuddy: { probed: 4, unavailable: 1, accountId: 'a', at: 1 } } },
+  })
+  // 当前账号就是探测账号：结论生效。
+  assert.equal(isModelVisible(providerOptions(value, 'workbuddy'), 'premium-only'), false)
+
+  // 切到另一个账号：免费账号看不到付费模型，付费账号却可能看得到 —— 结论不能再套用。
+  const switched = normalize({ ...value, activeAccount: { workbuddy: 'b' } })
+  assert.equal(isModelVisible(providerOptions(switched, 'workbuddy'), 'premium-only'), true)
+
+  // 老设置没有 accountId：保留旧行为，避免升级后突然多出一堆用不了的模型。
+  const legacy = normalize({ unavailableModels: { workbuddy: ['old'] }, probe: { results: {} } })
+  assert.equal(isModelVisible(providerOptions(legacy, 'workbuddy'), 'old'), false)
 })
 
 test('设置归一化保留不可用/强制/探测三块，并丢掉未知 provider', () => {

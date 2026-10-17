@@ -98,6 +98,8 @@ window.__ModuleLoader__.load({
       creditsExhausted: '额度已用尽',
       creditsFreeQueue: '免费模型排队',
       creditsPackages: '{count} 个套餐包',
+      creditsPackageFallback: '额度包',
+      usageHeatCell: '{date} · {requests} 次 · {tokens} tok',
       creditsFailed: '额度暂时读不到：{message}',
       creditsFetchedAt: '更新于 {time}',
       modelRateToggle: '在模型名后显示倍率',
@@ -309,6 +311,8 @@ window.__ModuleLoader__.load({
       creditsExhausted: 'Quota exhausted',
       creditsFreeQueue: 'Free model queues',
       creditsPackages: '{count} packages',
+      creditsPackageFallback: 'Credit package',
+      usageHeatCell: '{date} · {requests} requests · {tokens} tok',
       creditsFailed: 'Credits unavailable: {message}',
       creditsFetchedAt: 'Updated {time}',
       modelRateToggle: 'Show rate after model names',
@@ -2314,7 +2318,7 @@ window.__ModuleLoader__.load({
                   key: 'pkg' + index,
                   style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
                 },
-                h('span', { style: S.modelName }, typeof item.name === 'string' ? item.name : '额度包'),
+                h('span', { style: S.modelName }, typeof item.name === 'string' && item.name !== '' ? item.name : bind(t, 'creditsPackageFallback')),
                 item.expired ? h('span', { style: S.badge }, bind(t, 'creditsExhausted')) : null,
                 h('span', { style: S.grow }),
                 h('span', { style: S.modelMeta }, formatNumber(item.remain) + ' / ' + formatNumber(item.total)),
@@ -2486,7 +2490,7 @@ window.__ModuleLoader__.load({
                   var height = Math.max(3, Math.round((tokens / maxDailyTokens) * 26))
                   return h('div', {
                     key: 'd' + day.date,
-                    title: day.date + ' · ' + formatNumber(day.requests || 0) + ' 次 · ' + formatNumber(tokens) + ' tok',
+                    title: bind(t, 'usageHeatCell', { date: day.date, requests: formatNumber(day.requests || 0), tokens: formatNumber(tokens) }),
                     style: {
                       flex: '1 1 0',
                       minWidth: 2,

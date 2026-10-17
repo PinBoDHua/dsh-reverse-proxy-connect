@@ -1,5 +1,52 @@
 # 更新记录
 
+## 1.4.0 — 2026-10-18
+
+一轮「流式与工具调用健壮性 + 账号语义」的打磨，没有新增依赖。
+
+### 修复：工具调用的首片在 `name` 缺失时被宿主拆成两段
+
+OpenAI 兼容上游给 `tool_calls` 分片时，`id` / `name` / `arguments` 的到达顺序没有保证，
+常见的是「先给一段 arguments，下一片才补 name」。宿主按 `id + name` 认工具块：name 为空
+的那一片会被当成普通 chunk，补到 name 时又另起一段 —— 一次正常调用的前半段参数直接
+丢掉，工具调用看起来「只传了一半」。现在适配器把首片压到 name 到位再发（先到的参数
+一并带上）；name 永远不到时在终态/中断前兜底补一片；首片之后的空分片不再发给宿主。
+
+### 修复：断流时 usage 合计漏掉缓存 token
+
+正常终态用 input + output + cacheRead + cacheWrite，但「上游没给终态就断流」那条分支
+只加了 input + output。DeepSeek 系上游的 `inputTokens` 已扣掉缓存命中量，漏掉 cache 会让
+断流那几次请求的今日 token 少一大截。
+
+### 修复：宿主运行期间的外部 `stats-reset` 被旧快照覆盖
+
+`stats.json` 是「进程内快照 + 定期全量落盘」。DSH 开着时执行 `node lib/bin.js stats-reset`，
+宿主的下一次去抖 flush 会把旧数字整份写回去 —— 重置后一分钟数字又回来了。
+现在 `flush()` 先用 mtime/size 判断磁盘是否被改过，并且只在「磁盘的 `since` 比内存里
+更新」时采纳磁盘那份（正常写入不改 `since`，自有写入不会被误判）。
+
+### 修复：能力探测结论按 provider 存，切号后会误藏模型
+
+花名册是产品级的、可用性是账号级的。切到另一个账号后旧结论仍在生效，「明明能用却从
+选择器里消失」。现在探测结果记 `accountId`，只有当前账号等于探测账号时才应用
+`unavailable`；老设置没有该字段时保留旧行为。
+
+### 修复：客户端两处硬编码中文
+
+套餐包兜底名与热力图悬停提示改走 locale（`creditsPackageFallback` / `usageHeatCell`），
+中英文案字典保持 209 个 key 一一对应。
+
+### 清理
+
+- 删除未使用的 `PROXY_PREFIX`、`CREDENTIAL_POLL_MS`；
+- 写接口请求体上限提成 `REQUEST_BODY_LIMIT`（1 MB），`readBody()` 不再散落魔法数字。
+
+### 测试
+
+- `node --test tests/*.test.mjs`：**163 条**，新增工具首片顺序、残缺 name 兜底、
+  断流 usage 缓存、外部重置采纳、自有写入不误判、探测结论按账号生效等用例；
+- `node tests/client-credits.mjs`：**29 项**全部通过（热力图断言同时兼容 locale 模板）。
+
 ## 1.3.1 — 2026-10-18
 
 两处回归修复，没有新增依赖。

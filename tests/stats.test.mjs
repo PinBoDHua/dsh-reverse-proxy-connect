@@ -313,3 +313,43 @@ test('统计：v2 文件升级后保留今日 provider 计数，并补出第一�
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('统计：CLI 在宿主运行期间重置后，宿主的下一次落盘不会把旧数字写回去', () => {
+  const dir = tempDir()
+  try {
+    const filePath = statsPathOf(dir)
+    const host = new Stats({ filePath, enabled: () => true, persistDelayMs: 0 })
+    host.record({ provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop', durationMs: 10 })
+    assert.equal(host.snapshot().totals.requests, 1)
+    host.stop()
+
+    // 模拟 `node lib/bin.js stats-reset`：另一个进程读同一个文件、重置、写回。
+    const cli = new Stats({ filePath, enabled: () => true, persistDelayMs: 0 })
+    cli.reset()
+
+    // 宿主的去抖 flush 现在才跑：磁盘上的 since 更新，必须采纳外部重置。
+    host.flush()
+    const reloaded = new Stats({ filePath, enabled: () => true })
+    assert.equal(reloaded.snapshot().totals.requests, 0, '外部重置不能被宿主旧快照覆盖')
+    reloaded.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：自有写入不会被误判成外部重置', () => {
+  const dir = tempDir()
+  try {
+    const filePath = statsPathOf(dir)
+    const stats = new Stats({ filePath, enabled: () => true, persistDelayMs: 0 })
+    stats.record({ provider: 'qoder', accountId: 'a', model: 'm', kind: 'stop', durationMs: 5 })
+    stats.flush()
+    stats.record({ provider: 'qoder', accountId: 'a', model: 'm', kind: 'stop', durationMs: 5 })
+    stats.flush()
+    const reloaded = new Stats({ filePath, enabled: () => true })
+    assert.equal(reloaded.snapshot().totals.requests, 2)
+    reloaded.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
