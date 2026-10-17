@@ -1,5 +1,48 @@
 # 更新记录
 
+## 0.7.0 — 2026-10-17
+
+### 更正：签到是存在的
+
+0.6.0 里我写过「上游没有签到接口」——**那个结论是错的**。当时只拆了桌面端
+`app.asar`，而签到走的是 Web 计费端点，不在客户端代码里。参考
+`dsh-our-free-model` 的实现后确认了真实协议，并逐条实测：
+
+```
+POST https://www.codebuddy.cn/v2/billing/meter/checkin-activity-status
+→ {"active":true,"today_checked_in":true,"streak_days":8,"daily_credit":100,
+   "total_credits":800,"activity_name":"Buddy应用","end_time":"2026-10-31 23:59:59",…}
+```
+
+- **WorkBuddy 国内版**：活动进行中，每天 100 积分（本机连续 8 天、累计 800）；
+- **WorkBuddy 国际版**：该账号 `active:false`，没有活动；
+- **Qoder**：`/sash/api/v1/me/campaigns` 返回空，无活动可领。
+
+### 新增：每日签到 / 领取
+
+- `POST {endpoint}/v2/billing/meter/daily-checkin` 领取；额外头
+  `X-Domain` / `X-Product: SaaS` / `X-Product-Code`；
+- 响应码按上游语义映射：`0` 成功、`10001/1001` 今天已领、
+  `1002` 无资格、`1003` 活动结束 —— 后两者算「无活动」而不是失败；
+- **先查状态再领取**：只有「活动进行中且今天没签」才发写请求；
+- **多账号一起签**：一个账号失败不影响其他账号；
+- **自动跑**：启动时与每 10 分钟的定时任务里各试一次，内部按 `lastRunAt`
+  做 20 小时节流，所以一天最多跑一次；
+- **手动跑**：卡片「账号」分组里有「立即签到」按钮，只跑当前 provider；
+- 领完自动刷新额度，数字立刻变。
+
+### 界面
+
+「账号」分组顶部多了一行签到状态：`今天已签到` / `本次签到成功：N 个账号，
++X 积分` / `当前账号没有签到活动` / `签到失败：…`，右侧还有「上次 …」时间。
+
+### 测试
+
+- `tests/checkin.test.mjs`（9 条）：状态与领取响应的全部码路径、非 JSON 兜底、
+  「没给积分数就不编造」；
+- `tests/client-credits.mjs` 增加：卡片有「立即签到」按钮，点了发
+  `action=checkin` 且带 provider。
+
 ## 0.6.0 — 2026-10-17
 
 ### 新增：多账号

@@ -125,6 +125,15 @@ window.__ModuleLoader__.load({
       useAccount: '使用',
       removeAccount: '删除',
       currentAccount: '当前',
+      checkinNow: '立即签到',
+      checkinRunning: '签到中…',
+      checkinOff: '签到已关闭',
+      checkinNever: '还没有签到记录',
+      checkinClaimed: '本次签到成功：{count} 个账号，+{credit} 积分',
+      checkinAlready: '今天已签到',
+      checkinInactive: '当前账号没有签到活动',
+      checkinFailed: '签到失败：{reason}',
+      checkinLastAt: '上次 {time}',
     }
     var en = {
       nav: 'Reverse proxy',
@@ -214,6 +223,15 @@ window.__ModuleLoader__.load({
       useAccount: 'Use',
       removeAccount: 'Remove',
       currentAccount: 'Current',
+      checkinNow: 'Check in',
+      checkinRunning: 'Checking in…',
+      checkinOff: 'Daily check-in is off',
+      checkinNever: 'No check-in yet',
+      checkinClaimed: 'Checked in: {count} account(s), +{credit} credits',
+      checkinAlready: 'Already checked in today',
+      checkinInactive: 'No check-in activity for this account',
+      checkinFailed: 'Check-in failed: {reason}',
+      checkinLastAt: 'Last run {time}',
     }
 
     function bind(t, key, vars) {
@@ -740,6 +758,22 @@ window.__ModuleLoader__.load({
         mutate({ providers: providersPatch })
       }
 
+      /** 手动签到：只跑当前 provider，避免一次点全平台。 */
+      var runCheckin = function (provider) {
+        if (status === undefined) return
+        setBusy('checkin')
+        postJson(ACTION_PATH, { action: 'checkin', provider: provider }, status.key)
+          .then(function (document) {
+            setStatus(document)
+            setBusy(undefined)
+            setError(undefined)
+          })
+          .catch(function (failure) {
+            setBusy(undefined)
+            setError(String(failure && failure.message ? failure.message : failure))
+          })
+      }
+
       var runProbeNow = function () {
         if (status === undefined) return
         setBusy('probe')
@@ -1037,6 +1071,35 @@ window.__ModuleLoader__.load({
         setAccSecret('')
       }
 
+      // 签到状态：优先显示「今日已签 / 可领 N 分 / 无活动 / 失败原因」。
+      var checkin = active.checkin || {}
+      var checkinResult = checkin.result
+      var checkinLabel
+      var checkinTone = 'hintTiny'
+      if (checkin.enabled === false) {
+        checkinLabel = bind(t, 'checkinOff')
+      } else if (checkinResult === undefined) {
+        checkinLabel = bind(t, 'checkinNever')
+      } else {
+        var claimedCount = typeof checkinResult.claimed === 'number' ? checkinResult.claimed : 0
+        var claimedCredit = typeof checkinResult.credit === 'number' ? checkinResult.credit : 0
+        var kinds = (checkinResult.outcomes || []).map(function (item) { return item.kind })
+        if (claimedCount > 0) {
+          checkinLabel = bind(t, 'checkinClaimed', { count: claimedCount, credit: claimedCredit })
+        } else if (kinds.indexOf('already') !== -1) {
+          checkinLabel = bind(t, 'checkinAlready')
+        } else if (kinds.indexOf('inactive') !== -1) {
+          checkinLabel = bind(t, 'checkinInactive')
+        } else if (kinds.indexOf('failed') !== -1) {
+          checkinLabel = bind(t, 'checkinFailed', {
+            reason: (checkinResult.outcomes.find(function (item) { return item.kind === 'failed' }) || {}).message || '—',
+          })
+          checkinTone = 'hintWarn'
+        } else {
+          checkinLabel = bind(t, 'checkinNever')
+        }
+      }
+
       sections.push(
         h('div', { key: 'accounts', style: S.section },
           h('div', { key: 'h', style: S.sectionHead },
@@ -1050,6 +1113,17 @@ window.__ModuleLoader__.load({
                 onChange: function () { mutate({ autoSwitch: { enabled: active.autoSwitch === false } }) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'autoSwitch')))),
+          h('div', { key: 'checkin', style: S.row },
+            h('button', {
+              type: 'button',
+              style: S.buttonGhost,
+              disabled: busy === 'checkin',
+              onClick: function () { runCheckin(active.provider) },
+            }, busy === 'checkin' ? bind(t, 'checkinRunning') : bind(t, 'checkinNow')),
+            h('span', { style: S[checkinTone] }, checkinLabel),
+            checkin.lastRunAt > 0
+              ? h('span', { style: S.modelMeta }, bind(t, 'checkinLastAt', { time: formatTime(checkin.lastRunAt) }))
+              : null),
           h('p', { key: 'hint', style: S.hintTiny }, bind(t, isPatProvider ? 'accountsHintPat' : 'accountsHintDesktop')),
           h('ul', { key: 'list', style: S.modelList }, accountItems),
           h('div', { key: 'add', style: S.stack },

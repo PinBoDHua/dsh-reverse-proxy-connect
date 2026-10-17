@@ -88,6 +88,7 @@ const STATUS = {
         { id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: true, credits: { state: 'ok', remain: 675, total: 1200, unit: 'credits', items: [] } },
         { id: 'acc-2', label: '备用账号', active: false, kind: 'desktop', configured: true, credits: { state: 'ok', remain: 0, total: 0, unit: 'credits' } },
       ],
+      checkin: { enabled: true, lastRunAt: 1792234000000, result: { provider: 'workbuddy', claimed: 0, credit: 0, outcomes: [{ accountId: 'default', kind: 'already' }] } },
       autoSwitch: true,
       credits: { state: 'ok', remain: 675, total: 1200, unit: 'credits', resetAtMs: 1793900000000, fetchedAt: 1792234000000, items: [] },
       credential: { status: 'signed-in', uid: 'u' },
@@ -277,6 +278,38 @@ if (calls.length === beforeUse || !String(useCall.body).includes('activeAccount'
 }
 if (!String(useCall.body).includes('acc-2')) throw new Error('切换目标账号不对')
 console.log('✓ 账号区可切换当前账号')
+
+const checkinButton = (function findCheckin(node) {
+  if (node === null || node === undefined) return undefined
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findCheckin(child)
+      if (hit !== undefined) return hit
+    }
+    return undefined
+  }
+  if (typeof node !== 'object') return undefined
+  if (node.type === 'button') {
+    const label = []
+    ;(function collect(child) {
+      if (typeof child === 'string') label.push(child)
+      if (Array.isArray(child)) child.forEach(collect)
+      else if (child && typeof child === 'object') collect(child.children)
+    })(node.children)
+    if (label.join('') === 'checkinNow') return node
+  }
+  return findCheckin(node.children)
+})(cardTree)
+if (checkinButton === undefined) throw new Error('卡片上没有「立即签到」按钮')
+const beforeCheckin = calls.length
+checkinButton.props.onClick()
+await new Promise((resolve) => setTimeout(resolve, 10))
+const checkinCall = calls[calls.length - 1]
+if (calls.length === beforeCheckin || !String(checkinCall.body).includes('checkin')) {
+  throw new Error('点签到没有发出 action=checkin')
+}
+if (!String(checkinCall.body).includes('workbuddy')) throw new Error('签到请求没有带 provider')
+console.log('✓ 签到按钮会发 action=checkin')
 
 // ---------- 2. 小卡默认收起 ----------
 let tree = await mount(pill, { t: (key) => key, wide: true })
