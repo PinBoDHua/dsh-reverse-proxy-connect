@@ -114,6 +114,8 @@ window.__ModuleLoader__.load({
       creditsCurrent: '当前 {label}',
       creditsNoData: '未读取',
       creditsUnreadable: '读取失败',
+      creditsNeedLogin: '未登录',
+      creditsResetShort: '到期 {date}',
       catalogBuiltin: '内置兜底列表（上游不可达且没有存档）',
       summary: '账号总览',
       secStatus: '状态',
@@ -281,6 +283,8 @@ window.__ModuleLoader__.load({
       creditsCurrent: 'Current: {label}',
       creditsNoData: 'Not read yet',
       creditsUnreadable: 'Read failed',
+      creditsNeedLogin: 'Signed out',
+      creditsResetShort: 'Expires {date}',
       catalogBuiltin: 'Built-in fallback list (upstream unreachable, no saved catalog)',
       summary: 'Accounts',
       secStatus: 'Status',
@@ -821,6 +825,19 @@ window.__ModuleLoader__.load({
         return sameDay ? date.toLocaleTimeString() : date.toLocaleString()
       } catch (_) {
         return String(ms)
+      }
+    }
+
+    /** 侧栏面板用的短日期：同一年只显示 M/D。 */
+    function formatShortDate(ms) {
+      if (ms === undefined || ms === null || ms === 0) return '—'
+      try {
+        var date = new Date(ms)
+        var now = new Date()
+        var prefix = date.getFullYear() === now.getFullYear() ? '' : String(date.getFullYear()) + '/'
+        return prefix + String(date.getMonth() + 1) + '/' + String(date.getDate())
+      } catch (_) {
+        return '—'
       }
     }
 
@@ -2600,12 +2617,23 @@ window.__ModuleLoader__.load({
             }
             var todayUsage = row.entry.usage && row.entry.usage.today
             var activeAccount = (row.entry.accounts || []).filter(function (account) { return account.active === true })[0]
+            // 小面板只显示「未登录 / 读取失败」两个词；完整原因放 title，卡片里仍然是全文。
+            var credential = row.entry.credential || {}
+            var authProblem = credential.status !== undefined && credential.status !== 'signed-in'
+            var problem = authProblem
+              ? bind(t, 'creditsNeedLogin')
+              : typeof snapshot.error === 'string' ? bind(t, 'creditsUnreadable') : undefined
+            var problemDetail = authProblem && typeof credential.message === 'string'
+              ? credential.message
+              : typeof snapshot.error === 'string' ? snapshot.error : ''
             var meta = []
+            if (problem !== undefined) meta.push(h('span', { key: 'problem', style: microChip('var(--dsw-alias-state-warning-primary, #b26b00)'), title: problemDetail }, problem))
             if (snapshot.planName !== undefined && snapshot.planName !== '') meta.push(h('span', { key: 'plan', style: microChip() }, snapshot.planName))
             if (percent !== undefined) meta.push(h('span', { key: 'pct', style: microChip(warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent) }, bind(t, 'creditsPercent', { percent: percent })))
-            if (activeAccount !== undefined) meta.push(h('span', { key: 'acc', style: { fontSize: 10.5, opacity: 0.6, maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bind(t, 'creditsCurrent', { label: activeAccount.label })))
-            if (snapshot.resetAtMs > 0) meta.push(h('span', { key: 'reset', style: { fontSize: 10.5, opacity: 0.55, whiteSpace: 'nowrap' } }, bind(t, 'creditsReset') + ' ' + formatTime(snapshot.resetAtMs)))
+            if (activeAccount !== undefined && problem === undefined) meta.push(h('span', { key: 'acc', style: { fontSize: 10.5, opacity: 0.6, maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bind(t, 'creditsCurrent', { label: activeAccount.label })))
+            if (snapshot.resetAtMs > 0) meta.push(h('span', { key: 'reset', style: { fontSize: 10.5, opacity: 0.55, whiteSpace: 'nowrap' } }, bind(t, 'creditsResetShort', { date: formatShortDate(snapshot.resetAtMs) })))
             if (todayUsage !== undefined && todayUsage.requests > 0) meta.push(h('span', { key: 'today', style: { fontSize: 10.5, opacity: 0.55, whiteSpace: 'nowrap' } }, bind(t, 'creditsToday', { count: todayUsage.requests, tokens: formatNumber(todayUsage.totalTokens || 0) })))
+            if (snapshot.stale === true) meta.push(h('span', { key: 'cached', style: microChip() }, bind(t, 'creditsCached')))
             return h(
               'div',
               {
@@ -2613,7 +2641,7 @@ window.__ModuleLoader__.load({
                 style: {
                   padding: '9px 0',
                   borderTop: index > 0 ? '0.5px solid var(--dsw-alias-border-l2)' : 'none',
-                  opacity: snapshot.stale === true ? 0.82 : 1,
+                  opacity: problem !== undefined ? 0.7 : snapshot.stale === true ? 0.82 : 1,
                 },
               },
               h(
@@ -2632,7 +2660,6 @@ window.__ModuleLoader__.load({
                 }),
                 h('span', { style: { fontSize: 12, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.entry.displayName),
                 exhausted ? h('span', { style: microChip('var(--dsw-alias-state-warning-primary, #b26b00)') }, bind(t, 'creditsExhausted')) : null,
-                snapshot.stale === true ? h('span', { style: microChip() }, bind(t, 'creditsCached')) : null,
                 h('span', { style: { flex: 1, minWidth: 4 } }),
                 h(
                   'span',
@@ -2664,9 +2691,6 @@ window.__ModuleLoader__.load({
               meta.length === 0
                 ? null
                 : h('div', { style: { display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5, marginTop: 5 } }, ...meta),
-              snapshot.error !== undefined && typeof snapshot.error === 'string'
-                ? h('div', { style: { fontSize: 10.5, lineHeight: '15px', color: 'var(--dsw-alias-state-warning-primary, #b26b00)', marginTop: 3 } }, bind(t, 'creditsFailed', { message: snapshot.error }))
-                : null,
             )
           }),
           h(

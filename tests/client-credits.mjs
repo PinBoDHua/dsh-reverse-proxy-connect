@@ -604,4 +604,27 @@ if (!calls.some((call) => String(call.url).includes('?light=1'))) {
 }
 console.log('✓ 侧栏小卡走轻量状态接口')
 
+// ---------- 10. 小面板不显示完整凭证错误，只给短状态 ----------
+const aiProvider = STATUS.providers[1]
+const longError = '没有找到 workbuddy-ai 的登录文件（已找：C:\\Users\\李\\AppData\\Local\\CodeBuddyExtension\\Data\\Public\\auth\\workbuddy-desktop-ai.info）。请先打开 WorkBuddy AI 并登录。'
+STATUS.providers[1] = {
+  ...aiProvider,
+  credential: { status: 'signed-out', reason: 'no-credential', message: longError },
+  credits: { ...aiProvider.credits, stale: true, error: longError },
+}
+try {
+  hookStates = []
+  let errorTree = await mount(pill, { t: (key) => key, wide: true })
+  const errorToggle = find(errorTree, (node) => node.type === 'button' && node.props?.['aria-expanded'] !== undefined)
+  errorToggle.props.onClick({ preventDefault() {} })
+  errorTree = await render(pill, { t: (key) => key, wide: true })
+  const errorText = textOf(errorTree)
+  if (!errorText.includes('creditsNeedLogin')) throw new Error('小面板没有显示简短的「未登录」')
+  if (errorText.includes('没有找到')) throw new Error('小面板不应展开完整错误文案')
+  if (!errorText.includes('creditsCached')) throw new Error('小面板没有标记缓存数据')
+  console.log('✓ 小面板把凭证错误简写成「未登录」，完整原因只留在卡片')
+} finally {
+  STATUS.providers[1] = aiProvider
+}
+
 console.log('client-credits: OK')
