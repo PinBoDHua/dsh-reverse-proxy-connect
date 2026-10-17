@@ -873,4 +873,54 @@ try {
   STATUS.providers[1] = wbaiSnapshot
 }
 
+// 手改 / 旧版本写坏的磁盘缓存会以 null、字符串、缺字段的形式进 /status。
+// 卡片与侧栏小卡必须活下来：一个坏行不能让宿主的 SlotErrorBoundary 把整块替换掉。
+const providersSnapshot = STATUS.providers
+const statsSnapshot = STATUS.stats
+const settingsSnapshot = STATUS.settings
+STATUS.providers = [
+  null,
+  {
+    provider: 'workbuddy',
+    displayName: 'WorkBuddy',
+    enabled: true,
+    models: [null, { id: 'm' }, { id: 'n', name: 5 }],
+    accounts: [null, { id: 'a', credits: null }, { id: 'b', credits: { state: 'ok', items: [null, 7] } }],
+    credits: { state: 'ok', remain: null, total: 'x', items: [null, { name: 3 }], trend: { points: [null, { remain: 'x' }] } },
+    usage: { today: null },
+    checkin: { result: { outcomes: [null, { kind: 'failed' }] } },
+    credential: null,
+    health: null,
+  },
+  { provider: 'qoder-global', displayName: 'Qoder Global', enabled: true, models: 'nope', accounts: 'nope', credits: null, usage: {}, checkin: null, credential: {}, health: {} },
+]
+STATUS.stats = {
+  today: null,
+  daily: [null, { date: '2026-10-18' }],
+  providerDaily: { workbuddy: [null, { date: '2026-10-18', totalTokens: 'x' }] },
+  models: { 'workbuddy::m': null },
+  recent: [null, { kind: 5 }],
+  providerCurrentSession: { workbuddy: null },
+}
+STATUS.settings = { alerts: { lowRatio: 'x' }, advanced: null, autoSwitch: 'yes', workbuddy: null, qoder: null }
+try {
+  cardTree = await mount(card, { t: (key) => key })
+  if (cardTree === undefined) throw new Error('坏数据下设置卡片没有渲染')
+
+  const brokenPill = await mount(pill, { t: (key) => key, wide: true })
+  if (brokenPill === null) throw new Error('坏数据下侧栏小卡不应整块返回 null')
+
+  // 逐页点过去：任何一个 provider 标签都不能把渲染炸掉。
+  cardTree = await mount(card, { t: (key) => key })
+  for (const tab of findAll(cardTree, (node) => node.type === 'button' && node.props?.role === 'tab')) {
+    tab.props.onClick()
+    cardTree = await render(card, { t: (key) => key })
+  }
+  console.log('✓ 坏数据（null / 错类型 / 缺字段）下卡片、标签页与侧栏小卡仍能渲染')
+} finally {
+  STATUS.providers = providersSnapshot
+  STATUS.stats = statsSnapshot
+  STATUS.settings = settingsSnapshot
+}
+
 console.log('client-credits: OK')

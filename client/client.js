@@ -1250,7 +1250,7 @@ window.__ModuleLoader__.load({
         }
       }, [load])
 
-      var providers = status && Array.isArray(status.providers) ? status.providers : []
+      var providers = safeArray(status && status.providers)
       var active = providers.filter(function (entry) {
         return entry.provider === activeTab
       })[0]
@@ -1333,7 +1333,7 @@ window.__ModuleLoader__.load({
         // - 账号不支持的模型：勾选 = 加入 forced（强制显示），与用户的 disabled 无关；
         // - 正常模型：勾选 = 从 disabled 移除。
         if (model.unavailable) {
-          var forced = (entry.models || [])
+          var forced = safeArray(entry.models)
             .filter(function (row) {
               return row.id !== model.id && row.forced
             })
@@ -1346,7 +1346,7 @@ window.__ModuleLoader__.load({
           mutate(forcePatch)
           return
         }
-        var disabled = (entry.models || [])
+        var disabled = safeArray(entry.models)
           .filter(function (row) {
             return row.id !== model.id && row.disabled
           })
@@ -1364,7 +1364,7 @@ window.__ModuleLoader__.load({
         providersPatch[entry.provider] = {
           // 「全部关闭」只处理账号本来就可用的那些；本来就不支持的保持原样。
           disabledModels: hidden
-            ? (entry.models || []).filter(function (row) { return !row.unavailable }).map(function (row) { return row.id })
+            ? safeArray(entry.models).filter(function (row) { return !row.unavailable }).map(function (row) { return row.id })
             : [],
         }
         mutate({ providers: providersPatch })
@@ -1407,7 +1407,7 @@ window.__ModuleLoader__.load({
             .then(function (document) {
               if (token !== loginPollToken.current) return
               setStatus(document)
-              var entry = (document.providers || []).find(function (item) { return item.provider === provider })
+              var entry = safeArray(document.providers).find(function (item) { return item.provider === provider })
               var job = entry === undefined ? undefined : entry.login
               if (job === undefined) return
               if (job.phase === 'waiting' || job.phase === 'starting') {
@@ -1494,7 +1494,7 @@ window.__ModuleLoader__.load({
 
       /** 被用户强制显示的模型数量。 */
       var forcedCount = function (entry) {
-        return (entry.models || []).filter(function (row) {
+        return safeArray(entry.models).filter(function (row) {
           return row.forced
         }).length
       }
@@ -1608,7 +1608,7 @@ window.__ModuleLoader__.load({
       }
 
       /** 账号池的最小可回传形态（密钥永远不回传，服务端按 id 合并）。 */
-      var accountRows = Array.isArray(active && active.accounts) ? active.accounts : []
+      var accountRows = safeArray(active && active.accounts)
 
       var activeRow = accountRows.filter(function (row) { return row.active })[0]
 
@@ -1743,9 +1743,9 @@ window.__ModuleLoader__.load({
         var valueText = credits.state === 'ok'
           ? credits.unlimited === true ? '∞' : compactNumber(credits.remain)
           : '—'
-        var metaParts = [String(entry.modelCount !== undefined ? entry.modelCount : (entry.models || []).length) + ' ' + bind(t, 'models')]
+        var metaParts = [String(entry.modelCount !== undefined ? entry.modelCount : safeArray(entry.models).length) + ' ' + bind(t, 'models')]
         if (today.requests > 0) metaParts.push(compactNumber(today.totalTokens || 0) + ' tok')
-        var activeRow = (entry.accounts || []).filter(function (row) { return row.active })[0]
+        var activeRow = safeArray(entry.accounts).filter(function (row) { return row.active })[0]
         if (activeRow !== undefined) metaParts.push(activeRow.label)
         return h(
           'button',
@@ -1897,7 +1897,7 @@ window.__ModuleLoader__.load({
       // 最近一次失败的具体原因（1.3.0 起统计里带 message）。
       // 健康状态只说「最近失败是什么时候」，这条才回答「为什么失败」。
       var statusStats = status.stats || {}
-      var lastFailure = (Array.isArray(statusStats.recent) ? statusStats.recent : []).filter(function (entry) {
+      var lastFailure = safeArray(statusStats.recent).filter(function (entry) {
         return entry.provider === active.provider && (entry.kind === 'error' || entry.kind === 'incomplete')
       })[0]
 
@@ -1953,7 +1953,7 @@ window.__ModuleLoader__.load({
       //
       // 多账号的意义：一个账号的积分用完了，自动/手动切到另一个还能用的账号。
       // 这里只做「增删与选定」，PAT 本身从不回传给浏览器（状态文档里没有）。
-      accountRows = Array.isArray(active && active.accounts) ? active.accounts : []
+      accountRows = safeArray(active && active.accounts)
       var isPatProvider = active.kind === 'pat'
       var loginJob = active.login
       var loginWaiting = loginJob !== undefined && (loginJob.phase === 'waiting' || loginJob.phase === 'starting')
@@ -2268,7 +2268,7 @@ window.__ModuleLoader__.load({
 
         // 额度趋势：今日/7 天花费、消耗速度与耗尽预估。
         var trend = credits.trend
-        if (trend !== null && typeof trend === 'object' && (trend.sampleCount > 0 || (trend.points || []).length > 1)) {
+        if (trend !== null && typeof trend === 'object' && (trend.sampleCount > 0 || safeArray(trend.points).length > 1)) {
           var trendChips = []
           trendChips.push(h('span', { key: 'td', style: microChip() }, bind(t, 'trendToday', { value: formatNumber(trend.spentToday || 0) })))
           if (trend.spent7d > 0) {
@@ -3016,10 +3016,10 @@ window.__ModuleLoader__.load({
 
           /** 这份状态里有没有可用的额度数字。 */
           var hasCredits = function (document) {
-            var list = document && Array.isArray(document.providers) ? document.providers : []
+            var list = safeArray(document && document.providers)
             for (var index = 0; index < list.length; index++) {
               var snapshot = list[index].credits
-              if (snapshot !== undefined && snapshot.state === 'ok') return true
+              if (snapshot !== undefined && snapshot !== null && snapshot.state === 'ok') return true
             }
             return false
           }
@@ -3098,7 +3098,7 @@ window.__ModuleLoader__.load({
             })
         }
 
-        var providers = status && Array.isArray(status.providers) ? status.providers : []
+        var providers = safeArray(status && status.providers)
         var sidebarAlertSettings = (status && status.settings && status.settings.alerts) || {}
         var sidebarAlertRatio = typeof sidebarAlertSettings.lowRatio === 'number' ? sidebarAlertSettings.lowRatio : LOW_CREDITS_RATIO
         var sidebarAlertsEnabled = sidebarAlertSettings.enabled !== false
@@ -3108,7 +3108,7 @@ window.__ModuleLoader__.load({
           var entry = providers[index]
           if (entry.enabled === false) continue
           var credits = entry.credits
-          if (credits === undefined || credits.state !== 'ok') continue
+          if (credits === undefined || credits === null || credits.state !== 'ok') continue
           rows.push({ entry: entry, credits: credits })
         }
         if (rows.length === 0) {
@@ -3363,7 +3363,7 @@ window.__ModuleLoader__.load({
               ratio = Math.max(0, Math.min(1, snapshot.remain / snapshot.total))
             }
             var todayUsage = row.entry.usage && row.entry.usage.today
-            var activeAccount = (row.entry.accounts || []).filter(function (account) { return account.active === true })[0]
+            var activeAccount = safeArray(row.entry.accounts).filter(function (account) { return account.active === true })[0]
             // 小面板只显示「未登录 / 读取失败」两个词；完整原因放 title，卡片里仍然是全文。
             var credential = row.entry.credential || {}
             var authProblem = credential.status !== undefined && credential.status !== 'signed-in'

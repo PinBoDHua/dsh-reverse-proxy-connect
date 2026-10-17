@@ -36,6 +36,21 @@ OpenAI 兼容上游给 `tool_calls` 分片时，`id` / `name` / `arguments` 的�
 套餐包兜底名与热力图悬停提示改走 locale（`creditsPackageFallback` / `usageHeatCell`），
 中英文案字典保持 209 个 key 一一对应。
 
+### 修复：手改 / 损坏的状态文档会让整张卡片崩掉
+
+`/status` 是「宿主拼出来的文档」，但字段源头可能是上一版写下的磁盘缓存、被手改过的
+JSON，或者旧宿主缺字段。客户端里有十几处 `(entry.models || [])`、`Array.isArray(x) ? x : []`
+这样的兜底，只挡住了「不是数组」，挡不住「数组里混了 `null`」与「`credits` 是 null」：
+
+- `providers` 里出现一个 `null` → 汇总卡与标签页在 `entry.provider` 上抛错；
+- `accounts` / `models` 里出现 `null` → 账号行与模型列表在 `row.active` / `row.id` 上抛错；
+- `credits: null` → 侧栏在 `credits.state` 上抛错。
+
+宿主用 `SlotErrorBoundary` 兜这类异常，表现是「整个插件设置区块被换成一条错误」。
+现在统一走 `safeArray()`（只保留对象元素），并对 `credits` 的 `null` 单独判空。
+`tests/client-credits.mjs` 新增一条「坏数据」用例：`null` / 错类型 / 缺字段混在一起时，
+卡片、四个标签页与侧栏小卡都必须能渲染。
+
 ### 清理
 
 - 删除未使用的 `PROXY_PREFIX`、`CREDENTIAL_POLL_MS`；
@@ -45,7 +60,8 @@ OpenAI 兼容上游给 `tool_calls` 分片时，`id` / `name` / `arguments` 的�
 
 - `node --test tests/*.test.mjs`：**163 条**，新增工具首片顺序、残缺 name 兜底、
   断流 usage 缓存、外部重置采纳、自有写入不误判、探测结论按账号生效等用例；
-- `node tests/client-credits.mjs`：**29 项**全部通过（热力图断言同时兼容 locale 模板）。
+- `node tests/client-credits.mjs`：**30 项**全部通过（新增「坏数据仍能渲染」，
+  热力图断言同时兼容 locale 模板）。
 
 ## 1.3.1 — 2026-10-18
 
