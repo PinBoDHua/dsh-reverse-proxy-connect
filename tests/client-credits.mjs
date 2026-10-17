@@ -506,7 +506,30 @@ if (!v4Text.includes('usageToday') || !v4Text.includes('usageTotal')) {
 if (!v4Text.includes('usageRecent') && !v4Text.includes('RATE_LIMIT')) {
   throw new Error('最近请求没有渲染')
 }
+// 表格必须有明确的表头与栅格约束，不能是一堆没有对齐的数字。
+for (const header of ['usageAvg', 'usageTime', 'usageTokenShort']) {
+  if (!v4Text.includes(header)) throw new Error(`用量表缺少表头：${header}`)
+}
+const usageGrid = find(cardTree, (node) => typeof node.props?.style?.gridTemplateColumns === 'string' && node.props.style.gridTemplateColumns.includes('minmax'))
+if (usageGrid === undefined) throw new Error('用量区块没有表格栅格')
 console.log('✓ 健康状态、图片能力与用量区块都渲染出来了')
+
+// 自动签到开关：界面上可见、可点，并且会发 checkin 补丁。
+if (!v4Text.includes('checkinAuto') || !v4Text.includes('checkinAutoHint')) {
+  throw new Error('缺少自动签到开关或说明')
+}
+const autoLabel = find(cardTree, (node) => node.type === 'label' && textOf(node) === 'checkinAuto')
+if (autoLabel === undefined) throw new Error('找不到自动签到开关')
+const autoInput = find(autoLabel, (node) => node.type === 'input')
+if (autoInput === undefined) throw new Error('自动签到开关没有 checkbox')
+const beforeAuto = calls.length
+autoInput.props.onChange({ target: { checked: false } })
+await new Promise((resolve) => setTimeout(resolve, 10))
+const autoCall = calls[calls.length - 1]
+if (calls.length === beforeAuto || !String(autoCall.body).includes('"checkin"')) {
+  throw new Error(`切换自动签到没有发 checkin 补丁：${String(autoCall?.body).slice(0, 160)}`)
+}
+console.log('✓ 自动签到开关可切换并会发 checkin 补丁')
 
 // 「重置统计」发 action=stats-reset
 const resetStatsButton = findButton(cardTree, 'usageReset')

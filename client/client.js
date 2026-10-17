@@ -127,13 +127,17 @@ window.__ModuleLoader__.load({
       currentAccount: '当前',
       checkinNow: '立即签到',
       checkinRunning: '签到中…',
-      checkinOff: '签到已关闭',
+      checkinOff: '自动签到已关闭',
       checkinNever: '还没有签到记录',
       checkinClaimed: '本次签到成功：{count} 个账号，+{credit} 积分',
       checkinAlready: '今天已签到',
       checkinInactive: '当前账号没有签到活动',
       checkinFailed: '签到失败：{reason}',
-      checkinLastAt: '上次 {time}',
+      checkinLastAt: '上次尝试 {time}',
+      checkinAuto: '自动签到',
+      checkinAutoHint: '每天自动检查一次；失败 10 分钟后重试。关闭后只能手动点。',
+      checkinAutoDone: '今日已完成',
+      checkinRetryHint: '上次失败，10 分钟后自动重试',
       loginAdd: '浏览器登录新增账号',
       loginOpening: '正在打开…',
       loginCancel: '取消',
@@ -149,9 +153,12 @@ window.__ModuleLoader__.load({
       usageRequests: '{count} 次请求',
       usageCalls: '请求',
       usageRate: '成功率',
+      usageAvg: '平均耗时',
       usageTokens: '{count} tokens',
+      usageTokenShort: 'tokens',
+      usageTime: '时间',
       usageSuccess: '成功率 {rate}%',
-      usageLatency: '平均 {ms}ms',
+      usageLatency: '平均 {ms}',
       usageRecent: '最近请求',
       usageEmpty: '还没有请求记录。发一次消息后这里会出现用量。',
       usageDisabled: '用量统计已关闭（可在高级设置里打开）。',
@@ -279,13 +286,17 @@ window.__ModuleLoader__.load({
       currentAccount: 'Current',
       checkinNow: 'Check in',
       checkinRunning: 'Checking in…',
-      checkinOff: 'Daily check-in is off',
+      checkinOff: 'Auto check-in is off',
       checkinNever: 'No check-in yet',
       checkinClaimed: 'Checked in: {count} account(s), +{credit} credits',
       checkinAlready: 'Already checked in today',
       checkinInactive: 'No check-in activity for this account',
       checkinFailed: 'Check-in failed: {reason}',
-      checkinLastAt: 'Last run {time}',
+      checkinLastAt: 'Last attempt {time}',
+      checkinAuto: 'Auto check-in',
+      checkinAutoHint: 'Checks once a day; failed attempts retry after 10 minutes. Turn it off to check in manually only.',
+      checkinAutoDone: 'Done for today',
+      checkinRetryHint: 'Last attempt failed; retrying in 10 minutes',
       loginAdd: 'Add account via browser login',
       loginOpening: 'Opening…',
       loginCancel: 'Cancel',
@@ -301,9 +312,12 @@ window.__ModuleLoader__.load({
       usageRequests: '{count} requests',
       usageCalls: 'Requests',
       usageRate: 'Success',
+      usageAvg: 'Avg time',
       usageTokens: '{count} tokens',
+      usageTokenShort: 'tokens',
+      usageTime: 'Time',
       usageSuccess: '{rate}% success',
-      usageLatency: '{ms}ms avg',
+      usageLatency: '{ms} avg',
       usageRecent: 'Recent requests',
       usageEmpty: 'No requests recorded yet. Send a message and the usage will show up here.',
       usageDisabled: 'Usage recording is off (enable it in Advanced).',
@@ -727,6 +741,21 @@ window.__ModuleLoader__.load({
       if (ms === undefined || ms === null || ms === 0) return '—'
       try {
         return new Date(ms).toLocaleString()
+      } catch (_) {
+        return String(ms)
+      }
+    }
+
+    /** 表格里的紧凑时间：今天只显示时分秒，跨天再带日期。 */
+    function formatShortTime(ms) {
+      if (ms === undefined || ms === null || ms === 0) return '—'
+      try {
+        var date = new Date(ms)
+        var now = new Date()
+        var sameDay = date.getFullYear() === now.getFullYear()
+          && date.getMonth() === now.getMonth()
+          && date.getDate() === now.getDate()
+        return sameDay ? date.toLocaleTimeString() : date.toLocaleString()
       } catch (_) {
         return String(ms)
       }
@@ -1419,7 +1448,7 @@ window.__ModuleLoader__.load({
       if (checkin.enabled === false) {
         checkinLabel = bind(t, 'checkinOff')
       } else if (checkinResult === undefined) {
-        checkinLabel = bind(t, 'checkinNever')
+        checkinLabel = checkin.completedToday === true ? bind(t, 'checkinAutoDone') : bind(t, 'checkinNever')
       } else {
         var claimedCount = typeof checkinResult.claimed === 'number' ? checkinResult.claimed : 0
         var claimedCredit = typeof checkinResult.credit === 'number' ? checkinResult.credit : 0
@@ -1436,9 +1465,10 @@ window.__ModuleLoader__.load({
           })
           checkinTone = 'hintWarn'
         } else {
-          checkinLabel = bind(t, 'checkinNever')
+          checkinLabel = checkin.completedToday === true ? bind(t, 'checkinAutoDone') : bind(t, 'checkinNever')
         }
       }
+      var checkinFailed = checkinTone === 'hintWarn' && checkin.enabled !== false
 
       sections.push(
         h('div', { key: 'accounts', style: S.section },
@@ -1460,10 +1490,19 @@ window.__ModuleLoader__.load({
               disabled: busy === 'checkin',
               onClick: function () { runCheckin(active.provider) },
             }, busy === 'checkin' ? bind(t, 'checkinRunning') : bind(t, 'checkinNow')),
+            h('label', { style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+              h('input', {
+                type: 'checkbox',
+                checked: checkin.enabled !== false,
+                onChange: function () { mutate({ checkin: { enabled: checkin.enabled === false } }) },
+              }),
+              h('span', { style: S.hintTiny }, bind(t, 'checkinAuto'))),
             h('span', { style: S[checkinTone] }, checkinLabel),
+            checkinFailed ? h('span', { style: S.hintTiny }, bind(t, 'checkinRetryHint')) : null,
             checkin.lastRunAt > 0
               ? h('span', { style: S.modelMeta }, bind(t, 'checkinLastAt', { time: formatTime(checkin.lastRunAt) }))
               : null),
+          h('p', { key: 'checkinhint', style: S.hintTiny }, bind(t, 'checkinAutoHint')),
           h('p', { key: 'hint', style: S.hintTiny }, bind(t, isPatProvider ? 'accountsHintPat' : 'accountsHintDesktop')),
           // 桌面 provider：一键打开 App 登录，登录成功后自动导入账号。
           isPatProvider
@@ -1640,25 +1679,87 @@ window.__ModuleLoader__.load({
         return entry.provider === active.provider
       }).slice(0, 6)
 
-      var usageStat = function (label, value, sub) {
-        return h('div', { key: label, style: { display: 'flex', flexDirection: 'column', gap: 1, minWidth: 74 } },
-          h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)' } }, label),
-          h('span', { style: { fontSize: TEXT.strong, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--dsw-alias-label-primary)' } }, value),
-          sub === undefined ? null : h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', opacity: 0.8 } }, sub))
+      // 表格基础样式：描边、表头底色、行分隔线全部显式给出。
+      // 之前的「一堆没有线的数字」看起来像排版事故，问题就在没有表格约束。
+      var usageBorder = 'var(--dsw-alias-border-l2)'
+      var usageCell = {
+        padding: '6px 9px',
+        fontSize: TEXT.body,
+        lineHeight: '18px',
+        minWidth: 0,
+        boxSizing: 'border-box',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+      }
+      var usageHeadCell = Object.assign({}, usageCell, {
+        fontSize: TEXT.tiny,
+        fontWeight: 600,
+        color: 'var(--dsw-alias-label-tertiary)',
+        background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.06))',
+      })
+      var usageNumberCell = Object.assign({}, usageCell, {
+        textAlign: 'right',
+        fontVariantNumeric: 'tabular-nums',
+        color: 'var(--dsw-alias-label-primary)',
+      })
+      var usageLabelCell = Object.assign({}, usageCell, {
+        color: 'var(--dsw-alias-label-tertiary)',
+        fontWeight: 500,
+      })
+      var usageTableFrame = {
+        border: '0.5px solid ' + usageBorder,
+        borderRadius: 8,
+        overflow: 'hidden',
+      }
+      var usageRowLine = { borderTop: '0.5px solid ' + usageBorder }
+      var summaryColumns = '52px minmax(48px, 1fr) minmax(56px, 1fr) minmax(62px, 1fr) minmax(58px, 1fr)'
+      var recentColumns = 'minmax(84px, 1.1fr) minmax(84px, 1.4fr) minmax(58px, .8fr) minmax(52px, .8fr) minmax(60px, .8fr)'
+
+      var usageHead = function (key, label, alignRight) {
+        return h('span', { key: key, style: Object.assign({}, usageHeadCell, alignRight === true ? { textAlign: 'right' } : {}) }, label)
+      }
+      var usageRow = function (key, label, values, top) {
+        return h(
+          'div',
+          { key: key, style: Object.assign({ display: 'grid', gridTemplateColumns: summaryColumns }, top === true ? usageRowLine : {}) },
+          h('span', { style: usageLabelCell }, label),
+          ...values.map(function (value, index) {
+            return h('span', { key: 'v' + index, style: usageNumberCell }, value)
+          }),
+        )
       }
 
       var usageBody = []
       if (statsDoc.enabled === false) {
         usageBody.push(h('p', { key: 'off', style: S.hintTiny }, bind(t, 'usageDisabled')))
       } else {
-        var success = typeof providerUsage.successRate === 'number'
-          ? Math.round(providerUsage.successRate * 100)
-          : undefined
+        var rateOf = function (counters) {
+          return typeof counters.successRate === 'number' ? String(Math.round(counters.successRate * 100)) + '%' : '—'
+        }
         usageBody.push(
-          h('div', { key: 'today', style: S.row },
-            h('span', { style: S.sectionTitle }, bind(t, 'usageToday')),
-            usageStat(bind(t, 'usageCalls'), String(usageToday.requests || 0), formatNumber(usageToday.totalTokens || 0) + ' tok'),
-            usageStat(bind(t, 'usageRate'), success === undefined ? '—' : String(success) + '%', bind(t, 'usageLatency', { ms: formatDuration(providerUsage.avgDurationMs) })),
+          h('div', { key: 'summary', style: usageTableFrame },
+            h('div', { style: { display: 'grid', gridTemplateColumns: summaryColumns } },
+              usageHead('h0', ''),
+              usageHead('h1', bind(t, 'usageCalls'), true),
+              usageHead('h2', bind(t, 'usageRate'), true),
+              usageHead('h3', bind(t, 'usageAvg'), true),
+              usageHead('h4', bind(t, 'usageTokenShort'), true)),
+            usageRow('today', bind(t, 'usageToday'), [
+              formatNumber(usageToday.requests || 0),
+              rateOf(usageToday),
+              formatDuration(usageToday.avgDurationMs),
+              formatNumber(usageToday.totalTokens || 0),
+            ], true),
+            usageRow('all', bind(t, 'usageTotal'), [
+              formatNumber(providerUsage.requests || 0),
+              rateOf(providerUsage),
+              formatDuration(providerUsage.avgDurationMs),
+              formatNumber(providerUsage.totalTokens || 0),
+            ], true)),
+        )
+        usageBody.push(
+          h('div', { key: 'resetrow', style: { display: 'flex', alignItems: 'center', gap: 8 } },
             h('span', { style: S.grow }),
             h('button', {
               type: 'button',
@@ -1667,35 +1768,39 @@ window.__ModuleLoader__.load({
               disabled: busy === 'stats',
             }, busy === 'stats' ? bind(t, 'refreshing') : bind(t, 'usageReset'))),
         )
-        usageBody.push(
-          h('div', { key: 'all', style: S.row },
-            h('span', { style: S.sectionTitle }, bind(t, 'usageTotal')),
-            usageStat(bind(t, 'usageCalls'), String(providerUsage.requests || 0), formatNumber(providerUsage.totalTokens || 0) + ' tok'),
-            usageStat(bind(t, 'usageRate'), success === undefined ? '—' : String(success) + '%', bind(t, 'usageLatency', { ms: formatDuration(providerUsage.avgDurationMs) }))),
-        )
         if (statsDoc.since > 0) {
           usageBody.push(h('p', { key: 'since', style: S.hintTiny }, bind(t, 'usageSince', { time: formatTime(statsDoc.since) })))
         }
+        usageBody.push(h('div', { key: 'recenthead', style: Object.assign({}, S.sectionTitle, { marginTop: 2 }) }, bind(t, 'usageRecent')))
         if (recentRequests.length === 0) {
           usageBody.push(h('p', { key: 'empty', style: S.hintTiny }, bind(t, 'usageEmpty')))
         } else {
           usageBody.push(
-            h('ul', { key: 'recent', style: S.modelList },
+            h('div', { key: 'recent', style: usageTableFrame },
+              h('div', { style: { display: 'grid', gridTemplateColumns: recentColumns } },
+                usageHead('r0', bind(t, 'usageTime')),
+                usageHead('r1', bind(t, 'usageModel')),
+                usageHead('r2', bind(t, 'usageOutcome'), true),
+                usageHead('r3', bind(t, 'usageDuration'), true),
+                usageHead('r4', bind(t, 'usageTokenShort'), true)),
               recentRequests.map(function (entry, index) {
                 var failed = entry.kind === 'error'
-                return h('li', {
-                  key: 'req' + index,
-                  style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
-                },
-                h('span', { style: S.modelMeta }, formatTime(entry.at)),
-                h('span', { style: Object.assign({}, S.modelName, { maxWidth: 220 }) }, entry.model || '—'),
-                h('span', {
-                  style: failed || entry.kind === 'incomplete' ? S.badgeWarn : S.badgeSoft,
-                }, bind(t, kindTextKey(entry.kind))),
-                h('span', { style: S.grow }),
-                h('span', { style: S.modelMeta }, formatDuration(entry.durationMs)),
-                h('span', { style: S.modelMeta }, formatNumber(entry.totalTokens || 0) + ' tok'),
-                entry.code ? h('span', { style: S.modelId }, entry.code) : null)
+                return h(
+                  'div',
+                  {
+                    key: 'req' + index,
+                    style: Object.assign({ display: 'grid', gridTemplateColumns: recentColumns, alignItems: 'center' }, index > 0 ? usageRowLine : {}),
+                  },
+                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-tertiary)', fontVariantNumeric: 'tabular-nums' }), title: formatTime(entry.at) }, formatShortTime(entry.at)),
+                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-primary)' }), title: entry.model || '' }, entry.model || '—'),
+                  h('span', { style: Object.assign({}, usageCell, { textAlign: 'right' }) },
+                    h('span', {
+                      style: failed || entry.kind === 'incomplete' ? S.badgeWarn : S.badgeSoft,
+                      title: entry.code || '',
+                    }, bind(t, kindTextKey(entry.kind)))),
+                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatDuration(entry.durationMs)),
+                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatNumber(entry.totalTokens || 0)),
+                )
               })),
           )
         }
@@ -1704,7 +1809,7 @@ window.__ModuleLoader__.load({
         h('div', { key: 'usage', style: S.section },
           h('div', { key: 'h', style: S.sectionHead },
             h('span', { style: S.sectionTitle }, bind(t, 'usage')),
-            h('span', { style: S.sectionCount }, String((active.models || []).length))),
+            h('span', { style: S.sectionCount }, String(usageToday.requests || 0))),
           ...usageBody),
       )
 

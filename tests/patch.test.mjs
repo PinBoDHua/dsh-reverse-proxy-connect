@@ -74,10 +74,28 @@ test('设置：v2 默认值包含 advanced，并且 normalize 会夹取非法数
   assert.equal(value.advanced.stats, true)
   assert.equal(value.advanced.catalogCache, true)
   assert.equal(value.display.showUsageInSidebar, true)
+  assert.deepEqual(value.checkin.completedOn, {})
+  assert.deepEqual(value.checkin.lastAttemptAt, {})
 
   const merged = normalize({ version: 1, advanced: { idleTimeoutMs: -1, catalogRefreshMs: 10, creditsRefreshMs: 999_999_999 } })
   assert.equal(merged.version, 2)
   assert.equal(merged.advanced.idleTimeoutMs, 15_000)
   assert.equal(merged.advanced.catalogRefreshMs, 120_000)
   assert.equal(merged.advanced.creditsRefreshMs, 21_600_000)
+})
+
+test('设置：签到完成日期与尝试时间按 provider 归一化，坏值丢弃', () => {
+  const value = normalize({
+    checkin: {
+      completedOn: { workbuddy: '2026-10-18', 'workbuddy-ai': '昨天', qoder: 42, bogus: '2026-10-18' },
+      lastAttemptAt: { workbuddy: 1792253476620, qoder: -1, bogus: 123 },
+    },
+  })
+  assert.equal(value.checkin.completedOn.workbuddy, '2026-10-18')
+  assert.equal(value.checkin.completedOn['workbuddy-ai'], undefined)
+  assert.equal(value.checkin.completedOn.qoder, undefined)
+  assert.equal(value.checkin.completedOn.bogus, undefined)
+  assert.equal(value.checkin.lastAttemptAt.workbuddy, 1792253476620)
+  assert.equal(value.checkin.lastAttemptAt.qoder, undefined)
+  assert.equal(value.checkin.lastAttemptAt.bogus, undefined)
 })
