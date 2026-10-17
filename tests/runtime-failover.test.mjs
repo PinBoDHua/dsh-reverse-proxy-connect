@@ -145,6 +145,66 @@ test('429 限流：只有一个账号时保留上游错误，不伪造成功', a
   }
 })
 
+test('Qoder 排队：首轮只发过保活帧（heartbeat）时仍然允许重开', async () => {
+  // 1.5.0 引入 heartbeat 后，retryQueued 曾把「任意事件」都当成已输出内容，
+  // 于是「上游先发了几帧保活、随后以排队拒绝」直接失败、不再重开。
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-requeue-'))
+  const originalFetch = globalThis.fetch
+  const encoder = new TextEncoder()
+  let attempt = 0
+  globalThis.fetch = async () => {
+    attempt += 1
+    const frames = attempt === 1
+      ? [
+          `data: ${JSON.stringify({ statusCodeValue: 200, body: '{}' })}\n\n`,
+          `data: ${JSON.stringify({ statusCodeValue: 403, body: JSON.stringify({ code: 10605, retryAfterSeconds: 1, isQueued: true }) })}\n\n`,
+        ]
+      : [
+          `data: ${JSON.stringify({ statusCodeValue: 200, body: JSON.stringify({ choices: [{ delta: { content: 'ok-from-retry' }, finish_reason: 'stop' }] }) })}\n\n`,
+        ]
+    const body = new ReadableStream({
+      start(controller) {
+        for (const frame of frames) controller.enqueue(encoder.encode(frame))
+        controller.close()
+      },
+    })
+    return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  }
+  try {
+    const settings = defaults()
+    settings.accounts['qoder-global'] = [{ id: 'a', label: 'PAT', enabled: true, pat: 'pt-test' }]
+    settings.activeAccount['qoder-global'] = 'a'
+    settings.advanced.qoderQueueWaitMs = 30_000
+    const runtime = new Runtime({ settings: () => settings, dataDir: dir, logger: {} })
+    runtime.catalogs.set('qoder-global::a', {
+      models: [{ id: 'qfmodel', name: 'Qwen3-Flash', contextWindow: 200_000, maxTokens: 32_768, reasoningEfforts: [], source: 'system' }],
+      fetchedAt: Date.now(),
+      source: 'live',
+    })
+    runtime.identities.set('qoder-global::a', {
+      pat: 'pt-test', region: 'global', userID: 'u1', authToken: 'job-token', name: 'tester',
+      email: 'a@b.c', machineID: 'm', expiresAtMs: Date.now() + 3600_000,
+    })
+    try {
+      const opened = await runtime.openStream('qoder-global', {
+        model: 'qfmodel',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+        signal: AbortSignal.timeout(20_000),
+      })
+      const events = []
+      for await (const event of opened.events) events.push(event)
+      assert.equal(attempt, 2, '只发过保活帧时必须重开一次')
+      assert.equal(events.filter((event) => event.type === 'text').map((event) => event.text).join(''), 'ok-from-retry')
+      assert.equal(events.at(-1).kind, 'stop')
+    } finally {
+      runtime.flushCaches()
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('正常完成：宿主收到 finish 后立即停止消费，统计仍记 stop 而不是中断', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-finish-'))
   const originalFetch = globalThis.fetch

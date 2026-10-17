@@ -233,3 +233,131 @@ test('宿主入口：注册四个 provider，status v6 与诊断接口可用', a
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('手动「检测账号可用模型」不会被正在跑的后台探测静默吞掉', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-probe-'))
+  const dataDir = join(root, DATA_DIR_NAME)
+  mkdirSync(dataDir, { recursive: true })
+  writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({
+    version: 2,
+    providers: {
+      workbuddy: { enabled: true },
+      'workbuddy-ai': { enabled: false },
+      qoder: { enabled: false },
+      'qoder-global': { enabled: false },
+    },
+    accounts: {
+      workbuddy: [{
+        id: 'a',
+        label: 'A',
+        enabled: true,
+        token: {
+          accessToken: 'tok', refreshToken: '', expiresAtMs: Date.now() + 3600_000,
+          refreshExpiresAtMs: 0, domain: 'codebuddy.cn', uid: 'u', enterpriseId: '',
+        },
+      }],
+    },
+    activeAccount: { workbuddy: 'a' },
+    probe: { enabled: true, lastRunAt: 0, results: {} },
+  }))
+
+  const handlers = {}
+  const disposers = []
+  const originalFetch = globalThis.fetch
+  let chatRequests = 0
+  let releaseFirst
+  const firstGate = new Promise((resolve) => { releaseFirst = resolve })
+
+  globalThis.fetch = async (url) => {
+    const text = String(url)
+    if (text.includes('/v3/config')) {
+      return new Response(JSON.stringify({
+        code: 0,
+        data: { agents: [{ name: 'cli', models: ['auto'] }], models: [{ id: 'auto', maxInputTokens: 8000, maxOutputTokens: 1000 }] },
+      }), { status: 200 })
+    }
+    if (text.includes('/meter/get-user-resource')) {
+      return new Response(JSON.stringify({ code: 0, data: { Response: { Data: { Accounts: [] } } } }), { status: 200 })
+    }
+    if (text.includes('/chat/completions')) {
+      chatRequests += 1
+      if (chatRequests === 1) await firstGate
+      const body = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n'))
+          controller.close()
+        },
+      })
+      return new Response(body, { status: 200 })
+    }
+    return new Response('{}', { status: 200 })
+  }
+
+  const ctx = {
+    get(name) {
+      if (name === 'profileContext') return { dir: root }
+      return undefined
+    },
+    inject(names, callback) {
+      if (names.includes('webServer')) {
+        callback({
+          webServer: fakeWebServer(handlers),
+          effect(fn) {
+            const dispose = fn()
+            disposers.push(dispose)
+            return dispose
+          },
+        })
+      }
+    },
+    effect(fn) {
+      const dispose = fn()
+      disposers.push(dispose)
+      return dispose
+    },
+    llm: { registerAdapter: () => () => {} },
+    emit() {},
+    logger: { info() {}, warn() {} },
+  }
+
+  try {
+    apply(ctx, {})
+    // 等后台那轮探测真的发出请求（并被 gate 卡住）。
+    for (let index = 0; index < 100 && chatRequests === 0; index++) await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.equal(chatRequests, 1, '后台探测应当已经发出一个请求')
+
+    const full = await get(handlers[STATUS_PATH], STATUS_PATH)
+    const actionRes = fakeResponse()
+    const req = new EventEmitter()
+    req.method = 'POST'
+    req.url = ACTION_PATH
+    req.headers = { host: '127.0.0.1:65466', 'x-rpc-key': full.body.key }
+    process.nextTick(() => {
+      req.emit('data', Buffer.from(JSON.stringify({ action: 'probe' })))
+      req.emit('end')
+    })
+    handlers[ACTION_PATH](req, actionRes)
+
+    // 手动请求此刻应当还在等后台那一轮，而不是立刻返回。
+    await new Promise((resolve) => setTimeout(resolve, 60))
+    assert.equal(actionRes.status, 0, '手动探测不能在前一轮还没结束时提前返回')
+
+    releaseFirst()
+    await actionRes.done
+    assert.equal(actionRes.status, 200)
+    // 放行后必须补跑一轮：总请求数应当 ≥ 2。
+    for (let index = 0; index < 100 && chatRequests < 2; index++) await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.ok(chatRequests >= 2, `手动探测应当补跑一轮，实际只发了 ${String(chatRequests)} 个请求`)
+  } finally {
+    globalThis.fetch = originalFetch
+    for (const dispose of disposers) {
+      try {
+        if (typeof dispose === 'function') dispose()
+      } catch {
+        /* 忽略清理失败 */
+      }
+    }
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
