@@ -1,5 +1,62 @@
 # 更新记录
 
+## 1.5.0 — 2026-10-18
+
+三条「平时看不出来、出问题时很难查」的修复：保活帧下的空闲超时、被 `??` 吃掉
+的单请求超时、以及额度缓存里的坏数字。
+
+### 修复：上游发保活帧时，长思考仍会被空闲超时切断
+
+`withIdleTimeout()` 只在「下一个事件到达」时重置计时器，而两个 SSE 解析器会**静默
+跳过**所有没有内容产出的帧：`: keep-alive` 注释行、空 `data:` 行、只带 `finish_reason`
+的帧、只带 `usage` 的帧。
+
+上游在长思考/排队时正是用这类帧保活。于是「连接明明活着、字节一直在流动」，本地却在
+空闲超时（默认 180 秒）到了以后把一条完全正常的请求 abort 掉 —— 用户看到的是
+「思考了三分钟突然失败」，日志里只有一句「上游已经 180 秒没有返回任何数据」。
+
+现在两个解析器在「这一批字节没有产出任何内容事件」时 yield 一个内部
+`{type:'heartbeat'}`；`withIdleTimeout()` 见到心跳会**重置计时器但不转发**，
+所以心跳既不会进适配器、也不会进统计。真正卡死（一个字节都不来）仍然照常超时。
+
+`_dsh-reverse-proxy-scratch/30-keepalive-idle.mjs` 复现：8 个保活帧 + 正文，
+`idleMs: 120` 时 1.5.0 之前报 `IdleTimeoutError`，之后正常完成。
+
+### 修复：`signal ?? AbortSignal.timeout(...)` 让单请求超时永远不会生效
+
+`a ?? b` 的语义是「a 为 null/undefined 才用 b」。而这些调用点的 `signal` 来自
+runtime，**几乎永远不是 undefined**（签到的 `checkinAbort`、额度/目录刷新的取消信号、
+插件卸载信号……）。于是那句「请求超时」注释下的代码从来没有执行过：
+
+- 签到的计费端点挂死 → `checkinRunning` 一直被占住，30 秒调度器整轮空转；
+- 额度请求挂死 → 卡片永远停在「读取中」；
+- 换 token 挂死 → 登录流程卡在「读取账号信息」。
+
+全仓 10 处同一写法（`checkin.js` ×3、`credits.js` ×2、`workbuddy/upstream.js`、
+`workbuddy/credentials.js`、`qoder/transport.js` ×3）统一改为新的
+`withTimeout(signal, ms)`：外部取消与单请求超时取**并集**，两者都生效。
+
+### 修复：额度缓存里的坏数字会让卡片算出 NaN
+
+`normalizeCachedCredits()` 之前只清洗 `items[]`。顶层字段是 `{...data}` 直接展开，
+所以手改或旧版本写下的 `remain: "x"` / `total: null` / `exceeded: "true"` 会原样进
+`/status`，卡片渲染成「NaN / NaN」、进度条宽度变成非法 CSS，`paid: "false"` 还会骗过
+「是不是 Free 套餐」的判定。现在数字/布尔/字符串字段都按类型收敛，认不出的一律丢掉。
+
+### 修复：Qoder 限流只读响应体，不读 `Retry-After` 头
+
+Qoder 把排队建议写在 body 的 `retryAfterSeconds` 里，但网关/WAF 层的普通 429 只有
+标准 `Retry-After` 头。之前这种情况拿不到等待时间，本地只能退到默认值。现在
+`classifyUpstreamBody()` 接受第三个参数并优先用 body，body 没有时才读头
+（秒数与 HTTP 日期都支持，夹到 10 分钟）。WorkBuddy 侧本来就有这套解析，这次把
+Qoder 补齐。
+
+### 测试
+
+- `node --test tests/*.test.mjs`：**168 条**（新增心跳重置/心跳不泄漏/只有心跳仍超时、
+  `withTimeout` 并集、`Retry-After` 头、额度缓存坏值归一化）；
+- `node tests/client-credits.mjs`：**30 项**全部通过。
+
 ## 1.4.0 — 2026-10-18
 
 一轮「流式与工具调用健壮性 + 账号语义」的打磨，没有新增依赖。

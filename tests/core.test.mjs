@@ -6,6 +6,7 @@ import {
   classifyUpstreamBody,
   encodeBody,
   parseCatalog as parseQoderCatalog,
+  parseRetryAfter as parseQoderRetryAfter,
   parseStream as parseQoderStream,
   finishKind,
   normalizeUsage,
@@ -16,6 +17,7 @@ import { prepareChatBody, parseCatalog as parseWorkBuddyCatalog, parseRetryAfter
 import { openAiFinishKind, normalizeOpenAiUsage, parseOpenAiSse, qoderQueueFailure, failureCodeOf, isFailoverCode, toOpenAiMessages, toOpenAiTools, accountLimitation } from '../lib/runtime.js'
 import { toModelInfo, toResolvedModelInfo, failureCode, stableFailureCode, ReverseProxyAdapter } from '../lib/adapter.js'
 import { defaults, normalize, providerOptions, isModelVisible } from '../lib/settings.js'
+import { withTimeout } from '../lib/timeout.js'
 
 test('Retry-After：秒数与 HTTP 日期都能解析，且夹到 10 分钟', () => {
   const now = Date.parse('2026-10-18T12:00:00Z')
@@ -26,6 +28,26 @@ test('Retry-After：秒数与 HTTP 日期都能解析，且夹到 10 分钟', ()
   assert.equal(parseRetryAfter('Sun, 18 Oct 2026 11:59:00 GMT', now), 0)
   assert.equal(parseRetryAfter('', now), undefined)
   assert.equal(parseRetryAfter('soon', now), undefined)
+})
+
+test('withTimeout：外部取消与单请求超时取并集，不能被 signal 覆盖掉超时', async () => {
+  // 旧写法 `signal ?? AbortSignal.timeout(ms)` 在调用方传了 signal 时
+  // 永远走左边 —— 上游挂死的那次请求会一直挂着。这里锁住「两者都生效」。
+  const controller = new AbortController()
+  const merged = withTimeout(controller.signal, 5_000)
+  assert.notEqual(merged, controller.signal, '不能把外部 signal 原样返回，否则超时丢失')
+  controller.abort()
+  await new Promise((resolve) => setTimeout(resolve, 20))
+  assert.equal(merged.aborted, true, '外部取消必须立即生效')
+
+  // 只有超时、没有外部 signal 时按超时 abort。
+  const timed = withTimeout(undefined, 30)
+  await new Promise((resolve) => setTimeout(resolve, 80))
+  assert.equal(timed.aborted, true)
+
+  // 传非法毫秒也不该抛错，而是当成 1ms 的超时。
+  assert.ok(withTimeout(undefined, 0) !== undefined)
+  assert.ok(withTimeout(undefined, Number.NaN) !== undefined)
 })
 
 test('WAF 编码可逆且长度为 4 的倍数', () => {
@@ -218,6 +240,38 @@ test('Qoder 普通 HTTP 429/402 按限流/额度处理，不再落成 malformed'
   assert.equal(classifyUpstreamBody('<html>forbidden</html>', 403).kind, 'auth')
 })
 
+test('Qoder 限流：响应体没给等待时间时读 Retry-After 头', () => {
+  // 网关/WAF 层限流通常只有标准头，没有 retryAfterSeconds。
+  const fromHeader = classifyUpstreamBody('{"message":"Too Many Requests"}', 429, '30')
+  assert.equal(fromHeader.kind, 'soft-rate')
+  assert.equal(fromHeader.retryAfterMs, 30_000)
+
+  // HTTP 日期形式同样支持：给一个「20 秒后」的日期（相对真实 now，否则会被夹到上限）。
+  const now = Date.now()
+  const fromDate = classifyUpstreamBody('', 429, new Date(now + 20_000).toUTCString())
+  assert.equal(typeof fromDate.retryAfterMs, 'number')
+  assert.ok(
+    fromDate.retryAfterMs >= 18_000 && fromDate.retryAfterMs <= 21_000,
+    `日期形式的等待量不对：${String(fromDate.retryAfterMs)}`,
+  )
+
+  // body 里的 retryAfterSeconds 优先于头。
+  const fromBody = classifyUpstreamBody('{"isQueued":true,"retryAfterSeconds":12}', 429, '30')
+  assert.equal(fromBody.retryAfterMs, 12_000)
+  assert.equal(fromBody.kind, 'soft-rate')
+
+  // 解析器本身：秒数、日期、垃圾值、上限。
+  assert.equal(parseQoderRetryAfter('45'), 45_000)
+  assert.equal(parseQoderRetryAfter(''), undefined)
+  assert.equal(parseQoderRetryAfter('not-a-date'), undefined)
+  assert.ok(parseQoderRetryAfter('99999') <= 10 * 60_000, '超过 10 分钟要夹住')
+  // HTTP 日期只精确到秒，给 1.5 秒容差。
+  const dated = parseQoderRetryAfter(new Date(now + 20_000).toUTCString(), now)
+  assert.ok(Math.abs(dated - 20_000) < 1_500, `日期解析偏差过大：${String(dated)}`)
+  // 已经过去的日期夹到 0，不会是负数。
+  assert.equal(parseQoderRetryAfter(new Date(now - 60_000).toUTCString(), now), 0)
+})
+
 test('Qoder PAT 失效：错误码优先于默认 kind=server，分类为 AUTH', () => {
   const failure = classifyUpstreamBody('', 403)
   assert.equal(failure.kind, 'auth')
@@ -241,8 +295,10 @@ test('SSE 末行没有换行时也要处理，不能丢最后一段正文/终态
   })
   const openaiEvents = []
   for await (const event of parseOpenAiSse(openai)) openaiEvents.push(event)
-  assert.equal(openaiEvents.map((event) => event.type).join(','), 'text,finish')
-  assert.equal(openaiEvents[0].text, 'tail')
+  // 心跳是给空闲看门狗看的内部信号，这里只断言真正的内容事件。
+  const openaiTypes = openaiEvents.filter((event) => event.type !== 'heartbeat').map((event) => event.type)
+  assert.equal(openaiTypes.join(','), 'text,finish')
+  assert.equal(openaiEvents.find((event) => event.type === 'text').text, 'tail')
 
   const qoder = new ReadableStream({
     start(controller) {
@@ -252,7 +308,8 @@ test('SSE 末行没有换行时也要处理，不能丢最后一段正文/终态
   })
   const qoderEvents = []
   for await (const event of parseQoderStream(qoder)) qoderEvents.push(event)
-  assert.equal(qoderEvents.map((event) => event.type).join(','), 'text,finish')
+  const qoderTypes = qoderEvents.filter((event) => event.type !== 'heartbeat').map((event) => event.type)
+  assert.equal(qoderTypes.join(','), 'text,finish')
   assert.equal(qoderEvents.at(-1).kind, 'max-tokens')
 })
 

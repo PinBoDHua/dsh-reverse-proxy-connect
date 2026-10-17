@@ -81,6 +81,42 @@ test('缓存里的坏套餐行会被丢弃，不能把 null 原样送进 /status
   })
 })
 
+test('缓存里的坏数字/坏布尔会被丢掉，不能让卡片算出 NaN', () => {
+  withTempDir((dir) => {
+    writeFileSync(join(dir, 'credits-cache.json'), JSON.stringify({
+      'qoder-global::default': {
+        fetchedAt: NOW,
+        data: {
+          state: 'ok',
+          remain: 'x',
+          total: null,
+          used: 'many',
+          resetAtMs: '2026-10-18',
+          unit: 42,
+          planName: 7,
+          exceeded: 'true',
+          paid: 'false',
+          freePlan: 1,
+          unlimited: null,
+          items: [],
+        },
+      },
+    }), 'utf8')
+    const data = loadCreditsCache(dir).get('qoder-global::default').data
+    assert.equal(data.remain, undefined, '字符串数字要丢掉，而不是留着让卡片算出 NaN')
+    assert.equal(data.total, undefined)
+    assert.equal(data.used, undefined)
+    assert.equal(data.resetAtMs, undefined)
+    assert.equal(data.unit, undefined)
+    assert.equal(data.planName, undefined)
+    assert.equal(data.exceeded, undefined, '字符串 "true" 不能冒充满额')
+    assert.equal(data.paid, undefined, '字符串 "false" 不能让 freePlan 判定误命中')
+    assert.equal(data.freePlan, undefined)
+    assert.equal(data.unlimited, undefined)
+    assert.equal(data.state, 'ok', 'state 本身是合法值，要保留')
+  })
+})
+
 test('坏文件 / 不存在 / 非对象内容都安静退化成空缓存', () => {
   withTempDir((dir) => {
     assert.equal(loadCreditsCache(dir).size, 0, '目录里没文件')

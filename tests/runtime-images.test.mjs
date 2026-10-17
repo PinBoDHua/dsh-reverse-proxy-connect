@@ -170,6 +170,41 @@ test('空闲超时：取消信号优先给出 CancelledError', async () => {
   )
 })
 
+test('空闲超时：心跳（上游保活帧）会重置计时器，且不会转给调用方', async () => {
+  // 每 15ms 一个心跳，共 8 个（120ms），空窗 15ms < idleMs 40ms；
+  // 之后 10ms 给正文。没有心跳时，等下一个「真事件」会超过 40ms 被判空闲超时。
+  async function* heartbeatSource() {
+    for (let index = 0; index < 8; index++) {
+      await new Promise((resolve) => setTimeout(resolve, 15))
+      yield { type: 'heartbeat' }
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    yield { type: 'text', text: 'after-keepalive' }
+  }
+  const events = []
+  for await (const event of withIdleTimeout(heartbeatSource(), { idleMs: 40 })) events.push(event)
+  assert.deepEqual(events, [{ type: 'text', text: 'after-keepalive' }], '心跳不能泄漏给调用方')
+})
+
+test('空闲超时：只有心跳、没有真实事件时仍会被判定为卡死', async () => {
+  async function* onlyHeartbeats() {
+    for (let index = 0; index < 3; index++) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+      yield { type: 'heartbeat' }
+    }
+    // 之后再无任何字节：真正卡死，必须超时。
+    await new Promise((resolve) => setTimeout(resolve, 500))
+  }
+  await assert.rejects(
+    (async () => {
+      for await (const _event of withIdleTimeout(onlyHeartbeats(), { idleMs: 40 })) {
+        /* 只会拿到心跳，被内部丢弃 */
+      }
+    })(),
+    (error) => error instanceof IdleTimeoutError,
+  )
+})
+
 test('Runtime 读图：用真实请求版本尺寸、映射只读路径、产出 data URL', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-image-'))
   try {
