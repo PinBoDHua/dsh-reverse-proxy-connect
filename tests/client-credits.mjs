@@ -40,6 +40,7 @@ let dirtyOwners = new Set()
 function beginRender() {
   activeOwner = ++ownerSeq
   hookIndex = 0
+  refIndex = 0
   effects = []
   dirty = false
   return activeOwner
@@ -65,13 +66,23 @@ function createElement(type, props, ...children) {
   return { type, props: props ?? {}, children: children.flat(Infinity) }
 }
 
+// useRef 必须**跨渲染保留**（按 hook 序号），否则 pending 集合之类的东西
+// 每次渲染都会被重置，测出来的行为是假的。
+let refSlots = {}
+let refIndex = 0
+function useRef(initial) {
+  const index = refIndex++
+  if (!(index in refSlots)) refSlots[index] = { current: initial }
+  return refSlots[index]
+}
+
 const React = {
   createElement,
   Fragment: 'Fragment',
   useState,
   useEffect: (fn) => effects.push(fn),
   useCallback: (fn) => fn,
-  useRef: (value) => ({ current: value }),
+  useRef,
 }
 
 // ---------- 假的 /status ----------
@@ -267,6 +278,7 @@ async function render(component, props, skipEffects) {
  */
 function mount(component, props) {
   hookStates = []
+refSlots = {}
   return render(component, props)
 }
 
@@ -655,6 +667,7 @@ STATUS.providers[1] = {
 }
 try {
   hookStates = []
+refSlots = {}
   let errorTree = await mount(pill, { t: (key) => key, wide: true })
   const errorToggle = find(errorTree, (node) => node.type === 'button' && node.props?.['aria-expanded'] !== undefined)
   errorToggle.props.onClick({ preventDefault() {} })
@@ -815,6 +828,7 @@ console.log('✓ Qoder Free 显示免费模型排队说明')
 
 // ---------- 13. 侧栏面板显示趋势；关闭后今日用量徽标消失 ----------
 hookStates = []
+refSlots = {}
 let trendPill = await mount(pill, { t: (key) => key, wide: true })
 let trendToggle = find(trendPill, (node) => node.type === 'button' && node.props?.['aria-expanded'] !== undefined)
 trendToggle.props.onClick({ preventDefault() {} })
@@ -831,6 +845,7 @@ console.log('✓ 侧栏面板显示今日消耗、耗尽预估与趋势折线')
 STATUS.settings.showUsageInSidebar = false
 try {
   hookStates = []
+refSlots = {}
   let noUsagePill = await mount(pill, { t: (key) => key, wide: true })
   const noUsageToggle = find(noUsagePill, (node) => node.type === 'button' && node.props?.['aria-expanded'] !== undefined)
   noUsageToggle.props.onClick({ preventDefault() {} })
@@ -921,6 +936,78 @@ try {
   STATUS.providers = providersSnapshot
   STATUS.stats = statsSnapshot
   STATUS.settings = settingsSnapshot
+}
+
+// 连点两个模型：第一个 POST 还没回来时点第二个，第二个请求必须带上第一个的改动。
+// 旧实现每次都基于「上一次 /status」算 disabledModels，后到的那次会把前一次覆盖掉。
+const toggleProviderSnapshot = STATUS.providers[0]
+try {
+  STATUS.providers[0] = {
+    ...toggleProviderSnapshot,
+    models: [
+      { id: 't1', name: 'T1', contextWindow: 1000, maxTokens: 100, supportsImages: false, reasoningEfforts: [], disabled: false },
+      { id: 't2', name: 'T2', contextWindow: 1000, maxTokens: 100, supportsImages: false, reasoningEfforts: [], disabled: false },
+    ],
+  }
+  cardTree = await mount(card, { t: (key) => key })
+  const modelBoxes = () => findAll(cardTree, (node) => node.type === 'input'
+    && node.props?.type === 'checkbox'
+    && typeof node.props['aria-label'] === 'string'
+    && (node.props['aria-label'] === 'T1' || node.props['aria-label'] === 'T2'))
+  const boxesBefore = modelBoxes()
+  if (boxesBefore.length !== 2) throw new Error(`模型复选框数量不对：${boxesBefore.length}`)
+
+  const writesBefore = calls.filter((call) => call.method === 'POST' && String(call.url).includes('/settings')).length
+  // 两次点击之间不等响应：这正是不加保护时会丢改动的那种时序。
+  boxesBefore[0].props.onChange()
+  boxesBefore[1].props.onChange()
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  // 只看这一次交互追加的补丁（按次数切片，避开前面所有用例留下的调用）。
+  const sent = calls
+    .filter((call) => call.method === 'POST' && String(call.url).includes('/settings'))
+    .slice(writesBefore)
+    .map((call) => {
+      try {
+        return JSON.parse(call.body)?.providers?.workbuddy?.disabledModels
+      } catch {
+        return undefined
+      }
+    })
+    .filter((value) => Array.isArray(value))
+  if (sent.length < 2) throw new Error(`应当发两次设置补丁，实际 ${sent.length}（${JSON.stringify(calls.slice(writesBefore))}）`)
+  const last = sent[sent.length - 1]
+  if (!last.includes('t1') || !last.includes('t2')) {
+    throw new Error(`连点两个模型时后一次请求丢了前一次改动：${JSON.stringify(sent)}`)
+  }
+
+  // 再验一条：先「全部关闭」，紧接着单独开启一个 —— 第二次必须基于全关后的集合，
+  // 而不是回到只有那一个 id 的状态（否则其余模型会全部复活成「开启」）。
+  const allOff = find(cardTree, (node) => node.type === 'button' && textOf(node) === 'hideAll')
+  if (allOff === undefined) throw new Error('找不到「全部关闭」按钮')
+  const beforeAllOff = calls.filter((call) => call.method === 'POST' && String(call.url).includes('/settings')).length
+  allOff.props.onClick()
+  const boxesAfterAllOff = modelBoxes()
+  boxesAfterAllOff[0].props.onChange()
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  const afterAllOff = calls
+    .filter((call) => call.method === 'POST' && String(call.url).includes('/settings'))
+    .slice(beforeAllOff)
+    .map((call) => {
+      try {
+        return JSON.parse(call.body)?.providers?.workbuddy?.disabledModels
+      } catch {
+        return undefined
+      }
+    })
+    .filter((value) => Array.isArray(value))
+  if (afterAllOff.length < 2) throw new Error(`全关 + 单开后应当发两次补丁，实际 ${afterAllOff.length}`)
+  const finalList = afterAllOff[afterAllOff.length - 1]
+  if (!finalList.includes('t1') || !finalList.includes('t2')) {
+    throw new Error(`全关后单独开启一个模型，把整批改动丢了：${JSON.stringify(afterAllOff)}`)
+  }
+  console.log('✓ 连点两个模型不会互相覆盖（后一次补丁带上全部改动）')
+} finally {
+  STATUS.providers[0] = toggleProviderSnapshot
 }
 
 console.log('client-credits: OK')

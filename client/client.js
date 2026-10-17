@@ -1290,20 +1290,79 @@ window.__ModuleLoader__.load({
         setAccSecret('')
       }, [activeTab, status === undefined])
 
+      /**
+       * 本地已生效、但服务端还没回来的模型开关。
+       *
+       * 为什么需要：`toggleModel()` 每次都回传**完整的** `disabledModels`，而它是
+       * 基于上一次 `/status` 计算出来的。连点两个模型时（第一个 POST 还没回来），
+       * 第二次仍然从旧 status 出发，后到的响应会把第一次的改动覆盖掉 ——
+       * 典型 lost update：勾一个、再勾一个，第一个又恢复成原样。
+       *
+       * 这里在本地记下「这一轮用户改了哪些 id」，计算时以它为准；服务端响应回来后
+       * 清空对应条目。只覆盖模型/强制显示这类幂等的开关，账号与密钥仍走原逻辑。
+       */
+      var pendingModelToggles = useRef({})
+      /** 最近的写入序号：旧响应不能覆盖新响应。 */
+      var writeSeq = useRef(0)
+
+      /**
+       * 把一个 provider 的「用户已勾选的模型集合」算出来（含尚未落盘的本地改动）。
+       *
+       * @param entry - 状态里的 provider 条目。
+       * @param field - `'disabled'` 或 `'forced'`。
+       * @returns 模型 id 数组。
+       */
+      var pendingSetFor = function (entry, field) {
+        var key = entry.provider + '::' + field
+        var local = pendingModelToggles.current[key]
+        var base = safeArray(entry.models)
+          .filter(function (row) { return row[field] })
+          .map(function (row) { return row.id })
+        var merged = base.slice()
+        if (local !== undefined) {
+          Object.keys(local).forEach(function (id) {
+            var on = local[id]
+            var at = merged.indexOf(id)
+            if (on && at === -1) merged.push(id)
+            else if (!on && at !== -1) merged.splice(at, 1)
+          })
+        }
+        return merged
+      }
+
+      /** 记下一个本地改动，等下一次服务端响应回来时清掉。 */
+      var markPending = function (provider, field, id, on) {
+        var key = provider + '::' + field
+        var bucket = pendingModelToggles.current[key]
+        if (bucket === undefined) bucket = pendingModelToggles.current[key] = {}
+        bucket[id] = on
+      }
+
       var mutate = function (patch, options) {
         if (status === undefined) return Promise.resolve()
         setBusy('save')
+        // 每次写入都占一个序号；只有最新一次的响应才允许覆盖本地状态，
+        // 否则「先发的慢响应」会把「后发的快响应」结果冲掉。
+        writeSeq.current += 1
+        var seq = writeSeq.current
         return postJson(SETTINGS_PATH, patch, status.key)
           .then(function (document) {
+            if (seq !== writeSeq.current) return document
             setStatus(document)
             setError(undefined)
             setBusy(undefined)
             if (options !== undefined && options.clearPatDraft === true) setPatDraft('')
             if (options !== undefined && typeof options.onSuccess === 'function') options.onSuccess()
+            return document
           })
           .catch(function (failure) {
-            setBusy(undefined)
-            setError(String(failure && failure.message ? failure.message : failure))
+            if (seq === writeSeq.current) {
+              setBusy(undefined)
+              setError(String(failure && failure.message ? failure.message : failure))
+            }
+            // 失败时丢弃本地猜测，让界面回到服务端真实值。
+            pendingModelToggles.current = {}
+            throw failure
           })
       }
 
@@ -1333,27 +1392,18 @@ window.__ModuleLoader__.load({
         // - 账号不支持的模型：勾选 = 加入 forced（强制显示），与用户的 disabled 无关；
         // - 正常模型：勾选 = 从 disabled 移除。
         if (model.unavailable) {
-          var forced = safeArray(entry.models)
-            .filter(function (row) {
-              return row.id !== model.id && row.forced
-            })
-            .map(function (row) {
-              return row.id
-            })
+          // 基于「含本地未落盘改动」的集合计算，避免连点时用旧快照覆盖。
+          var forced = pendingSetFor(entry, 'forced').filter(function (id) { return id !== model.id })
           if (!model.forced) forced.push(model.id)
+          markPending(entry.provider, 'forced', model.id, !model.forced)
           var forcePatch = { forcedModels: {} }
           forcePatch.forcedModels[entry.provider] = forced
           mutate(forcePatch)
           return
         }
-        var disabled = safeArray(entry.models)
-          .filter(function (row) {
-            return row.id !== model.id && row.disabled
-          })
-          .map(function (row) {
-            return row.id
-          })
+        var disabled = pendingSetFor(entry, 'disabled').filter(function (id) { return id !== model.id })
         if (!model.disabled) disabled.push(model.id)
+        markPending(entry.provider, 'disabled', model.id, !model.disabled)
         var providersPatch = {}
         providersPatch[entry.provider] = { disabledModels: disabled }
         mutate({ providers: providersPatch })
@@ -1367,6 +1417,15 @@ window.__ModuleLoader__.load({
             ? safeArray(entry.models).filter(function (row) { return !row.unavailable }).map(function (row) { return row.id })
             : [],
         }
+        // 全开/全关要写成「本地意图」，否则紧随其后的单模型开关仍从旧 status 出发、
+        // 只发一个 id，把这次批量改动整份冲掉（全关后发现只有一个模型被关）。
+        var key = entry.provider + '::disabled'
+        var bucket = {}
+        safeArray(entry.models).forEach(function (row) {
+          if (row.unavailable) return
+          bucket[row.id] = hidden === true
+        })
+        pendingModelToggles.current[key] = bucket
         mutate({ providers: providersPatch })
       }
 
@@ -2827,7 +2886,11 @@ window.__ModuleLoader__.load({
                   },
                   h('input', {
                     type: 'checkbox',
-                    checked: !model.disabled,
+                    // 勾选态要带上「还没落盘的本地改动」，否则连点时界面会闪回旧值。
+                    checked: pendingModelToggles.current[active.provider + '::disabled'] !== undefined
+                      && pendingModelToggles.current[active.provider + '::disabled'][model.id] !== undefined
+                      ? !pendingModelToggles.current[active.provider + '::disabled'][model.id]
+                      : !model.disabled,
                     'aria-label': model.name,
                     onChange: function () { toggleModel(active, model) },
                   }),
