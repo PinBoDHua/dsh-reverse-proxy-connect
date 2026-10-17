@@ -6,8 +6,10 @@ import {
   activeAccountFor,
   isAccountUsable,
   isExhausted,
+  mergeAccountSecrets,
   newAccountId,
   normalizeAccount,
+  pickFailoverCandidates,
   pickSwitchTarget,
 } from '../lib/accounts.js'
 import { PROVIDERS } from '../lib/protocol.js'
@@ -68,7 +70,55 @@ test('activeAccount 钉住优先，否则取第一个启用的', () => {
   assert.equal(activeAccountFor(QG, settings).id, 'a')
 
   settings.activeAccount[QG] = 'c'
-  assert.equal(activeAccountFor(QG, settings).id, 'c', '钉住的账号即使禁用也尊重用户选择')
+  assert.equal(activeAccountFor(QG, settings).id, 'a', '钉住的账号被禁用时让位给第一个启用的账号（禁用是更强的信号）')
+})
+
+test('请求失败换号：排除刚失败的账号，优先额度明确可用的', () => {
+  const settings = settingsWith({
+    accounts: { [QG]: [{ id: 'a', pat: 'p1' }, { id: 'b', pat: 'p2' }, { id: 'c', pat: 'p3' }, { id: 'd', pat: 'p4', enabled: false }] },
+  })
+  const credits = {
+    a: { state: 'ok', remain: 0 },
+    b: { state: 'none' },
+    c: { state: 'ok', remain: 10 },
+    d: { state: 'ok', remain: 10 },
+  }
+  const list = pickFailoverCandidates(QG, settings, 'a', (id) => credits[id], { isCoolingDown: (id) => id === 'c' })
+  assert.deepEqual(list.map((account) => account.id), ['b'], 'c 冷却中被跳过、d 被禁用、a 是当前账号')
+})
+
+test('账号更新是增量 upsert：没提到的账号与密钥都保留', () => {
+  const settings = settingsWith({
+    accounts: {
+      [QG]: [
+        { id: 'a', label: 'A', pat: 'keep-a' },
+        { id: 'b', label: 'B', pat: 'keep-b' },
+      ],
+    },
+  })
+  const merged = mergeAccountSecrets({ accounts: { [QG]: [{ id: 'a', label: 'A2' }] } }, settings)
+  assert.deepEqual(merged.accounts[QG].map((account) => account.id), ['a', 'b'])
+  assert.equal(merged.accounts[QG][0].label, 'A2')
+  assert.equal(merged.accounts[QG][0].pat, 'keep-a', '没带 pat 时沿用旧密钥')
+  assert.equal(merged.accounts[QG][1].pat, 'keep-b', '没提到的账号原样保留')
+})
+
+test('账号删除必须显式 removedAccounts；forget 清空单个账号密钥', () => {
+  const settings = settingsWith({
+    accounts: {
+      [QG]: [
+        { id: 'a', label: 'A', pat: 'pa' },
+        { id: 'b', label: 'B', pat: 'pb' },
+      ],
+    },
+  })
+  const removed = mergeAccountSecrets({ removedAccounts: { [QG]: ['a'] } }, settings)
+  assert.deepEqual(removed.accounts[QG].map((account) => account.id), ['b'])
+  assert.equal(removed.accounts[QG][0].pat, 'pb')
+
+  const forgot = mergeAccountSecrets({ accounts: { [QG]: [{ id: 'b', forget: true }] } }, settings)
+  assert.equal(forgot.accounts[QG].find((account) => account.id === 'b').pat, undefined)
+  assert.equal(forgot.accounts[QG].find((account) => account.id === 'b').forget, undefined, 'forget 不应写进设置')
 })
 
 test('账号可用性：桌面账号允许空路径，PAT 账号必须有令牌', () => {
@@ -107,6 +157,13 @@ test('自动切换：优先挑还有余额且可用的账号', () => {
   // 禁用账号不参与
   balances.c = { state: 'ok', remain: 9 }
   settings.accounts[QG][2].enabled = false
+  assert.equal(pickSwitchTarget(QG, settings, 'a', (id) => balances[id]), undefined)
+
+  // 「读不到、保留上次结果」不能当作可切换依据
+  settings.accounts[QG][2].enabled = true
+  balances.c = { state: 'ok', remain: 9, error: '读取失败' }
+  assert.equal(pickSwitchTarget(QG, settings, 'a', (id) => balances[id]), undefined)
+  balances.c = { state: 'ok', remain: 9, stale: true }
   assert.equal(pickSwitchTarget(QG, settings, 'a', (id) => balances[id]), undefined)
 })
 

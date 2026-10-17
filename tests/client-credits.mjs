@@ -76,17 +76,27 @@ const React = {
 
 // ---------- 假的 /status ----------
 const STATUS = {
-  version: 3,
-  plugin: { name: 'dsh-reverse-proxy-connect', version: '9.9.9', host: 'in-process' },
+  version: 4,
+  plugin: { name: 'dsh-reverse-proxy-connect', version: '9.9.9', host: 'in-process', api: 4, node: '24.0.0' },
+  host: { images: true, stats: true, catalogCache: true },
   key: 'k',
   providers: [
     {
       provider: 'workbuddy', displayName: 'WorkBuddy', kind: 'desktop', enabled: true,
       catalogSource: 'live', fetchedAt: 1792234000000,
+      health: { state: 'ok', consecutiveFailures: 0, lastErrorAt: 0 },
+      usage: {
+        requests: 12, ok: 11, failed: 1, aborted: 0, inputTokens: 100, outputTokens: 200, totalTokens: 300,
+        avgDurationMs: 1200, successRate: 11 / 12,
+        today: { requests: 3, totalTokens: 80 },
+        last: { at: 1792234000000, model: 'auto', kind: 'stop', durationMs: 1000, totalTokens: 20 },
+      },
       models: [{ id: 'auto', name: 'Auto', contextWindow: 256000, maxTokens: 32000, supportsImages: true, reasoningEfforts: [], disabled: false, unavailable: false, forced: false }],
+      modelCount: 1,
+      images: true,
       accounts: [
-        { id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: true, credits: { state: 'ok', remain: 675, total: 1200, unit: 'credits', items: [] } },
-        { id: 'acc-2', label: '备用账号', active: false, kind: 'desktop', configured: true, credits: { state: 'ok', remain: 0, total: 0, unit: 'credits' } },
+        { id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: true, source: 'desktop', credits: { state: 'ok', remain: 675, total: 1200, unit: 'credits', items: [] } },
+        { id: 'acc-2', label: '备用账号', active: false, kind: 'desktop', configured: true, source: 'browser-login', credits: { state: 'ok', remain: 0, total: 0, unit: 'credits' } },
       ],
       checkin: { enabled: true, lastRunAt: 1792234000000, result: { provider: 'workbuddy', claimed: 0, credit: 0, outcomes: [{ accountId: 'default', kind: 'already' }] } },
       autoSwitch: true,
@@ -96,22 +106,52 @@ const STATUS = {
     {
       provider: 'workbuddy-ai', displayName: 'WorkBuddy AI', kind: 'desktop', enabled: true,
       catalogSource: 'live', fetchedAt: 1792234000000,
+      health: { state: 'degraded', consecutiveFailures: 2, lastErrorAt: 1792234000000 },
+      usage: { requests: 2, ok: 1, failed: 1, totalTokens: 40, avgDurationMs: 800, successRate: 0.5, today: { requests: 1, totalTokens: 20 } },
       models: [{ id: 'glm-5.3', name: 'GLM-5.3', contextWindow: 1000000, maxTokens: 48000, supportsImages: true, reasoningEfforts: ['low'], credits: 'x0.79', disabled: false }],
+      modelCount: 1,
       credits: { state: 'ok', remain: 99, total: 100, unit: 'credits', resetAtMs: 1793500000000, items: [], fetchedAt: 1792234000000 },
       credential: { status: 'signed-in', uid: 'u2' },
     },
     {
       provider: 'qoder-global', displayName: 'Qoder Global', kind: 'pat', enabled: true,
       catalogSource: 'live', fetchedAt: 1792234000000,
+      health: { state: 'unknown', consecutiveFailures: 0 },
+      usage: { requests: 0, ok: 0, failed: 0, totalTokens: 0, avgDurationMs: 0, today: { requests: 0, totalTokens: 0 } },
       models: [{ id: 'qfmodel', name: 'Qwen3.8-Flash', contextWindow: 200000, maxTokens: 32768, supportsImages: true, reasoningEfforts: [], credits: 'x0', disabled: false }],
-      accounts: [{ id: 'default', label: '默认令牌', active: true, kind: 'pat', configured: true, credits: { state: 'ok', remain: 0, total: 0, unit: 'credits', exceeded: true } }],
+      modelCount: 1,
+      accounts: [{ id: 'default', label: '默认令牌', active: true, kind: 'pat', configured: true, source: 'pat', credits: { state: 'ok', remain: 0, total: 0, unit: 'credits', exceeded: true } }],
       autoSwitch: true,
       credits: { state: 'ok', remain: 0, total: 0, unit: 'credits', planName: 'Free', resetAtMs: 1794803568608, exceeded: true, items: [], fetchedAt: 1792234000000 },
       credential: { status: 'signed-in', email: 'a@b.c' },
     },
   ],
-  settings: { workbuddy: {}, qoder: { qoder: { configured: false }, 'qoder-global': { configured: true } }, showRateInModelName: true },
+  settings: {
+    workbuddy: {},
+    qoder: { qoder: { configured: false }, 'qoder-global': { configured: true } },
+    showRateInModelName: true,
+    showUsageInSidebar: true,
+    autoSwitch: true,
+    checkin: true,
+    probe: true,
+    advanced: { idleTimeoutMs: 180000, catalogRefreshMs: 600000, creditsRefreshMs: 120000, stats: true, catalogCache: true },
+  },
   probe: { enabled: true, lastRunAt: 1792234000000, results: {} },
+  stats: {
+    enabled: true,
+    since: 1792000000000,
+    totals: { requests: 14, ok: 12, failed: 2, totalTokens: 340, avgDurationMs: 1100, successRate: 12 / 14 },
+    today: { requests: 4, totalTokens: 100, date: '2026-10-18' },
+    providers: {},
+    providerToday: {},
+    accounts: {},
+    models: {},
+    health: {},
+    recent: [
+      { at: 1792234000000, provider: 'workbuddy', accountId: 'default', model: 'auto', kind: 'stop', durationMs: 1000, totalTokens: 20 },
+      { at: 1792233000000, provider: 'workbuddy', accountId: 'default', model: 'auto', kind: 'error', code: 'RATE_LIMIT', durationMs: 300, totalTokens: 0 },
+    ],
+  },
 }
 
 const calls = []
@@ -178,12 +218,14 @@ if (registered.some((entry) => entry.options.name === 'shell.overlay')) {
 }
 
 /** 走一遍渲染，直到状态收敛。 */
-async function render(component, props) {
+async function render(component, props, skipEffects) {
   let tree
   for (let pass = 0; pass < 6; pass++) {
     beginRender()
     tree = component(props)
-    for (const effect of effects) effect()
+    if (skipEffects !== true) {
+      for (const effect of effects) effect()
+    }
     await new Promise((resolve) => setTimeout(resolve, 5))
     if (!dirty) break
   }
@@ -227,8 +269,26 @@ function find(tree, predicate) {
   return found
 }
 
+/** 按可见文字找按钮。 */
+function findButton(tree, label) {
+  return find(tree, (node) => node.type === 'button' && textOf(node) === label)
+}
+
+/** 收集所有符合条件的节点。 */
+function findAll(tree, predicate) {
+  const out = []
+  ;(function walk(node) {
+    if (node === null || node === undefined) return
+    if (Array.isArray(node)) { node.forEach(walk); return }
+    if (typeof node !== 'object') return
+    if (predicate(node)) out.push(node)
+    walk(node.children)
+  })(tree)
+  return out
+}
+
 // ---------- 1. 设置卡片：版本号 + 各分组都在 ----------
-const cardTree = await mount(card, { t: (key) => key })
+let cardTree = await mount(card, { t: (key) => key })
 const cardText = textOf(cardTree)
 if (!cardText.includes('v9.9.9')) throw new Error('卡片没有显示版本号')
 for (const section of ['secStatus', 'secConnection', 'models', 'credits']) {
@@ -431,5 +491,90 @@ toggle2.props.onClick({ preventDefault() {} })
 tree = await render(pill, { t: (key) => key, wide: true })
 if (textOf(tree).includes('creditsRefresh')) throw new Error('再点一次没有收起面板')
 console.log('✓ 再点一次收起面板')
+
+// ---------- 7. 1.0.0：健康状态与用量区块 ----------
+// 小卡用的是另一棵组件树；不重新挂载的话下面的 hook 槽还是小卡的。
+cardTree = await mount(card, { t: (key) => key })
+const v4Text = textOf(cardTree)
+if (!v4Text.includes('healthOk')) throw new Error('卡片没有显示健康状态')
+if (!v4Text.includes('healthDegraded')) throw new Error('降级状态没有显示')
+if (!v4Text.includes('IMG')) throw new Error('卡片没有标记图片输入能力')
+if (!v4Text.includes('usage')) throw new Error('卡片缺少用量分组')
+if (!v4Text.includes('usageToday') || !v4Text.includes('usageTotal')) {
+  throw new Error('用量区块缺少今日/累计')
+}
+if (!v4Text.includes('usageRecent') && !v4Text.includes('RATE_LIMIT')) {
+  throw new Error('最近请求没有渲染')
+}
+console.log('✓ 健康状态、图片能力与用量区块都渲染出来了')
+
+// 「重置统计」发 action=stats-reset
+const resetStatsButton = findButton(cardTree, 'usageReset')
+if (resetStatsButton === undefined) throw new Error('用量区块没有「重置统计」按钮')
+const beforeReset = calls.length
+resetStatsButton.props.onClick()
+await new Promise((resolve) => setTimeout(resolve, 10))
+const resetCall = calls[calls.length - 1]
+if (calls.length === beforeReset || !String(resetCall.body).includes('stats-reset')) {
+  throw new Error('点重置统计没有发出 action=stats-reset')
+}
+console.log('✓ 重置统计会发 action=stats-reset')
+
+// 高级设置：保存会发 advanced 补丁
+const advancedSaveButton = findButton(cardTree, 'advancedSave')
+if (advancedSaveButton === undefined) throw new Error('高级设置里没有保存按钮')
+const beforeAdvanced = calls.length
+advancedSaveButton.props.onClick()
+await new Promise((resolve) => setTimeout(resolve, 10))
+const advancedCall = calls[calls.length - 1]
+if (calls.length === beforeAdvanced || !String(advancedCall.body).includes('advanced')) {
+  throw new Error('保存高级设置没有发出 advanced 补丁')
+}
+console.log('✓ 高级设置会发 advanced 补丁')
+
+// ---------- 8. PAT 保存要写进当前账号（而不是被忽略的旧字段） ----------
+const qoderTab = findButton(cardTree, 'Qoder Global')
+if (qoderTab === undefined) throw new Error('找不到 Qoder Global 标签')
+qoderTab.props.onClick()
+cardTree = await render(card, { t: (key) => key })
+const patInput = find(cardTree, (node) => node.type === 'input' && node.props.type === 'password' && String(node.props.placeholder).includes('patConfigured'))
+if (patInput === undefined) throw new Error('找不到 PAT 输入框')
+patInput.props.onChange({ target: { value: 'pt-123' } })
+// 简化版 hooks 每次渲染都会重跑 effect；跳过一轮，模拟 React 里
+// 「依赖没变就不重置输入草稿」的行为。
+cardTree = await render(card, { t: (key) => key }, true)
+const savePatButton = findButton(cardTree, 'save')
+if (savePatButton === undefined) throw new Error('找不到保存 PAT 按钮')
+const beforePat = calls.length
+savePatButton.props.onClick()
+await new Promise((resolve) => setTimeout(resolve, 10))
+const patCall = calls[calls.length - 1]
+if (calls.length === beforePat) throw new Error('保存 PAT 没有发请求')
+if (!String(patCall.body).includes('"accounts"') || !String(patCall.body).includes('pt-123')) {
+  throw new Error(`有账号池时 PAT 应写进 accounts，实际：${String(patCall.body).slice(0, 200)}`)
+}
+console.log('✓ 有账号池时 PAT 会写进当前账号')
+
+// ---------- 8b. 删除账号走 removedAccounts（避免旧列表覆盖新账号） ----------
+const wbTab = findButton(cardTree, 'WorkBuddy')
+if (wbTab === undefined) throw new Error('找不到 WorkBuddy 标签')
+wbTab.props.onClick()
+cardTree = await render(card, { t: (key) => key })
+const removeButtons = findAll(cardTree, (node) => node.type === 'button' && textOf(node) === 'removeAccount')
+if (removeButtons.length !== 2) throw new Error(`应有 2 个删除按钮，实际 ${removeButtons.length}`)
+const beforeRemove = calls.length
+removeButtons[1].props.onClick()
+await new Promise((resolve) => setTimeout(resolve, 10))
+const removeCall = calls[calls.length - 1]
+if (calls.length === beforeRemove || !String(removeCall.body).includes('removedAccounts') || !String(removeCall.body).includes('acc-2')) {
+  throw new Error(`删除账号应发 removedAccounts：${String(removeCall?.body).slice(0, 200)}`)
+}
+console.log('✓ 删除账号走 removedAccounts')
+
+// ---------- 9. 侧栏小卡用轻量状态，不再拉整份模型清单 ----------
+if (!calls.some((call) => String(call.url).includes('?light=1'))) {
+  throw new Error('侧栏小卡没有走 ?light=1 轻量状态')
+}
+console.log('✓ 侧栏小卡走轻量状态接口')
 
 console.log('client-credits: OK')

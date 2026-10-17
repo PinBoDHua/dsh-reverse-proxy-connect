@@ -138,6 +138,56 @@ window.__ModuleLoader__.load({
       loginOpening: '正在打开…',
       loginCancel: '取消',
       loginOpenManually: '没有自动打开？点这里',
+      // 1.0.0 新增：健康、用量、高级
+      healthOk: '正常',
+      healthDegraded: '降级',
+      healthDown: '不可用',
+      healthUnknown: '无记录',
+      usage: '用量',
+      usageToday: '今日',
+      usageTotal: '累计',
+      usageRequests: '{count} 次请求',
+      usageCalls: '请求',
+      usageRate: '成功率',
+      usageTokens: '{count} tokens',
+      usageSuccess: '成功率 {rate}%',
+      usageLatency: '平均 {ms}ms',
+      usageRecent: '最近请求',
+      usageEmpty: '还没有请求记录。发一次消息后这里会出现用量。',
+      usageDisabled: '用量统计已关闭（可在高级设置里打开）。',
+      usageReset: '重置统计',
+      usageResetDone: '已重置',
+      usageSince: '统计起点 {time}',
+      usageModel: '模型',
+      usageDuration: '耗时',
+      usageOutcome: '结果',
+      usageKindStop: '完成',
+      usageKindTools: '工具调用',
+      usageKindMaxTokens: '达到上限',
+      usageKindError: '失败',
+      usageKindAborted: '已取消',
+      usageKindIncomplete: '中断',
+      advanced: '高级',
+      advancedHint: '这些参数一般不需要改；改错了也不会让插件失效，数字会被夹到安全区间。',
+      advancedIdle: '流空闲超时（秒）',
+      advancedIdleHint: '多久没有新数据就判定卡死。长回答只要持续出字就不会被打断。',
+      advancedCatalog: '目录刷新间隔（秒）',
+      advancedCredits: '额度刷新间隔（秒）',
+      advancedStats: '记录用量统计',
+      advancedCache: '把模型目录缓存到磁盘（重启后立即有模型）',
+      advancedSave: '保存高级设置',
+      advancedSaved: '已保存',
+      imagesOn: '图片输入已启用',
+      imagesOff: '宿主未提供附件服务，图片输入不可用',
+      catalogDisk: '已缓存（启动时恢复）',
+      patOpen: '打开 PAT 页面',
+      patLinkHint: '在账号设置 → 个人访问令牌里生成，粘贴到上面。',
+      usageInSidebar: '侧栏显示今日用量',
+      summaryProviders: '四个 provider',
+      accountSourceBrowser: '浏览器登录',
+      accountSourceDesktop: '桌面登录',
+      accountSourcePat: 'PAT',
+      lastErrorAt: '最近失败 {time}',
     }
     var en = {
       nav: 'Reverse proxy',
@@ -240,6 +290,56 @@ window.__ModuleLoader__.load({
       loginOpening: 'Opening…',
       loginCancel: 'Cancel',
       loginOpenManually: 'Not opened? Click here',
+      // 1.0.0 additions: health, usage, advanced
+      healthOk: 'Healthy',
+      healthDegraded: 'Degraded',
+      healthDown: 'Unavailable',
+      healthUnknown: 'No data',
+      usage: 'Usage',
+      usageToday: 'Today',
+      usageTotal: 'All time',
+      usageRequests: '{count} requests',
+      usageCalls: 'Requests',
+      usageRate: 'Success',
+      usageTokens: '{count} tokens',
+      usageSuccess: '{rate}% success',
+      usageLatency: '{ms}ms avg',
+      usageRecent: 'Recent requests',
+      usageEmpty: 'No requests recorded yet. Send a message and the usage will show up here.',
+      usageDisabled: 'Usage recording is off (enable it in Advanced).',
+      usageReset: 'Reset stats',
+      usageResetDone: 'Reset',
+      usageSince: 'Counting since {time}',
+      usageModel: 'Model',
+      usageDuration: 'Took',
+      usageOutcome: 'Outcome',
+      usageKindStop: 'Completed',
+      usageKindTools: 'Tool calls',
+      usageKindMaxTokens: 'Max tokens',
+      usageKindError: 'Failed',
+      usageKindAborted: 'Cancelled',
+      usageKindIncomplete: 'Interrupted',
+      advanced: 'Advanced',
+      advancedHint: 'You normally do not need these. Out-of-range values are clamped to safe bounds.',
+      advancedIdle: 'Stream idle timeout (seconds)',
+      advancedIdleHint: 'How long without any data before the stream is considered stuck. Long answers keep flowing and are never cut off.',
+      advancedCatalog: 'Catalog refresh interval (seconds)',
+      advancedCredits: 'Credits refresh interval (seconds)',
+      advancedStats: 'Record usage statistics',
+      advancedCache: 'Cache the model catalog on disk (models appear instantly after a restart)',
+      advancedSave: 'Save advanced settings',
+      advancedSaved: 'Saved',
+      imagesOn: 'Image input enabled',
+      imagesOff: 'The host exposes no attachment service, so image input is unavailable',
+      catalogDisk: 'Cached (restored at startup)',
+      patOpen: 'Open the PAT page',
+      patLinkHint: 'Generate one under account settings → personal access tokens, then paste it above.',
+      usageInSidebar: 'Show today’s usage in the sidebar',
+      summaryProviders: 'Four providers',
+      accountSourceBrowser: 'Browser login',
+      accountSourceDesktop: 'Desktop login',
+      accountSourcePat: 'PAT',
+      lastErrorAt: 'Last failure {time}',
     }
 
     function bind(t, key, vars) {
@@ -320,6 +420,45 @@ window.__ModuleLoader__.load({
       var total = credits.total > 0 ? ' / ' + formatNumber(credits.total) : ''
       var unit = credits.unit === 'credits' ? bind(t, 'creditsUnit') : ''
       return remain + total + ' ' + unit
+    }
+
+    /** 健康状态的文案键。 */
+    function healthTextKey(state) {
+      if (state === 'ok') return 'healthOk'
+      if (state === 'degraded') return 'healthDegraded'
+      if (state === 'down') return 'healthDown'
+      return 'healthUnknown'
+    }
+
+    /** 健康状态的颜色。 */
+    function healthColor(state) {
+      if (state === 'ok') return 'var(--dsw-alias-state-success-primary, #1a8f5f)'
+      if (state === 'degraded') return 'var(--dsw-alias-state-warning-primary, #b26b00)'
+      if (state === 'down') return 'var(--dsw-alias-state-error-primary, #b3261e)'
+      return 'var(--dsw-alias-label-tertiary)'
+    }
+
+    /** 毫秒 → 人话。 */
+    function formatDuration(ms) {
+      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '—'
+      if (ms < 1000) return String(Math.round(ms)) + 'ms'
+      return String(Math.round(ms / 100) / 10) + 's'
+    }
+
+    /** 请求终态 → 文案键。 */
+    function kindTextKey(kind) {
+      if (kind === 'tool-calls') return 'usageKindTools'
+      if (kind === 'max-tokens') return 'usageKindMaxTokens'
+      if (kind === 'error') return 'usageKindError'
+      if (kind === 'aborted') return 'usageKindAborted'
+      if (kind === 'incomplete') return 'usageKindIncomplete'
+      return 'usageKindStop'
+    }
+
+    /** Qoder PAT 页面（按区域）。 */
+    var PAT_PAGE = {
+      qoder: 'https://qoder.cn/account/integrations',
+      'qoder-global': 'https://qoder.com/account/integrations',
     }
 
     // ── 极简样式 ────────────────────────────────────────────────────
@@ -563,8 +702,9 @@ window.__ModuleLoader__.load({
     }
 
     // ── 网络 ────────────────────────────────────────────────────────
-    function fetchStatus() {
-      return fetch(STATUS_PATH, { headers: { Accept: 'application/json' } }).then(function (response) {
+    function fetchStatus(light) {
+      var url = light === true ? STATUS_PATH + '?light=1' : STATUS_PATH
+      return fetch(url, { headers: { Accept: 'application/json' } }).then(function (response) {
         if (!response.ok) throw new Error('status ' + response.status)
         return response.json()
       })
@@ -642,6 +782,25 @@ window.__ModuleLoader__.load({
       var accSecretState = useState('')
       var accSecret = accSecretState[0]
       var setAccSecret = accSecretState[1]
+      // 高级设置草稿（秒为单位；保存时换算回毫秒）。
+      var advIdleState = useState('')
+      var advIdle = advIdleState[0]
+      var setAdvIdle = advIdleState[1]
+      var advCatalogState = useState('')
+      var advCatalog = advCatalogState[0]
+      var setAdvCatalog = advCatalogState[1]
+      var advCreditsState = useState('')
+      var advCredits = advCreditsState[0]
+      var setAdvCredits = advCreditsState[1]
+      var advStatsState = useState(true)
+      var advStats = advStatsState[0]
+      var setAdvStats = advStatsState[1]
+      var advCacheState = useState(true)
+      var advCache = advCacheState[0]
+      var setAdvCache = advCacheState[1]
+      var advSavedState = useState(false)
+      var advSaved = advSavedState[0]
+      var setAdvSaved = advSavedState[1]
 
       var load = useCallback(
         function () {
@@ -683,6 +842,12 @@ window.__ModuleLoader__.load({
             setAppPathDraft(desktop.electronPath || '')
             setAuthFileDraft(desktop.authFile || '')
           }
+          var advanced = status.settings.advanced || {}
+          if (typeof advanced.idleTimeoutMs === 'number') setAdvIdle(String(Math.round(advanced.idleTimeoutMs / 1000)))
+          if (typeof advanced.catalogRefreshMs === 'number') setAdvCatalog(String(Math.round(advanced.catalogRefreshMs / 1000)))
+          if (typeof advanced.creditsRefreshMs === 'number') setAdvCredits(String(Math.round(advanced.creditsRefreshMs / 1000)))
+          setAdvStats(advanced.stats !== false)
+          setAdvCache(advanced.catalogCache !== false)
         }
         setPatDraft('')
       }, [activeTab, status === undefined])
@@ -866,6 +1031,54 @@ window.__ModuleLoader__.load({
           })
       }
 
+      /** 保存高级设置：秒 → 毫秒，非法输入交给宿主夹取。 */
+      var saveAdvanced = function () {
+        if (status === undefined) return
+        var toMs = function (value, fallback) {
+          var parsed = Number(String(value).trim())
+          if (!isFinite(parsed) || parsed <= 0) return fallback
+          return Math.round(parsed * 1000)
+        }
+        var current = (status.settings && status.settings.advanced) || {}
+        setBusy('advanced')
+        postJson(SETTINGS_PATH, {
+          advanced: {
+            idleTimeoutMs: toMs(advIdle, current.idleTimeoutMs || 180000),
+            catalogRefreshMs: toMs(advCatalog, current.catalogRefreshMs || 600000),
+            creditsRefreshMs: toMs(advCredits, current.creditsRefreshMs || 120000),
+            stats: advStats !== false,
+            catalogCache: advCache !== false,
+          },
+        }, status.key)
+          .then(function (document) {
+            setStatus(document)
+            setBusy(undefined)
+            setError(undefined)
+            setAdvSaved(true)
+            setTimeout(function () { setAdvSaved(false) }, 1600)
+          })
+          .catch(function (failure) {
+            setBusy(undefined)
+            setError(String(failure && failure.message ? failure.message : failure))
+          })
+      }
+
+      /** 重置用量统计。 */
+      var resetStats = function () {
+        if (status === undefined) return
+        setBusy('stats')
+        postJson(ACTION_PATH, { action: 'stats-reset' }, status.key)
+          .then(function (document) {
+            setStatus(document)
+            setBusy(undefined)
+            setError(undefined)
+          })
+          .catch(function (failure) {
+            setBusy(undefined)
+            setError(String(failure && failure.message ? failure.message : failure))
+          })
+      }
+
       /**
        * 额度文案。
        *
@@ -878,15 +1091,47 @@ window.__ModuleLoader__.load({
         return formatCreditsText(credits, t)
       }
 
+      /** 账号池的最小可回传形态（密钥永远不回传，服务端按 id 合并）。 */
+      var accountRows = Array.isArray(active && active.accounts) ? active.accounts : []
+      var plainAccounts = function (extra) {
+        return accountRows.map(function (row) {
+          var next = {
+            id: row.id,
+            label: row.label,
+            enabled: row.enabled !== false,
+          }
+          if (row.authFile !== undefined && row.authFile !== '') next.authFile = row.authFile
+          if (extra !== undefined && extra.id === row.id) {
+            if (extra.pat !== undefined) next.pat = extra.pat
+            if (extra.forget === true) next.forget = true
+          }
+          return next
+        })
+      }
+
+      var activeRow = accountRows.filter(function (row) { return row.active })[0]
+
       var savePat = function () {
         if (active === undefined) return
+        var pat = patDraft.trim()
+        if (pat === '') return
+        // 账号池存在时必须写进「当前账号」，否则写的是被忽略的旧字段，
+        // 用户会看到「保存成功但状态没变」。
+        if (accountRows.length > 0 && activeRow !== undefined) {
+          mutate({ accounts: plainAccounts({ id: activeRow.id, pat: pat }) })
+          return
+        }
         var patch = { qoder: {} }
-        patch.qoder[active.provider] = { pat: patDraft.trim() }
+        patch.qoder[active.provider] = { pat: pat }
         mutate(patch)
       }
 
       var clearPat = function () {
         if (active === undefined) return
+        if (accountRows.length > 0 && activeRow !== undefined) {
+          mutate({ accounts: plainAccounts({ id: activeRow.id, forget: true }) })
+          return
+        }
         var patch = { qoder: {} }
         patch.qoder[active.provider] = { pat: '' }
         mutate(patch)
@@ -919,6 +1164,7 @@ window.__ModuleLoader__.load({
 
       var tabs = providers.map(function (entry) {
         var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
+        var tabHealth = entry.health || { state: 'unknown' }
         return h(
           'button',
           {
@@ -931,52 +1177,90 @@ window.__ModuleLoader__.load({
           h(
             'span',
             { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } },
-            h('span', { style: dot(signed ? DOT_OK : DOT_OFF) }),
+            h('span', { style: dot(signed ? (tabHealth.state === 'unknown' ? DOT_OK : healthColor(tabHealth.state)) : DOT_OFF) }),
             entry.displayName,
           ),
         )
       })
 
-      // 账号总览：一行小胶囊，不用切标签就能横向对比四家余额。
-      var overview = []
-      for (var overviewIndex = 0; overviewIndex < providers.length; overviewIndex++) {
-        var overviewEntry = providers[overviewIndex]
-        if (overviewEntry.enabled === false) continue
-        var overviewCredits = overviewEntry.credits
-        if (overviewCredits === undefined || overviewCredits.state !== 'ok') continue
-        overview.push(h(
-          'span',
+      // 账号总览：四张可点的卡片。比原来一行小胶囊多三样东西：
+      // 健康圆点、今日用量、当前账号名 —— 不切标签就能判断「该不该点进去」。
+      var summaryCards = providers.map(function (entry) {
+        var health = entry.health || { state: 'unknown' }
+        var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
+        var credits = entry.credits || { state: 'none' }
+        var today = (entry.usage && entry.usage.today) || {}
+        var selected = entry.provider === activeTab
+        var accent = PROVIDER_ACCENT[entry.provider] || 'currentColor'
+        var low = credits.state === 'ok' && isCreditsLow(credits)
+        var valueText = credits.state === 'ok'
+          ? credits.unlimited === true ? '∞' : compactNumber(credits.remain)
+          : '—'
+        var metaParts = [String(entry.modelCount !== undefined ? entry.modelCount : (entry.models || []).length) + ' ' + bind(t, 'models')]
+        if (today.requests > 0) metaParts.push(compactNumber(today.totalTokens || 0) + ' tok')
+        var activeRow = (entry.accounts || []).filter(function (row) { return row.active })[0]
+        if (activeRow !== undefined) metaParts.push(activeRow.label)
+        return h(
+          'button',
           {
-            key: overviewEntry.provider,
+            key: entry.provider,
+            type: 'button',
+            'aria-pressed': selected,
+            onClick: function () { setActiveTab(entry.provider) },
             style: {
-              display: 'inline-flex',
-              alignItems: 'baseline',
-              gap: 6,
-              padding: '3px 10px',
-              borderRadius: 999,
-              border: '0.5px solid var(--dsw-alias-border-l2)',
-              background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.06))',
+              font: 'inherit',
+              textAlign: 'left',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 3,
+              padding: '8px 10px',
+              borderRadius: 10,
+              cursor: 'pointer',
+              border: '0.5px solid ' + (selected ? 'var(--dsw-alias-state-business-primary, #2f6fed)' : 'var(--dsw-alias-border-l2)'),
+              background: selected
+                ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))'
+                : 'var(--dsw-alias-bg-l1, transparent)',
+              color: 'var(--dsw-alias-label-primary)',
+              minWidth: 0,
+              opacity: entry.enabled === false ? 0.55 : 1,
             },
           },
-          h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)' } }, overviewEntry.displayName),
+          h('span', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
+            h('span', { title: bind(t, healthTextKey(health.state)), style: Object.assign({}, dot(signed ? healthColor(health.state) : DOT_OFF)) }),
+            h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, entry.displayName),
+            h('span', { style: S.grow }),
+            h('span', {
+              style: {
+                fontSize: TEXT.tiny,
+                color: healthColor(health.state),
+                opacity: health.state === 'unknown' ? 0.6 : 1,
+                whiteSpace: 'nowrap',
+              },
+            }, bind(t, healthTextKey(health.state)))),
           h('span', {
             style: {
-              fontSize: TEXT.strong,
+              fontSize: 20,
+              lineHeight: '24px',
               fontWeight: 600,
               fontVariantNumeric: 'tabular-nums',
-              color: isCreditsLow(overviewCredits)
-                ? 'var(--dsw-alias-state-warning-primary, #b26b00)'
-                : 'var(--dsw-alias-label-primary)',
+              color: low ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent,
             },
-          }, overviewCredits.unlimited === true ? bind(t, 'creditsUnlimited') : formatNumber(overviewCredits.remain)),
-        ))
-      }
+          }, valueText),
+          h('span', {
+            style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+          }, metaParts.join(' · ')),
+        )
+      })
 
       var sections = [
         h('div', { key: 'head', style: S.header },
           h('h3', { style: S.title }, bind(t, 'title')),
           // 版本号：排查问题时第一件要问的就是「你装的是哪一版」。
-          h('span', { style: S.version }, 'v' + (status.plugin && status.plugin.version ? status.plugin.version : '?'))),
+          h('span', { style: S.version }, 'v' + (status.plugin && status.plugin.version ? status.plugin.version : '?')),
+          h('span', {
+            style: S.badgeSoft,
+            title: status.host && status.host.images === true ? bind(t, 'imagesOn') : bind(t, 'imagesOff'),
+          }, status.host && status.host.images === true ? 'IMG' : 'TXT')),
         h('p', { key: 'intro', style: S.intro }, bind(t, 'intro')),
         h('div', { key: 'toolbar', style: S.row },
           h('button', { type: 'button', style: S.buttonPrimary, onClick: refresh, disabled: busy === 'refresh' },
@@ -988,11 +1272,9 @@ window.__ModuleLoader__.load({
             onClick: function () { setShowDiag(!showDiag) },
           }, bind(t, 'diagnostics'))),
         error === undefined ? null : h('p', { key: 'err', style: S.hintError }, bind(t, 'error') + '：' + error),
-        overview.length === 0
+        summaryCards.length === 0
           ? null
-          : h('div', { key: 'overview', style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
-              h('span', { style: S.sectionTitle }, bind(t, 'summary')),
-              ...overview),
+          : h('div', { key: 'summary', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 } }, summaryCards),
         h('div', { key: 'tabs', style: S.tabs }, tabs),
       ]
 
@@ -1003,14 +1285,17 @@ window.__ModuleLoader__.load({
 
       // ── 状态 ────────────────────────────────────────────────────
       var credential = active.credential || {}
+      var activeHealth = active.health || { state: 'unknown' }
       var catalogText =
         active.catalogSource === 'live'
           ? bind(t, 'catalogLive') + ' · ' + formatTime(active.fetchedAt)
           : active.catalogSource === 'saved'
             ? bind(t, 'catalogSaved') + ' · ' + formatTime(active.fetchedAt)
-            : active.catalogSource === 'builtin'
-              ? bind(t, 'catalogBuiltin')
-              : bind(t, 'catalogNone')
+            : active.catalogSource === 'disk'
+              ? bind(t, 'catalogDisk') + ' · ' + formatTime(active.fetchedAt)
+              : active.catalogSource === 'builtin'
+                ? bind(t, 'catalogBuiltin')
+                : bind(t, 'catalogNone')
 
       sections.push(
         h('div', { key: 'status', style: S.section },
@@ -1027,13 +1312,24 @@ window.__ModuleLoader__.load({
             h('span', { style: S.badgeSoft }, active.kind === 'desktop' ? bind(t, 'kindDesktop') : bind(t, 'kindPat')),
             h('span', {
               style: credential.status === 'signed-in' ? S.badge : S.badgeWarn,
-            }, credential.status === 'signed-in' ? bind(t, 'signedIn') : bind(t, 'signedOut'))),
+            }, credential.status === 'signed-in' ? bind(t, 'signedIn') : bind(t, 'signedOut')),
+            h('span', {
+              title: activeHealth.consecutiveFailures > 0 ? String(activeHealth.consecutiveFailures) + ' 连败' : '',
+              style: Object.assign({}, S.badgeSoft, { color: healthColor(activeHealth.state) }),
+            }, bind(t, healthTextKey(activeHealth.state))),
+            h('span', {
+              style: S.badgeSoft,
+              title: active.images === true ? bind(t, 'imagesOn') : bind(t, 'imagesOff'),
+            }, 'IMG')),
           h('p', { key: 'cat', style: S.hintTiny }, catalogText),
           credential.status === 'signed-in' && credential.email
             ? h('p', { key: 'who', style: S.hintTiny }, credential.email)
             : null,
           credential.status !== 'signed-in' && credential.message
             ? h('p', { key: 'why', style: S.hintWarn }, credential.message)
+            : null,
+          activeHealth.lastErrorAt > 0 && activeHealth.state !== 'ok'
+            ? h('p', { key: 'last', style: S.hintWarn }, bind(t, 'lastErrorAt', { time: formatTime(activeHealth.lastErrorAt) }))
             : null,
           active.message ? h('p', { key: 'msg', style: S.hintWarn }, active.message) : null),
       )
@@ -1042,7 +1338,7 @@ window.__ModuleLoader__.load({
       //
       // 多账号的意义：一个账号的积分用完了，自动/手动切到另一个还能用的账号。
       // 这里只做「增删与选定」，PAT 本身从不回传给浏览器（状态文档里没有）。
-      var accountRows = Array.isArray(active.accounts) ? active.accounts : []
+      accountRows = Array.isArray(active && active.accounts) ? active.accounts : []
       var isPatProvider = active.kind === 'pat'
       var loginJob = active.login
       var accountItems = accountRows.map(function (account, index) {
@@ -1080,18 +1376,15 @@ window.__ModuleLoader__.load({
               style: S.buttonGhost,
               disabled: busy === 'accounts',
               onClick: function () {
-                var list = accountRows
-                  .filter(function (row) { return row.id !== account.id })
-                  .map(function (row) {
-                    return {
-                      id: row.id,
-                      label: row.label,
-                      enabled: row.enabled !== false,
-                      ...(row.authFile === undefined || row.authFile === '' ? {} : { authFile: row.authFile }),
-                    }
-                  })
-                var patch = { accounts: {} }
-                patch.accounts[active.provider] = list
+                // 删除用显式 id，而不是回传一个「少了这一条」的列表：
+                // 列表可能是轮询前的旧快照，整表覆盖会把刚登录的账号一起冲掉。
+                var remaining = accountRows.filter(function (row) { return row.id !== account.id })
+                var patch = { removedAccounts: {} }
+                patch.removedAccounts[active.provider] = [account.id]
+                if (account.active === true && remaining.length > 0) {
+                  patch.activeAccount = {}
+                  patch.activeAccount[active.provider] = remaining[0].id
+                }
                 mutate(patch)
               },
             }, bind(t, 'removeAccount'))
@@ -1101,14 +1394,6 @@ window.__ModuleLoader__.load({
       var addAccount = function () {
         var secret = accSecret.trim()
         var label = accLabel.trim() === '' ? bind(t, 'accountDefaultLabel') : accLabel.trim()
-        var list = accountRows.map(function (row) {
-          return {
-            id: row.id,
-            label: row.label,
-            enabled: row.enabled !== false,
-            ...(row.authFile === undefined || row.authFile === '' ? {} : { authFile: row.authFile }),
-          }
-        })
         var next = { id: 'acc-' + String(Date.now()), label: label, enabled: true }
         if (isPatProvider) {
           if (secret === '') return
@@ -1116,9 +1401,9 @@ window.__ModuleLoader__.load({
         } else if (secret !== '') {
           next.authFile = secret
         }
-        list.push(next)
         var patch = { accounts: {}, activeAccount: {} }
-        patch.accounts[active.provider] = list
+        // 增量 upsert：服务端会把这一条并进现有账号池，不会覆盖别的账号。
+        patch.accounts[active.provider] = [next]
         // 新加的账号直接设为当前，省得用户再点一次。
         patch.activeAccount[active.provider] = next.id
         mutate(patch)
@@ -1343,6 +1628,86 @@ window.__ModuleLoader__.load({
 
       sections.push(h('div', { key: 'credits', style: S.section }, creditsHead, ...creditsBody))
 
+      // ── 用量 ────────────────────────────────────────────────────
+      //
+      // 这是 1.0.0 新增的一块：之前只有「还剩多少」，没有「用掉多少」。
+      // 数据由宿主在每次请求结束时写入 stats.json，失败与取消分开计数，
+      // 所以「今天 12 次请求、成功率 91%」这类问题是能直接回答的。
+      var statsDoc = status.stats || {}
+      var providerUsage = active.usage || {}
+      var usageToday = providerUsage.today || {}
+      var recentRequests = (statsDoc.recent || []).filter(function (entry) {
+        return entry.provider === active.provider
+      }).slice(0, 6)
+
+      var usageStat = function (label, value, sub) {
+        return h('div', { key: label, style: { display: 'flex', flexDirection: 'column', gap: 1, minWidth: 74 } },
+          h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)' } }, label),
+          h('span', { style: { fontSize: TEXT.strong, fontWeight: 600, fontVariantNumeric: 'tabular-nums', color: 'var(--dsw-alias-label-primary)' } }, value),
+          sub === undefined ? null : h('span', { style: { fontSize: 11, color: 'var(--dsw-alias-label-tertiary)', opacity: 0.8 } }, sub))
+      }
+
+      var usageBody = []
+      if (statsDoc.enabled === false) {
+        usageBody.push(h('p', { key: 'off', style: S.hintTiny }, bind(t, 'usageDisabled')))
+      } else {
+        var success = typeof providerUsage.successRate === 'number'
+          ? Math.round(providerUsage.successRate * 100)
+          : undefined
+        usageBody.push(
+          h('div', { key: 'today', style: S.row },
+            h('span', { style: S.sectionTitle }, bind(t, 'usageToday')),
+            usageStat(bind(t, 'usageCalls'), String(usageToday.requests || 0), formatNumber(usageToday.totalTokens || 0) + ' tok'),
+            usageStat(bind(t, 'usageRate'), success === undefined ? '—' : String(success) + '%', bind(t, 'usageLatency', { ms: formatDuration(providerUsage.avgDurationMs) })),
+            h('span', { style: S.grow }),
+            h('button', {
+              type: 'button',
+              style: S.buttonGhost,
+              onClick: resetStats,
+              disabled: busy === 'stats',
+            }, busy === 'stats' ? bind(t, 'refreshing') : bind(t, 'usageReset'))),
+        )
+        usageBody.push(
+          h('div', { key: 'all', style: S.row },
+            h('span', { style: S.sectionTitle }, bind(t, 'usageTotal')),
+            usageStat(bind(t, 'usageCalls'), String(providerUsage.requests || 0), formatNumber(providerUsage.totalTokens || 0) + ' tok'),
+            usageStat(bind(t, 'usageRate'), success === undefined ? '—' : String(success) + '%', bind(t, 'usageLatency', { ms: formatDuration(providerUsage.avgDurationMs) }))),
+        )
+        if (statsDoc.since > 0) {
+          usageBody.push(h('p', { key: 'since', style: S.hintTiny }, bind(t, 'usageSince', { time: formatTime(statsDoc.since) })))
+        }
+        if (recentRequests.length === 0) {
+          usageBody.push(h('p', { key: 'empty', style: S.hintTiny }, bind(t, 'usageEmpty')))
+        } else {
+          usageBody.push(
+            h('ul', { key: 'recent', style: S.modelList },
+              recentRequests.map(function (entry, index) {
+                var failed = entry.kind === 'error'
+                return h('li', {
+                  key: 'req' + index,
+                  style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
+                },
+                h('span', { style: S.modelMeta }, formatTime(entry.at)),
+                h('span', { style: Object.assign({}, S.modelName, { maxWidth: 220 }) }, entry.model || '—'),
+                h('span', {
+                  style: failed || entry.kind === 'incomplete' ? S.badgeWarn : S.badgeSoft,
+                }, bind(t, kindTextKey(entry.kind))),
+                h('span', { style: S.grow }),
+                h('span', { style: S.modelMeta }, formatDuration(entry.durationMs)),
+                h('span', { style: S.modelMeta }, formatNumber(entry.totalTokens || 0) + ' tok'),
+                entry.code ? h('span', { style: S.modelId }, entry.code) : null)
+              })),
+          )
+        }
+      }
+      sections.push(
+        h('div', { key: 'usage', style: S.section },
+          h('div', { key: 'h', style: S.sectionHead },
+            h('span', { style: S.sectionTitle }, bind(t, 'usage')),
+            h('span', { style: S.sectionCount }, String((active.models || []).length))),
+          ...usageBody),
+      )
+
       // ── 连接设置 ────────────────────────────────────────────────
       var connectionBody = []
       if (active.kind === 'pat') {
@@ -1358,6 +1723,14 @@ window.__ModuleLoader__.load({
               onChange: function (event) { setPatDraft(event.target.value) },
             })),
           h('p', { key: 'h', style: S.hintTiny }, bind(t, 'patHint')),
+          h('p', { key: 'link', style: S.hintTiny },
+            bind(t, 'patLinkHint') + ' ',
+            h('a', {
+              href: PAT_PAGE[active.provider] || PAT_PAGE.qoder,
+              target: '_blank',
+              rel: 'noreferrer',
+              style: { color: 'var(--dsw-alias-label-link, var(--dsw-alias-state-business-primary, #2f6fed))' },
+            }, bind(t, 'patOpen'))),
           h('div', { key: 'btns', style: S.row },
             h('button', { type: 'button', style: S.buttonPrimary, onClick: savePat, disabled: busy === 'save' || patDraft.trim() === '' },
               busy === 'save' ? bind(t, 'saving') : bind(t, 'save')),
@@ -1397,6 +1770,74 @@ window.__ModuleLoader__.load({
           h('div', { key: 'h', style: S.sectionHead },
             h('span', { style: S.sectionTitle }, bind(t, 'secConnection'))),
           ...connectionBody),
+      )
+
+      // ── 高级 ────────────────────────────────────────────────────
+      //
+      // 默认折叠：这些都是「装好就不用再碰」的参数，但必须给一个入口 ——
+      // 旧版本把它们写死在代码里，用户遇到长回答被切断时只能改源码。
+      sections.push(
+        h('div', { key: 'advanced', style: S.section },
+          h('details', {},
+            h('summary', {
+              style: { cursor: 'pointer', fontSize: TEXT.tiny, fontWeight: 600, letterSpacing: '.08em', color: 'var(--dsw-alias-label-tertiary)' },
+            }, bind(t, 'advanced')),
+            h('p', { style: Object.assign({}, S.hintTiny, { marginTop: 8 }) }, bind(t, 'advancedHint')),
+            h('div', { key: 'idle', style: S.field },
+              h('span', { style: S.label }, bind(t, 'advancedIdle')),
+              h('input', {
+                style: S.input,
+                type: 'number',
+                min: 15,
+                max: 900,
+                value: advIdle,
+                onChange: function (event) { setAdvIdle(event.target.value) },
+              }),
+              h('span', { style: S.hintTiny }, bind(t, 'advancedIdleHint'))),
+            h('div', { key: 'intervals', style: S.row },
+              h('div', { style: Object.assign({}, S.field, { flex: '1 1 140px' }) },
+                h('span', { style: S.label }, bind(t, 'advancedCatalog')),
+                h('input', {
+                  style: S.input,
+                  type: 'number',
+                  min: 120,
+                  max: 86400,
+                  value: advCatalog,
+                  onChange: function (event) { setAdvCatalog(event.target.value) },
+                })),
+              h('div', { style: Object.assign({}, S.field, { flex: '1 1 140px' }) },
+                h('span', { style: S.label }, bind(t, 'advancedCredits')),
+                h('input', {
+                  style: S.input,
+                  type: 'number',
+                  min: 30,
+                  max: 21600,
+                  value: advCredits,
+                  onChange: function (event) { setAdvCredits(event.target.value) },
+                }))),
+            h('label', { key: 'stats', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+              h('input', {
+                type: 'checkbox',
+                checked: advStats !== false,
+                onChange: function () { setAdvStats(!(advStats !== false)) },
+              }),
+              h('span', { style: S.hintTiny }, bind(t, 'advancedStats'))),
+            h('label', { key: 'cache', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+              h('input', {
+                type: 'checkbox',
+                checked: advCache !== false,
+                onChange: function () { setAdvCache(!(advCache !== false)) },
+              }),
+              h('span', { style: S.hintTiny }, bind(t, 'advancedCache'))),
+            h('div', { key: 'btn', style: S.row },
+              h('button', {
+                type: 'button',
+                style: S.button,
+                disabled: busy === 'advanced',
+                onClick: saveAdvanced,
+              }, busy === 'advanced' ? bind(t, 'saving') : bind(t, 'advancedSave')),
+              advSaved ? h('span', { style: S.hintTiny }, bind(t, 'advancedSaved')) : null)),
+        ),
       )
 
       // ── 模型 ────────────────────────────────────────────────────
@@ -1658,7 +2099,7 @@ window.__ModuleLoader__.load({
           }
 
           var load = function () {
-            fetchStatus()
+            fetchStatus(true)
               .then(function (document) {
                 if (disposed) return
                 setStatus(document)
@@ -1740,7 +2181,42 @@ window.__ModuleLoader__.load({
           if (credits === undefined || credits.state !== 'ok') continue
           rows.push({ entry: entry, credits: credits })
         }
-        if (rows.length === 0) return null
+        if (rows.length === 0) {
+          // 已经拿到状态、但没有任何可用额度时，仍然留一个极淡的入口：
+          // 完全消失会让用户以为插件没装，反而更困惑。
+          if (providers.length === 0) return null
+          return h(
+            'div',
+            { style: { display: 'flex', width: '100%', minWidth: 0, boxSizing: 'border-box', margin: '0 0 4px' } },
+            h(
+              'button',
+              {
+                type: 'button',
+                onClick: refresh,
+                style: {
+                  font: 'inherit',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  padding: '4px 11px',
+                  lineHeight: '18px',
+                  cursor: 'pointer',
+                  borderRadius: 999,
+                  border: '0.5px solid var(--dsw-alias-border-l2)',
+                  background: 'transparent',
+                  color: 'var(--dsw-alias-label-tertiary)',
+                  fontSize: 12,
+                  opacity: 0.75,
+                },
+              },
+              h('span', {}, bind(t, 'summary') + ' —'),
+              h('span', {}, bind(t, 'creditsNone')),
+            ),
+          )
+        }
 
         var wide = props.wide !== false
 
@@ -1917,6 +2393,10 @@ window.__ModuleLoader__.load({
             var note = []
             if (snapshot.planName !== undefined && snapshot.planName !== '') note.push(snapshot.planName)
             if (snapshot.resetAtMs > 0) note.push(bind(t, 'creditsReset') + ' ' + formatTime(snapshot.resetAtMs))
+            var todayUsage = row.entry.usage && row.entry.usage.today
+            if (todayUsage !== undefined && todayUsage.requests > 0) {
+              note.push(String(todayUsage.requests) + ' req · ' + compactNumber(todayUsage.totalTokens || 0) + ' tok')
+            }
             return h(
               'div',
               { key: row.entry.provider, style: { marginBottom: 8 } },

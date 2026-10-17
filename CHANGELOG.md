@@ -1,5 +1,191 @@
 # 更新记录
 
+## 1.0.0 — 2026-10-18
+
+第一个正式版。重点不是「再加一个功能」，而是把 0.9.0 里那套「各条链路各读各的
+凭证」的结构拆掉，再在统一运行时上补齐图片、用量、换号与可观测性。
+
+### 修复：浏览器登录的账号不能聊天
+
+**这是 0.9.0 最严重的问题。** 浏览器登录只把令牌写进账号（`account.token`），
+而目录与聊天仍然调用 `readDesktopCredential()` 去找本机登录文件。结果是：
+
+- 卡片显示「已登录」；
+- 额度能正常读取（额度路径用了 `credentialForAccount()`）；
+- 一发消息就报「没有找到 WorkBuddy 的登录文件」。
+
+1.0.0 把凭证解析收敛成 `Runtime.credentialForAccount()` 一个入口，目录、聊天、
+额度、签到全部走它：`account.token` → 本机登录文件 → 续期 → 写回。浏览器登录
+从此是真的可用，而不是「只在额度面板里可用」。
+
+### 修复：长回答被 5 分钟总超时切断
+
+旧代码用 `AbortSignal.timeout(300_000)` 当整条流的总超时，并且注释写的是「空闲超时」。
+实际行为是：任何持续超过 5 分钟的正常长回答都会在 5 分钟处被 abort。
+
+现在拆成两层：
+
+- 打开连接（等响应头）60 秒；
+- 流建立后**空闲** 180 秒（只有连续没有事件才 abort，持续出字永不打断）。
+
+两个值都可以在「高级」里改，并被夹到安全区间。
+
+### 修复：Qoder 首包排队不会本地重试
+
+旧实现只在流已经建立之后处理 `isQueued`（`retryQueued`）。如果上游在**打开阶段**
+就回 403 + `isQueued`，错误直接抛给宿主。现在打开阶段也会按 `retryAfterSeconds`
+等一次再重开（最多 3 次，可取消）。
+
+### 修复：多账号下 PAT 保存/清除写到了被忽略的字段
+
+有账号池时，卡片上的「保存 PAT」写的是 `qoder[provider].pat`，而 `accountsFor()`
+在账号池非空时根本不会读这个字段 —— 用户看到「已保存」但状态没变。
+
+现在：
+
+- 有账号池 → 写进**当前账号**；
+- 没有账号池 → 仍写旧字段，保持老设置兼容；
+- 「清除」通过 `forget: true` 显式告诉服务端不要沿用旧密钥（空字符串在归一化时会被
+  丢掉，没有这个标记就清不掉）。
+
+### 修复：续期后的凭证没有更新内存缓存
+
+`refreshDesktopCredential()` 返回新 token，但 `credentials.js` 里按
+「文件 + mtime + size」做的缓存仍是旧对象。于是下一次读文件又拿到过期 token，
+每个请求都续期一次。现在续期成功后同步更新缓存，并把新的
+`refreshExpiresAtMs` 一起带回。
+
+### 修复：两个 WorkBuddy 变体共用一份 UA 版本号
+
+`readAppVersion()` 用一个全局变量缓存版本，第二个变体会沿用第一个的值。而
+`/v3/config` 是按 User-Agent 分流花名册的 —— 错配会拿到另一份目录。现在按变体
+分别缓存，并且会从已解析的 App 路径读 `version`。
+
+### 修复：内置兜底目录被当成真实目录缓存
+
+目录磁盘缓存最初会把 `builtin` 的 4 个兜底模型也写进去，下次启动就会以「已缓存」
+的身份展示。现在只缓存 `live` / `saved` / 已有磁盘条目，`builtin` 永不落盘。
+
+### 新增：图片输入
+
+- 通过 `ctx.attachments.readImageRequest()` 把持久引用读成请求版本；
+- 默认预算约 4M 像素 / 4MB，保持宽高比、不放大；
+- user / system 图片 → 说明文本 + `image_url` data URL；
+- tool 结果图片 → 工具消息保持纯文本，图片提升成紧随其后的 user 消息
+  （OpenAI 的 tool 消息只接受文本）；
+- 没有附件服务时 `inputModalities` 只声明 `text`，由宿主换成占位符；
+- 适配器实现 `imageRequestTarget()`，与运行时使用同一套几何计算。
+
+### 新增：用量统计
+
+`lib/stats.js` + `stats.json`：
+
+- 每次请求记录 provider / 账号 / 模型 / 结果 / token / 耗时；
+- 今日与累计分开，日切按本机时区；
+- 成功、失败、取消、中断分开计数；
+- 连续失败算出 `ok / degraded / down` 健康状态；
+- 最近 40 条请求，失败带稳定 code；
+- 支持重置、关闭；写盘原子化且失败不影响聊天。
+
+设置卡片新增「用量」区块，侧栏面板增加「今日请求 / token」，CLI 新增 `usage`。
+
+### 新增：请求级自动换号
+
+- `AUTH` / `QUOTA` 失败且尚未产出内容 → 换下一个账号重开；
+- 换号结果写回 `activeAccount`；
+- 失败账号进入冷却（认证/额度 2 分钟、限流 30 秒、服务端 15 秒）；
+- 已产出内容后失败不换号，避免重复输出；
+- 探测请求不参与换号。
+
+### 新增：目录磁盘缓存
+
+- 按 `provider::账号` 保存最后一份成功目录（30 天有效）；
+- 启动时恢复，卡片来源显示「已缓存」；
+- 手动刷新/定时刷新成功后替换；
+- 可在高级设置里关闭。
+
+### 新增：轻量状态接口
+
+`GET /status?light=1` 只返回额度、账号、健康与今日用量，供侧栏小卡每 60 秒轮询；
+完整卡片仍走 `/status`。侧栏轮询的响应体从几十 KB 降到几 KB。
+
+### 新增：健康状态
+
+每个 provider 根据最近请求计算健康状态，卡片总览、标签页圆点、状态区都有展示。
+连续 2 次失败为降级、3 次为不可用、一次成功立即恢复。自动目录刷新在 `down` 时
+会短暂熔断 2 分钟（手动刷新不受影响）。
+
+### 新增：高级设置
+
+`settings.advanced`：
+
+| 字段 | 默认 | 区间 |
+|---|---|---|
+| `idleTimeoutMs` | 180000 | 15s – 15min |
+| `catalogRefreshMs` | 600000 | 2min – 24h |
+| `creditsRefreshMs` | 120000 | 30s – 6h |
+| `stats` | true | 布尔 |
+| `catalogCache` | true | 布尔 |
+
+调度器改成 30 秒节拍检查「到点没有」，改设置立刻生效，不需要重启插件。
+
+### 新增：CLI 工具
+
+```text
+node lib/bin.js doctor [--strict]
+node lib/bin.js usage [provider]
+node lib/bin.js probe [provider]
+node lib/bin.js checkin [provider]
+node lib/bin.js login workbuddy
+node lib/bin.js stats-reset
+```
+
+`doctor` 会检查 Node 版本、设置版本、数据目录、四个 provider 的登录/目录/额度/健康，
+`--strict` 时有问题退出码为 1。
+
+### 其他修复与打磨
+
+- 设置、额度、目录、统计四份 JSON 统一改成原子写（临时文件 + rename，0600）；
+- **账号池改成增量 upsert**：`accounts` 补丁只更新提到的账号，删除必须走
+  `removedAccounts`。旧版整表覆盖，浏览器拿着旧快照点一次「使用 / 删除」就会把刚
+  登录的账号整条冲掉（令牌永久丢失）；
+- 设置结构升到 v2，读入时自动升级，旧设置不需要手动迁移；
+- `sanitizePatch` 从 `index.js` 抽到 `lib/patch.js`，新增 `advanced`、`checkin`、
+  `display.showUsageInSidebar` 等字段，未知字段一律丢弃；
+- 被关闭的 provider 不再做凭证探测（桌面端探测可能起子进程、Qoder 探测要网络）；
+- 关闭的 provider 也不刷新目录与额度；
+- `activeAccount` 钉住的账号被禁用时，改为让位给第一个启用的账号
+  （禁用是更强的信号）；
+- 失败凭证探测缓存 60 秒，坏 PAT 不会被设置卡片每 20 秒重打一次；
+- 状态响应加 `Cache-Control: no-store` 与 `X-Content-Type-Options: nosniff`；
+- 状态接口只接受 GET；
+- 删除无用的 `describeVariant`、`CLIENT_UA_BASE`、`accountOf` 等死代码；
+- 上游请求追加 `x-dsh-attribution` 头（WorkBuddy 的 UA 不能替换，见 README）。
+
+### 测试
+
+- 93 条 `node --test` 用例，新增：
+  - `tests/stats.test.mjs`（用量、健康、日切、持久化、开关）；
+  - `tests/catalog-cache.test.mjs`（按账号、过期、坏行、内置不落盘）；
+  - `tests/patch.test.mjs`（补丁白名单、夹取、刷新判定、设置 v2）；
+  - `tests/runtime-images.test.mjs`（图片收集、请求预算、消息翻译、tool 图片提升、
+    失败分类、空闲超时）；
+  - `tests/host.test.mjs`（用假 Cordis 上下文跑 `apply()`，验证路由、status v4、
+    轻量状态、统计重置、设置补丁与密钥校验）；
+  - `tests/runtime-browser-token.test.mjs`（桩掉 fetch，证明浏览器登录令牌真的被
+    聊天请求使用，而不是回落到本机登录文件）。
+- `tests/client-credits.mjs` 扩到 18 项检查，新增健康/用量渲染、重置统计、高级保存、
+  账号池 PAT 保存、删除账号走 removedAccounts、侧栏轻量接口。
+
+### 行为变更（升级前请确认）
+
+1. **设置升级到 v2**。旧文件会在读入时补齐 `advanced` 与展示偏好；写回时版本号变 2。
+2. **状态文档升级到 v4**。按 `version === 3` 硬编码的第三方消费者需要更新；本插件客户端已同步。
+3. **「钉住的账号被禁用」的行为变了**：以前仍会使用该账号，现在会退回第一个启用的账号。
+4. **内置兜底目录不再写入磁盘缓存**；离线首启仍会显示兜底，但不会被标成「已缓存」。
+5. **状态接口不再接受 HEAD**（只接受 GET）。
+6. **关闭的 provider 不再刷新目录/额度/凭证**；重新打开后由设置补丁触发刷新。
+
 ## 0.9.0 — 2026-10-17
 
 ### 重做：改成真正的浏览器登录

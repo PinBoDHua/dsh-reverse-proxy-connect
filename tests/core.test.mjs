@@ -12,7 +12,7 @@ import {
 } from '../lib/qoder/transport.js'
 import { prepareChatBody, parseCatalog as parseWorkBuddyCatalog } from '../lib/workbuddy/upstream.js'
 import { openAiFinishKind, normalizeOpenAiUsage, toOpenAiMessages, toOpenAiTools, accountLimitation } from '../lib/runtime.js'
-import { toModelInfo, toResolvedModelInfo, failureCode } from '../lib/adapter.js'
+import { toModelInfo, toResolvedModelInfo, failureCode, stableFailureCode } from '../lib/adapter.js'
 import { defaults, normalize, providerOptions, isModelVisible } from '../lib/settings.js'
 
 test('WAF 编码可逆且长度为 4 的倍数', () => {
@@ -259,6 +259,11 @@ test('失败种类映射到 DSH 的稳定 code', () => {
   assert.equal(failureCode('quota'), 'QUOTA')
   assert.equal(failureCode('auth'), 'AUTH')
   assert.equal(failureCode('weird'), 'upstream-error')
+  // 内部码不能原样透给宿主。
+  assert.equal(stableFailureCode('image-unavailable'), 'IMAGE_UNAVAILABLE')
+  assert.equal(stableFailureCode('pat-invalid'), 'AUTH')
+  assert.equal(stableFailureCode('timeout'), 'TIMEOUT')
+  assert.equal(stableFailureCode('AUTH'), 'AUTH')
 })
 
 test('设置归一化容忍缺字段与错类型', () => {
