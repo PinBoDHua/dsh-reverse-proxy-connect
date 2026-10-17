@@ -1318,6 +1318,11 @@ window.__ModuleLoader__.load({
         var expandedState = useState(false)
         var expanded = expandedState[0]
         var setExpanded = expandedState[1]
+        // 悬停态：宿主里可点的行（会话、账号）悬停都会浮一层底色，
+        // 胶囊也得跟上，否则用户根本看不出它能点。
+        var hoverState = useState(false)
+        var hovered = hoverState[0]
+        var setHovered = hoverState[1]
         var rootRef = useRef(undefined)
 
         useEffect(function () {
@@ -1475,12 +1480,31 @@ window.__ModuleLoader__.load({
 
         var visibleSegments = wide ? segments : segments.slice(0, 1)
 
+        // 展开指示箭头：常显，悬停时更明显 —— 这是「能点」最直接的暗示。
+        var caret = wide
+          ? h('span', {
+              key: 'caret',
+              'aria-hidden': 'true',
+              style: {
+                fontSize: 9,
+                lineHeight: '12px',
+                opacity: hovered || expanded === true ? 0.85 : 0.45,
+                transform: expanded === true ? 'rotate(180deg)' : 'none',
+                transition: 'transform .15s ease, opacity .12s ease',
+                flex: '0 0 auto',
+              },
+            }, '▾')
+          : null
+
         var pill = h(
           'button',
           {
             type: 'button',
             onClick: toggle,
-            onFocus: function () { /* 键盘用户点 Enter 即可，展开交给 onClick */ },
+            onMouseEnter: function () { setHovered(true) },
+            onMouseLeave: function () { setHovered(false) },
+            onFocus: function () { setHovered(true) },
+            onBlur: function () { setHovered(false) },
             'aria-expanded': expanded === true,
             'aria-controls': PANEL_ID,
             'aria-label': rows
@@ -1507,21 +1531,25 @@ window.__ModuleLoader__.load({
               border: '0.5px solid ' + (
                 failed
                   ? 'var(--dsw-alias-state-error-primary, #b3261e)'
-                  : expanded === true
+                  : expanded === true || hovered
                     ? 'var(--dsw-alias-border-l3, var(--dsw-alias-border-l2))'
                     : 'var(--dsw-alias-border-l2)'
               ),
               background: expanded === true
                 ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))'
-                : 'var(--dsw-alias-bg-l1, transparent)',
+                : hovered
+                  ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.08))'
+                  : 'var(--dsw-alias-bg-l1, transparent)',
+              boxShadow: hovered && expanded !== true ? '0 1px 4px rgba(0,0,0,.08)' : 'none',
               color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-tertiary))',
-              transition: 'background .12s ease, border-color .12s ease',
+              transition: 'background .12s ease, border-color .12s ease, box-shadow .12s ease',
               opacity: busy ? 0.72 : 1,
               overflow: 'hidden',
               whiteSpace: 'nowrap',
             },
           },
           visibleSegments,
+          caret,
         )
 
         // 收起时也套一层满宽容器：直接在 `footerActions`（横向 flex）里返回按钮，

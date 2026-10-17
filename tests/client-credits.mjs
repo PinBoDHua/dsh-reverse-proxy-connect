@@ -276,6 +276,32 @@ if (collapsedToggle.props.style?.justifyContent !== 'space-between') {
 }
 console.log('✓ 胶囊收起时也是满宽')
 
+// ---------- 2b. 悬停要有反馈（用户靠这个判断「能点」）----------
+const caretCount = textOf(collapsedToggle).includes('▾')
+if (!caretCount) throw new Error('胶囊上没有展开箭头（▾），用户看不出能点')
+
+const idleBackground = String(collapsedToggle.props.style?.background)
+collapsedToggle.props.onMouseEnter()
+tree = await render(pill, { t: (key) => key, wide: true })
+const hoveredToggle = find(tree, (node) => node.type === 'button' && node.props?.['aria-expanded'] !== undefined)
+const hoverBackground = String(hoveredToggle.props.style?.background)
+if (hoverBackground === idleBackground || !hoverBackground.includes('bg-l2')) {
+  throw new Error(`悬停没有底色反馈：idle=${idleBackground} hover=${hoverBackground}`)
+}
+if (!String(hoveredToggle.props.style?.border).includes('border-l3')) {
+  throw new Error('悬停时描边没有加深')
+}
+if (hoveredToggle.props.style?.boxShadow === 'none' || hoveredToggle.props.style?.boxShadow === undefined) {
+  throw new Error('悬停时缺少阴影，层级感不足')
+}
+
+// 移开要恢复
+hoveredToggle.props.onMouseLeave()
+tree = await render(pill, { t: (key) => key, wide: true })
+const idleAgain = find(tree, (node) => node.type === 'button' && node.props?.['aria-expanded'] !== undefined)
+if (String(idleAgain.props.style?.background) !== idleBackground) throw new Error('移开鼠标后底色没有恢复')
+console.log('✓ 胶囊有悬停底色、描边加深与展开箭头')
+
 // ---------- 3. 点胶囊展开 ----------
 const toggle = find(tree, (node) => node.type === 'button' && node.props?.onClick !== undefined)
 if (toggle === undefined) throw new Error('胶囊不是可点按钮')
