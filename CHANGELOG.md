@@ -1,5 +1,49 @@
 # 更新记录
 
+## 1.1.1 — 2026-10-18
+
+### 修复：浏览器登录页提示「登录链接不完整」
+
+这不是登录接口的问题，而是**打开浏览器的方式**把 URL 截断了。
+
+`authUrl` 形如：
+
+```text
+https://www.codebuddy.cn/login?platform=ide&state=39479458-…
+```
+
+1.1.0 的 `openInBrowser()` 走的是：
+
+```js
+spawn('cmd', ['/c', 'start', '', url])
+```
+
+Node 在 Windows 上只给**含空格**的参数加引号，URL 没有空格，于是 `cmd` 收到的
+命令是未加引号的 `start "" https://…/login?platform=ide&state=…`。`&` 在 `cmd`
+里是命令分隔符 —— 浏览器只拿到 `https://…/login?platform=ide`，`state` 被当成
+第二条命令。登录页收不到 `state`，就显示「登录链接不完整，请返回客户端点击
+『复制登录链接』后粘贴到浏览器打开」。
+
+现在改成显式引号 + `windowsVerbatimArguments`：
+
+```js
+spawn('cmd', ['/d', '/s', '/c', 'start', '""', `"${url}"`], {
+  windowsVerbatimArguments: true,
+  detached: true,
+})
+```
+
+同时给自动打开的 URL 加了白名单：只接受 `https:`，拒绝引号与换行。
+
+实测：用同样的 `authUrl` 打开后，Edge 地址栏保留完整的
+`?platform=ide&state=…`，页面进入「选择账号」而不是错误页。
+
+### 测试
+
+- `tests/browser-login.test.mjs` 改为断言 URL 必须整体带引号且
+  `windowsVerbatimArguments === true`，并新增 URL 白名单用例；
+- 共 **124 条** `node --test` 用例，**25 项**客户端检查。
+
 ## 1.1.0 — 2026-10-18
 
 这一版不再只是「把模型接进来」，而是回答三个使用中真正会问的问题：

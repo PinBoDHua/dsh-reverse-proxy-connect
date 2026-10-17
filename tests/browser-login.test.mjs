@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  browserOpenCommand,
   loginTarget,
   normalizeToken,
   openInBrowser,
   pollAuthToken,
+  safeBrowserUrl,
   startBrowserLogin,
 } from '../lib/workbuddy/browser-login.js'
 
@@ -38,9 +40,10 @@ test('token 归一化：refreshToken 缺失时给空串而不是 undefined', () 
   assert.equal(value.domain, '')
 })
 
-test('openInBrowser 把 URL 交给 start（带 & 也不会被 cmd 拆开）', () => {
+test('openInBrowser 把 URL 完整交给浏览器（带 & 的 state 不能被 cmd 拆开）', () => {
   const calls = []
-  const ok = openInBrowser('https://x/login?platform=ide&state=abc', (command, args, options) => {
+  const url = 'https://x/login?platform=ide&state=abc'
+  const ok = openInBrowser(url, (command, args, options) => {
     calls.push({ command, args, options })
     return { unref() {} }
   })
@@ -49,10 +52,24 @@ test('openInBrowser 把 URL 交给 start（带 & 也不会被 cmd 拆开）', ()
   const [call] = calls
   if (process.platform === 'win32') {
     assert.equal(call.command, 'cmd')
-    assert.deepEqual(call.args.slice(0, 3), ['/c', 'start', ''])
-    assert.equal(call.args[3], 'https://x/login?platform=ide&state=abc')
+    // 关键：URL 必须整体带引号，并且用 windowsVerbatimArguments 原样交给 cmd。
+    // 1.1.0 没加引号，cmd 在 & 处截断，浏览器只收到 ?platform=ide，
+    // 登录页因此提示「登录链接不完整」。
+    assert.deepEqual(call.args, ['/d', '/s', '/c', 'start', '""', `"${url}"`])
+    assert.equal(call.options.windowsVerbatimArguments, true)
+  } else {
+    assert.equal(call.args[0], url)
   }
   assert.equal(call.options.detached, true)
+})
+
+test('登录 URL 白名单：只接受 https，拒绝引号与换行', () => {
+  assert.equal(safeBrowserUrl('https://x/login?state=1'), 'https://x/login?state=1')
+  assert.equal(safeBrowserUrl('http://x/login'), undefined)
+  assert.equal(safeBrowserUrl('https://x/\"&calc'), undefined)
+  assert.equal(safeBrowserUrl('https://x/\nstate'), undefined)
+  assert.equal(browserOpenCommand('javascript:alert(1)'), undefined)
+  assert.equal(openInBrowser('http://x/login', () => { throw new Error('should not spawn') }), false)
 })
 
 test('轮询 token：11217 未就绪会继续等，成功后返回令牌', async () => {
