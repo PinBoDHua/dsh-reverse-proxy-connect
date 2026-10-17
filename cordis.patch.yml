@@ -1,0 +1,8 @@
+# dsh-reverse-proxy-connect — bundle patch
+#
+# 把插件插进 profile 的层栈。宿主半边（lib/index.js）注册四个 provider 路由，
+# 并在 127.0.0.1 上起一个共享的本地反代；浏览器半边（client/client.js）只做
+# 设置卡片，与宿主通过 /plugins/dsh-reverse-proxy-connect/* 同源接口通信。
+- insert:
+    - id: reverse-proxy-connect
+      name: 'dsh-reverse-proxy-connect'

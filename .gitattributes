@@ -1,0 +1,8 @@
+# 统一用 LF 存仓库，避免 Windows 上 CRLF 噪音污染 diff。
+* text=auto eol=lf
+
+# 二进制/资源不参与行尾转换
+*.png binary
+*.ico binary
+*.jpg binary
+*.svg text

@@ -1,0 +1,24 @@
+# 依赖与构建产物
+node_modules/
+lib/**/*.map
+
+# 本地环境
+.env
+.env.*
+
+# 排障与临时脚本（不进仓库）
+_*.mjs
+_*_scratch/
+tests/_*.mjs
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# 运行期数据（插件自己写在 profile 下，不该出现在源码树）
+.dsh-reverse-proxy-connect/
+settings.json
+*.log
