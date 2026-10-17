@@ -861,9 +861,6 @@ window.__ModuleLoader__.load({
         h('div', { key: 'toolbar', style: S.row },
           h('button', { type: 'button', style: S.buttonPrimary, onClick: refresh, disabled: busy === 'refresh' },
             busy === 'refresh' ? bind(t, 'refreshing') : bind(t, 'refresh')),
-          status.proxy && status.proxy.mode === 'in-process'
-            ? h('span', { style: S.badgeSoft }, 'in-process')
-            : null,
           h('span', { style: S.grow }),
           h('button', {
             type: 'button',

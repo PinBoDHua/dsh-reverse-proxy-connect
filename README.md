@@ -10,6 +10,8 @@
 | `qoder` | Qoder | 个人访问令牌（PAT，qoder.com.cn） | 视账号 | — |
 | `qoder-global` | Qoder Global | 个人访问令牌（PAT，qoder.com） | 视账号 | 0（Free） |
 
+> **0.5.3 重点**：去掉界面上那枚 `in-process` 内部术语（信息仍在诊断 JSON 里）。
+>
 > **0.5.2 重点**：展开箭头从 9px 的 `▾` 字符换成 14px 内联 SVG 折线，侧栏里一眼可见。
 >
 > **0.5.1 重点**：侧栏胶囊补上悬停反馈（底色 + 描边 + 阴影）与展开箭头，
