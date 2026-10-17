@@ -573,8 +573,8 @@ const advancedCall = calls[calls.length - 1]
 if (calls.length === beforeAdvanced || !String(advancedCall.body).includes('advanced')) {
   throw new Error('保存高级设置没有发出 advanced 补丁')
 }
-if (!String(advancedCall.body).includes('"alerts"') || !String(advancedCall.body).includes('thresholdRatio')) {
-  throw new Error(`高级设置没有带上预警/换号阈值：${String(advancedCall.body).slice(0, 240)}`)
+if (!String(advancedCall.body).includes('"alerts"') || !String(advancedCall.body).includes('thresholdRatio') || !String(advancedCall.body).includes('qoderQueueWaitMs')) {
+  throw new Error(`高级设置没有带上预警/换号/排队阈值：${String(advancedCall.body).slice(0, 280)}`)
 }
 console.log('✓ 高级设置会发 advanced 补丁')
 
@@ -656,8 +656,9 @@ try {
 // ---------- 12. 1.1.0：额度趋势、预警、账号测试与用量历史 ----------
 cardTree = await mount(card, { t: (key) => key })
 const trendCardText = textOf(cardTree)
-if (!trendCardText.includes('alertBannerExhausted') && !trendCardText.includes('alertBannerLow')) {
-  throw new Error('额度为 0 时没有渲染预警横幅')
+// Qoder Free 的 0 是「付费额度为 0」，不是「已用尽」；不应触发顶部橙色横幅。
+if (trendCardText.includes('alertBannerExhausted')) {
+  throw new Error('Qoder Free 的 0 付费额度不应显示「额度已用尽」横幅')
 }
 if (!trendCardText.includes('trend') || !trendCardText.includes('trendToday')) {
   throw new Error('额度区块没有渲染趋势')
@@ -665,6 +666,20 @@ if (!trendCardText.includes('trend') || !trendCardText.includes('trendToday')) {
 if (!trendCardText.includes('trendEta')) throw new Error('没有渲染耗尽预估')
 if (find(cardTree, (node) => node.type === 'polyline') === undefined) {
   throw new Error('额度趋势没有折线')
+}
+
+// 真正的低额度账号仍然要有橙色横幅（用临时 5% 的 WorkBuddy AI 验证）。
+const lowProvider = STATUS.providers[1]
+STATUS.providers[1] = { ...lowProvider, credits: { ...lowProvider.credits, remain: 5, total: 100 } }
+try {
+  cardTree = await mount(card, { t: (key) => key })
+  if (!textOf(cardTree).includes('alertBannerLow')) {
+    throw new Error('低额度账号没有渲染预警横幅')
+  }
+  console.log('✓ 低额度账号仍会触发预警横幅')
+} finally {
+  STATUS.providers[1] = lowProvider
+  cardTree = await mount(card, { t: (key) => key })
 }
 for (const label of ['usageSession', 'usageHeatmap', 'usageTopModels', 'usageShowInSidebar']) {
   if (!trendCardText.includes(label)) throw new Error(`用量区块缺少 ${label}`)

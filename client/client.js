@@ -236,7 +236,9 @@ window.__ModuleLoader__.load({
       advancedAlertHint: '剩余低于该比例时，侧栏与卡片亮警示色。',
       advancedSwitch: '低于该比例自动换号（%）',
       advancedSwitchHint: '0 = 只在额度用尽时切换；换号只发生在还有其它可用账号时。',
-      freeModelHint: 'Free 套餐的付费额度为 0；免费模型不扣积分，但高峰期会排队。',
+      advancedQueue: 'Qoder 排队等待上限（秒）',
+      advancedQueueHint: '免费模型排队时最多等这么久；调大可以等更久，但会占用一次请求。',
+      freeModelHint: 'Free 套餐的付费额度为 0；免费模型不扣积分，但高峰期会排队。可在「高级」里延长排队等待。',
       usageNoUsage: '上游没有返回 token 统计；这里显示 0 不代表没有消耗。',
     }
     var en = {
@@ -437,7 +439,9 @@ window.__ModuleLoader__.load({
       advancedAlertHint: 'The sidebar and card turn amber below this remaining ratio.',
       advancedSwitch: 'Switch accounts below (%)',
       advancedSwitchHint: '0 = switch only when exhausted; switching requires another usable account.',
-      freeModelHint: 'The Free plan has no paid quota; free models cost no credits but may queue at peak times.',
+      advancedQueue: 'Qoder queue wait limit (seconds)',
+      advancedQueueHint: 'How long to wait for a queued free model; raising it can wait longer but holds the request.',
+      freeModelHint: 'The Free plan has no paid quota; free models cost no credits but may queue at peak times. You can raise the wait limit under Advanced.',
       usageNoUsage: 'The upstream did not report token usage; 0 here does not mean nothing was consumed.',
     }
 
@@ -516,6 +520,7 @@ window.__ModuleLoader__.load({
     /** 额度预警等级：优先用宿主算好的，老宿主没有就按同一套规则补。 */
     function alertOfCredits(credits, ratio, provider) {
       if (credits === undefined || credits === null || credits.state !== 'ok') return undefined
+      if (isQoderFreePlan(provider, credits)) return undefined
       if (credits.alert === 'low' || credits.alert === 'exhausted') return credits.alert
       if (credits.unlimited === true) return undefined
       if (credits.exceeded === true || (typeof credits.remain === 'number' && credits.remain <= 0)) return 'exhausted'
@@ -1097,6 +1102,9 @@ window.__ModuleLoader__.load({
       var advSwitchState = useState('')
       var advSwitch = advSwitchState[0]
       var setAdvSwitch = advSwitchState[1]
+      var advQueueState = useState('')
+      var advQueue = advQueueState[0]
+      var setAdvQueue = advQueueState[1]
 
       var load = useCallback(
         function () {
@@ -1151,6 +1159,7 @@ window.__ModuleLoader__.load({
             ? auto.thresholdRatio
             : 0
           setAdvSwitch(String(Math.round(switchRatio * 100)))
+          if (typeof advanced.qoderQueueWaitMs === 'number') setAdvQueue(String(Math.round(advanced.qoderQueueWaitMs / 1000)))
         }
         setPatDraft('')
       }, [activeTab, status === undefined])
@@ -1386,6 +1395,7 @@ window.__ModuleLoader__.load({
             idleTimeoutMs: toMs(advIdle, current.idleTimeoutMs || 180000),
             catalogRefreshMs: toMs(advCatalog, current.catalogRefreshMs || 600000),
             creditsRefreshMs: toMs(advCredits, current.creditsRefreshMs || 120000),
+            qoderQueueWaitMs: toMs(advQueue, current.qoderQueueWaitMs || 60000),
             stats: advStats !== false,
             catalogCache: advCache !== false,
           },
@@ -2492,6 +2502,17 @@ window.__ModuleLoader__.load({
                   onChange: function (event) { setAdvSwitch(event.target.value) },
                 }),
                 h('span', { style: S.hintTiny }, bind(t, 'advancedSwitchHint')))),
+            h('div', { key: 'queue', style: S.field },
+              h('span', { style: S.label }, bind(t, 'advancedQueue')),
+              h('input', {
+                style: S.input,
+                type: 'number',
+                min: 15,
+                max: 180,
+                value: advQueue,
+                onChange: function (event) { setAdvQueue(event.target.value) },
+              }),
+              h('span', { style: S.hintTiny }, bind(t, 'advancedQueueHint'))),
             h('label', { key: 'stats', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
               h('input', {
                 type: 'checkbox',

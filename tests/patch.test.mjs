@@ -22,7 +22,7 @@ test('设置补丁：已知字段全部接受，未知字段全部丢弃', () =>
     probe: { enabled: false },
     checkin: { enabled: false },
     display: { showRateInModelName: false, showUsageInSidebar: false, unknown: 1 },
-    advanced: { idleTimeoutMs: 999_999_999, catalogRefreshMs: 1, creditsRefreshMs: 60_000, stats: false, catalogCache: false },
+    advanced: { idleTimeoutMs: 999_999_999, catalogRefreshMs: 1, creditsRefreshMs: 60_000, qoderQueueWaitMs: 999_999, stats: false, catalogCache: false },
     unknown: 'drop',
   })
   assert.equal(patch.providers.workbuddy.enabled, false)
@@ -50,6 +50,7 @@ test('设置补丁：已知字段全部接受，未知字段全部丢弃', () =>
   assert.equal(patch.advanced.idleTimeoutMs, 900_000)
   assert.equal(patch.advanced.catalogRefreshMs, 120_000)
   assert.equal(patch.advanced.creditsRefreshMs, 60_000)
+  assert.equal(patch.advanced.qoderQueueWaitMs, 180_000)
   assert.equal(patch.advanced.stats, false)
   assert.equal(patch.advanced.catalogCache, false)
   assert.equal(patch.unknown, undefined)
@@ -79,15 +80,17 @@ test('设置：v2 默认值包含 advanced，并且 normalize 会夹取非法数
   assert.equal(value.version, 2)
   assert.equal(value.advanced.stats, true)
   assert.equal(value.advanced.catalogCache, true)
+  assert.equal(value.advanced.qoderQueueWaitMs, 60_000)
   assert.equal(value.display.showUsageInSidebar, true)
   assert.deepEqual(value.checkin.completedOn, {})
   assert.deepEqual(value.checkin.lastAttemptAt, {})
 
-  const merged = normalize({ version: 1, advanced: { idleTimeoutMs: -1, catalogRefreshMs: 10, creditsRefreshMs: 999_999_999 } })
+  const merged = normalize({ version: 1, advanced: { idleTimeoutMs: -1, catalogRefreshMs: 10, creditsRefreshMs: 999_999_999, qoderQueueWaitMs: 999_999 } })
   assert.equal(merged.version, 2)
   assert.equal(merged.advanced.idleTimeoutMs, 15_000)
   assert.equal(merged.advanced.catalogRefreshMs, 120_000)
   assert.equal(merged.advanced.creditsRefreshMs, 21_600_000)
+  assert.equal(merged.advanced.qoderQueueWaitMs, 180_000)
 })
 
 test('设置：签到完成日期与尝试时间按 provider 归一化，坏值丢弃', () => {
