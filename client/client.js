@@ -484,6 +484,29 @@ window.__ModuleLoader__.load({
       }
     }
 
+    /** 比较两条错误文案是否在说同一件事（空白归一化后互相包含也算）。 */
+    function isSameMessage(a, b) {
+      var left = String(a === undefined || a === null ? '' : a).replace(/\s+/g, ' ').trim()
+      var right = String(b === undefined || b === null ? '' : b).replace(/\s+/g, ' ').trim()
+      if (left === '' || right === '') return false
+      return left === right || left.indexOf(right) !== -1 || right.indexOf(left) !== -1
+    }
+
+    /**
+     * 卡片与签到区里用的短错误。
+     *
+     * 凭证缺失的原始文案会带两三个绝对路径，塞进签到行里就是三四行橙色文字。
+     * 这里只保留「未登录」；完整原因仍然在状态区显示一次。
+     */
+    function shortErrorMessage(message, t) {
+      var text = String(message === undefined || message === null ? '' : message).replace(/\s+/g, ' ').trim()
+      if (text === '') return '—'
+      if (/没有找到|登录文件|尚未保存|未登录|no-credential|not found|signed out|sign in/i.test(text)) return bind(t, 'creditsNeedLogin')
+      var http = /HTTP\s*\d{3}/i.exec(text)
+      if (http !== null) return http[0]
+      return text.length > 48 ? text.slice(0, 48) + '…' : text
+    }
+
     /**
      * 一份额度快照的人话描述。
      *
@@ -1406,6 +1429,17 @@ window.__ModuleLoader__.load({
                 ? bind(t, 'catalogBuiltin')
                 : bind(t, 'catalogNone')
 
+      // 目录失败与凭证失败经常是同一个原因（例如没有登录文件）。两处各显示一遍
+      // 会得到截图里那种「同一段长文案出现两次」；这里做一次归一化去重。
+      var credentialMessage = credential.status !== 'signed-in'
+        && typeof credential.message === 'string' && credential.message !== ''
+        ? credential.message
+        : undefined
+      var extraMessage = typeof active.message === 'string' && active.message !== ''
+        && !isSameMessage(credentialMessage, active.message)
+        ? active.message
+        : undefined
+
       sections.push(
         h('div', { key: 'status', style: S.section },
           h('div', { key: 'h', style: S.sectionHead },
@@ -1434,13 +1468,13 @@ window.__ModuleLoader__.load({
           credential.status === 'signed-in' && credential.email
             ? h('p', { key: 'who', style: S.hintTiny }, credential.email)
             : null,
-          credential.status !== 'signed-in' && credential.message
-            ? h('p', { key: 'why', style: S.hintWarn }, credential.message)
+          credentialMessage !== undefined
+            ? h('p', { key: 'why', style: S.hintWarn }, credentialMessage)
             : null,
           activeHealth.lastErrorAt > 0 && activeHealth.state !== 'ok'
             ? h('p', { key: 'last', style: S.hintWarn }, bind(t, 'lastErrorAt', { time: formatTime(activeHealth.lastErrorAt) }))
             : null,
-          active.message ? h('p', { key: 'msg', style: S.hintWarn }, active.message) : null),
+          extraMessage !== undefined ? h('p', { key: 'msg', style: S.hintWarn }, extraMessage) : null),
       )
 
       // ── 账号 ────────────────────────────────────────────────────
@@ -1525,6 +1559,7 @@ window.__ModuleLoader__.load({
       var checkinResult = checkin.result
       var checkinLabel
       var checkinTone = 'hintTiny'
+      var checkinFailureRaw = ''
       if (checkin.enabled === false) {
         checkinLabel = bind(t, 'checkinOff')
       } else if (checkinResult === undefined) {
@@ -1540,9 +1575,8 @@ window.__ModuleLoader__.load({
         } else if (kinds.indexOf('inactive') !== -1) {
           checkinLabel = bind(t, 'checkinInactive')
         } else if (kinds.indexOf('failed') !== -1) {
-          checkinLabel = bind(t, 'checkinFailed', {
-            reason: (checkinResult.outcomes.find(function (item) { return item.kind === 'failed' }) || {}).message || '—',
-          })
+          checkinFailureRaw = (checkinResult.outcomes.find(function (item) { return item.kind === 'failed' }) || {}).message || '—'
+          checkinLabel = bind(t, 'checkinFailed', { reason: shortErrorMessage(checkinFailureRaw, t) })
           checkinTone = 'hintWarn'
         } else {
           checkinLabel = checkin.completedToday === true ? bind(t, 'checkinAutoDone') : bind(t, 'checkinNever')
@@ -1577,7 +1611,7 @@ window.__ModuleLoader__.load({
                 onChange: function () { mutate({ checkin: { enabled: checkin.enabled === false } }) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'checkinAuto'))),
-            h('span', { style: S[checkinTone] }, checkinLabel),
+            h('span', { style: S[checkinTone], title: checkinFailureRaw !== '' ? checkinFailureRaw : '' }, checkinLabel),
             checkinFailed ? h('span', { style: S.hintTiny }, bind(t, 'checkinRetryHint')) : null,
             checkin.lastRunAt > 0
               ? h('span', { style: S.modelMeta }, bind(t, 'checkinLastAt', { time: formatTime(checkin.lastRunAt) }))

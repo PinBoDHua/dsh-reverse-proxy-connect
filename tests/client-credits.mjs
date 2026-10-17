@@ -638,4 +638,35 @@ try {
   STATUS.providers[1] = aiProvider
 }
 
+// ---------- 11. 长错误不重复：状态区一次，签到区只留短原因 ----------
+const wbaiSnapshot = STATUS.providers[1]
+STATUS.providers[1] = {
+  ...wbaiSnapshot,
+  message: longError,
+  credential: { status: 'signed-out', reason: 'no-credential', message: longError },
+  checkin: {
+    enabled: true,
+    lastRunAt: 1792253476620,
+    completedToday: false,
+    lastAttemptAt: 1792253476620,
+    result: { provider: 'workbuddy-ai', claimed: 0, credit: 0, outcomes: [{ kind: 'failed', message: longError }] },
+  },
+}
+try {
+  cardTree = await mount(card, { t: (key) => key })
+  const aiTab = findButton(cardTree, 'WorkBuddy AI')
+  if (aiTab === undefined) throw new Error('找不到 WorkBuddy AI 标签')
+  aiTab.props.onClick()
+  cardTree = await render(card, { t: (key) => key })
+  const errorCardText = textOf(cardTree)
+  const occurrences = errorCardText.split(longError).length - 1
+  if (occurrences !== 1) throw new Error(`同一段长错误应只显示一次，实际 ${occurrences} 次`)
+  if (!errorCardText.includes('checkinFailed')) throw new Error('签到失败状态没有渲染')
+  const titled = find(cardTree, (node) => node.props?.title === longError)
+  if (titled === undefined) throw new Error('签到失败应保留完整原因在 title 里')
+  console.log('✓ 长错误只显示一次，签到失败只给短原因（全文在悬停提示里）')
+} finally {
+  STATUS.providers[1] = wbaiSnapshot
+}
+
 console.log('client-credits: OK')
