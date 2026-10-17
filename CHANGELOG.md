@@ -1,5 +1,48 @@
 # 更新记录
 
+## 0.4.2 — 2026-10-17
+
+### 紧急修复：悬停不再显示明细
+
+0.4.1 的气泡组件把 `useState` 的**值**当成了 setter：
+
+```js
+var versionState = useState(0)
+var setVersion = versionState[0]   // 取到的是值 0，不是 setter
+var bump = setVersion[1]           // (0)[1] === undefined
+```
+
+于是悬停时订阅回调一执行就抛 `TypeError: bump is not a function`，
+又被 `setPillHover` 里那层「不让订阅者把整个 UI 拖垮」的 `try/catch` 吞掉了 ——
+表现就是**鼠标悬停毫无反应**，控制台里只有一行不起眼的报错。
+
+改为直接取 setter：`var bump = React.useState(0)[1]`。
+
+### 为什么 0.4.1 的冒烟测试没抓住
+
+当时的测试只做了「模拟悬停 → 渲染气泡」，而那一刻 `visible` 已经是 `true`，
+首次渲染就能出结果，**根本没走到订阅重渲染那条路径**。
+
+新加的 `tests/client-hover.mjs` 按真实顺序来：
+
+1. 先渲染一次气泡（`visible=false` → `null`），让订阅 effect 跑起来；
+2. 再模拟 `mouseenter`；
+3. 断言**气泡自己**收到了重渲染通知。
+
+第 3 步比较的是「每个 hook 槽属于哪个组件挂载」——不能用全局的 dirty 标志，
+因为悬停同时会点亮胶囊自己的 `setHovered`，会把气泡订阅坏掉这件事盖住
+（第一版测试就是这么误判成通过的）。
+
+这条测试自带 bug 注入模式，可以自证有效性：
+
+```
+node tests/client-hover.mjs          # 通过
+BUG=1 node tests/client-hover.mjs    # 失败：悬停后气泡没有收到重渲染通知
+```
+
+`package.json` 增加 `npm run test`（单元）与 `npm run test:client`（组件）两条脚本，
+`npm run verify` 跑全部。
+
 ## 0.4.1 — 2026-10-17
 
 ### 重做侧栏积分小卡的显示

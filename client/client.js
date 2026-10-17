@@ -1251,12 +1251,12 @@ window.__ModuleLoader__.load({
        * 没有 `window` 时（比如单测/SSR）直接不渲染。
        */
       var CreditsBubble = function () {
-        var useState = React.useState
         var useEffect = React.useEffect
 
-        var versionState = useState(0)
-        var setVersion = versionState[0]
-        var bump = setVersion[1]
+        // 订阅模块级 store。这里的重渲染只为了「可见性变了」——
+        // 注意必须取 `useState` 的**第二个**元素（setter）；写成 `[0]` 拿到的是
+        // 值本身，`bump` 会是 undefined，悬停时静默失败、气泡永远不出现。
+        var bump = React.useState(0)[1]
 
         useEffect(function () {
           var listener = function () { bump(function (value) { return value + 1 }) }
