@@ -265,7 +265,8 @@ for (let pass = 0; pass < 4; pass++) {
   if (!rerenderRequested) break
 }
 if (bubbleTree === null || bubbleTree === undefined) throw new Error('气泡没有渲染')
-if (bubbleTree.props?.role !== 'tooltip') throw new Error('气泡缺少 role=tooltip')
+// 气泡里有可点的按钮，语义上是 dialog 而不是 tooltip。
+if (bubbleTree.props?.role !== 'dialog') throw new Error('气泡缺少 role=dialog')
 
 const text = []
 ;(function walk(node) {
@@ -293,4 +294,57 @@ if (bars.length < 2) throw new Error(`额度进度条数量不对：${bars.lengt
 
 console.log('气泡文本:', JSON.stringify(joined))
 console.log(`✓ 气泡显示 3 个账号、${bars.length} 条进度条与提示`)
+
+// ---------- 胶囊宽度：必须是 border-box ----------
+// 曾经的 bug：默认 content-box，padding 把宽度撑出侧栏，胶囊往左溢出。
+const pillBox = button.props?.style?.boxSizing
+if (pillBox !== 'border-box') throw new Error(`胶囊缺少 boxSizing:border-box（实际 ${String(pillBox)}），会在侧栏里横向溢出`)
+console.log('✓ 胶囊用 border-box，不会撑出侧栏')
+
+// ---------- 气泡可交互 ----------
+// 曾经的 bug：pointerEvents:none + 立即关闭，鼠标一离开胶囊气泡就消失，
+// 里面的按钮根本点不到。
+if (bubbleTree.props?.style?.pointerEvents !== 'auto') throw new Error('气泡不可交互（pointerEvents 不是 auto）')
+if (typeof bubbleTree.props?.onMouseEnter !== 'function') throw new Error('气泡没有 onMouseEnter，移进去就会关掉')
+
+const refreshButton = (() => {
+  let found
+  ;(function find(node) {
+    if (found !== undefined || node === null || node === undefined) return
+    if (Array.isArray(node)) { node.forEach(find); return }
+    if (typeof node === 'object' && node.type === 'button' && typeof node.props?.onClick === 'function') { found = node; return }
+    if (typeof node === 'object') find(node.children)
+  })(bubbleTree)
+  return found
+})()
+if (refreshButton === undefined) throw new Error('气泡里没有可点击的刷新按钮')
+
+const label = []
+;(function collect(node) {
+  if (typeof node === 'string' || typeof node === 'number') { label.push(String(node)); return }
+  if (Array.isArray(node)) { node.forEach(collect); return }
+  if (node && typeof node === 'object') collect(node.children)
+})(refreshButton.children)
+if (!label.join('').includes('creditsRefresh')) throw new Error(`刷新按钮文案不对：${JSON.stringify(label)}`)
+console.log('✓ 气泡可交互，且带着可点的刷新按钮')
+
+// ---------- 延迟关闭：鼠标能挪进气泡 ----------
+button.props.onMouseLeave()          // 离开胶囊 → 安排 160ms 后关闭
+bubbleTree.props.onMouseEnter()      // 进入气泡 → 取消关闭
+await new Promise((resolve) => setTimeout(resolve, 240))
+beginRender()
+const stillVisible = bubble({ t: (key) => key })
+if (stillVisible === null || stillVisible === undefined) {
+  throw new Error('鼠标移进气泡后气泡仍被关闭了 —— 延迟关闭没生效，用户点不到按钮')
+}
+console.log('✓ 鼠标可以从胶囊移进气泡而不被关掉')
+
+// ---------- 但真的离开后仍会关闭 ----------
+stillVisible.props.onMouseLeave()
+await new Promise((resolve) => setTimeout(resolve, 240))
+beginRender()
+const afterLeave = bubble({ t: (key) => key })
+if (afterLeave !== null) throw new Error('鼠标离开后气泡没有关闭，会一直挡在界面上')
+console.log('✓ 真正离开后气泡会自行关闭')
+
 console.log('client-hover: OK')

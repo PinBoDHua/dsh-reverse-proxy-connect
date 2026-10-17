@@ -104,7 +104,7 @@ window.__ModuleLoader__.load({
       search: '搜索模型',
       searchPlaceholder: '按名字或 id 过滤…',
       searchEmpty: '没有匹配的模型。',
-      pillHint: '点击重新读取额度',
+      pillHint: '数据每 2 分钟自动刷新',
       creditsStale: '上次结果，正在刷新…',
       catalogBuiltin: '内置兜底列表（上游不可达且没有存档）',
       summary: '账号总览',
@@ -176,7 +176,7 @@ window.__ModuleLoader__.load({
       search: 'Search models',
       searchPlaceholder: 'Filter by name or id…',
       searchEmpty: 'No model matches.',
-      pillHint: 'Click to re-read credits',
+      pillHint: 'Refreshes every 2 minutes',
       creditsStale: 'Last known — refreshing…',
       catalogBuiltin: 'Built-in fallback list (upstream unreachable, no saved catalog)',
       summary: 'Accounts',
@@ -213,6 +213,40 @@ window.__ModuleLoader__.load({
       rows: [],
       hint: '',
       listeners: new Set(),
+      /** 由小卡每次渲染时挂上：气泡里的「刷新额度」按钮要能触发它。 */
+      onRefresh: undefined,
+    }
+
+    /** 气泡延迟关闭的句柄。 */
+    var pillHideTimer
+
+    /** 立刻收起气泡。 */
+    function hidePillHoverNow() {
+      if (pillHideTimer !== undefined) {
+        clearTimeout(pillHideTimer)
+        pillHideTimer = undefined
+      }
+      setPillHover({ visible: false, rows: [], hint: '' })
+    }
+
+    /**
+     * 延迟关闭。
+     *
+     * 为什么需要：气泡在胶囊上方、中间隔着 8px 空隙。鼠标从胶囊移向气泡时会先触发
+     * `mouseleave` —— 立刻关闭的话，用户永远够不到气泡里的按钮（这正是「根本没法点」
+     * 的原因）。留 160ms 的窗口让鼠标走进气泡，进去后 `mouseenter` 会取消这个计时。
+     */
+    function schedulePillHide(delay) {
+      if (pillHideTimer !== undefined) clearTimeout(pillHideTimer)
+      pillHideTimer = setTimeout(hidePillHoverNow, delay === undefined ? 160 : delay)
+    }
+
+    /** 取消待执行的关闭。 */
+    function cancelPillHide() {
+      if (pillHideTimer !== undefined) {
+        clearTimeout(pillHideTimer)
+        pillHideTimer = undefined
+      }
     }
 
     /** 更新气泡状态并通知订阅者。 */
@@ -1203,6 +1237,7 @@ window.__ModuleLoader__.load({
          * 由 overlay 里的组件画气泡（侧栏自身会裁剪，画在这里会被切掉）。
          */
         var showBubble = function (event) {
+          cancelPillHide()
           setHovered(true)
           var node = event !== undefined ? event.currentTarget : undefined
           var rect
@@ -1239,7 +1274,8 @@ window.__ModuleLoader__.load({
 
         var hideBubble = function () {
           setHovered(false)
-          setPillHover({ visible: false, rows: [], hint: '' })
+          // 延迟关闭，给鼠标从胶囊挪进气泡留出时间。
+          schedulePillHide(160)
         }
 
         var segments = rows.map(function (row, position) {
@@ -1286,6 +1322,9 @@ window.__ModuleLoader__.load({
 
         var visible = wide ? segments : segments.slice(0, 1)
 
+        // 气泡里的「刷新额度」按钮要能触发小卡的刷新：把回调挂到 store 上。
+        pillHover.onRefresh = refresh
+
         return h(
           'button',
           {
@@ -1305,7 +1344,11 @@ window.__ModuleLoader__.load({
               display: 'inline-flex',
               alignItems: 'center',
               gap: 10,
+              // 关键：默认 content-box 时 padding 会把宽度撑出容器，
+              // 侧栏里就表现为「胶囊往左溢出去」。border-box + minWidth:0 才收得住。
+              boxSizing: 'border-box',
               maxWidth: '100%',
+              minWidth: 0,
               margin: '0 0 4px',
               padding: wide ? '4px 11px' : '4px 7px',
               lineHeight: '18px',
@@ -1368,7 +1411,12 @@ window.__ModuleLoader__.load({
         return h(
           'div',
           {
-            role: 'tooltip',
+            role: 'dialog',
+            'aria-label': bind(t, 'credits'),
+            // 可交互：鼠标能从胶囊移进来点「刷新额度」。
+            // 关闭由 mouseleave 的延迟计时负责，移进来时取消它。
+            onMouseEnter: cancelPillHide,
+            onMouseLeave: function () { schedulePillHide(160) },
             style: {
               position: 'fixed',
               left: left,
@@ -1376,7 +1424,7 @@ window.__ModuleLoader__.load({
               bottom: Math.max(8, (window.innerHeight || 0) - rect.top + 8),
               width: width,
               zIndex: 2147483000,
-              pointerEvents: 'none',
+              pointerEvents: 'auto',
               borderRadius: 10,
               padding: '12px 14px',
               background: 'var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-l1, #fff))',
@@ -1456,13 +1504,33 @@ window.__ModuleLoader__.load({
           }),
           h('div', {
             style: {
-              fontSize: 11.5,
-              opacity: 0.5,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
               borderTop: '0.5px solid var(--dsw-alias-border-l2)',
-              paddingTop: 7,
+              paddingTop: 8,
               marginTop: 2,
             },
-          }, pillHover.hint),
+          },
+          h('span', { style: { fontSize: 11.5, opacity: 0.5 } }, pillHover.hint),
+          h('span', { style: { flex: 1 } }),
+          h('button', {
+            type: 'button',
+            onClick: function (event) {
+              if (event !== undefined && event.preventDefault !== undefined) event.preventDefault()
+              if (typeof pillHover.onRefresh === 'function') pillHover.onRefresh(event)
+            },
+            style: {
+              font: 'inherit',
+              fontSize: 11.5,
+              padding: '2px 9px',
+              borderRadius: 999,
+              cursor: 'pointer',
+              border: '0.5px solid var(--dsw-alias-border-l2)',
+              background: 'transparent',
+              color: 'var(--dsw-alias-label-primary)',
+            },
+          }, bind(t, 'creditsRefresh'))),
         )
       }
 
