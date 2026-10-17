@@ -66,7 +66,7 @@ async function post(handler, url, key, payload) {
   return { status: res.status, body: JSON.parse(res.body) }
 }
 
-test('宿主入口：注册四个 provider，status v5 与诊断接口可用', async () => {
+test('宿主入口：注册四个 provider，status v6 与诊断接口可用', async () => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-host-'))
   const dataDir = join(root, DATA_DIR_NAME)
   mkdirSync(dataDir, { recursive: true })
@@ -144,7 +144,7 @@ test('宿主入口：注册四个 provider，status v5 与诊断接口可用', a
 
     const full = await get(handlers[STATUS_PATH], STATUS_PATH)
     assert.equal(full.status, 200)
-    assert.equal(full.body.version, 5)
+    assert.equal(full.body.version, 6)
     assert.equal(full.body.plugin.version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version)
     assert.equal(full.body.providers.length, 4)
     assert.equal(full.body.host.images, true, '注入了附件服务后应声明图片可用')
@@ -154,6 +154,18 @@ test('宿主入口：注册四个 provider，status v5 与诊断接口可用', a
     assert.equal(full.body.settings.alerts.lowRatio, 0.15)
     assert.match(full.body.key, /^[0-9a-f]{48}$/)
     assert.equal(full.body.providers[0].credits.trend.spentToday, 0)
+
+    // Host 头可以伪造；socket 对端不是回环时必须拒绝，且不返回控制密钥。
+    const remoteRes = fakeResponse()
+    handlers[STATUS_PATH]({
+      method: 'GET',
+      url: STATUS_PATH,
+      headers: { host: '127.0.0.1:65466' },
+      socket: { remoteAddress: '203.0.113.7' },
+    }, remoteRes)
+    await remoteRes.done
+    assert.equal(remoteRes.status, 403)
+    assert.ok(!remoteRes.body.includes(full.body.key))
 
     const light = await get(handlers[STATUS_PATH], `${STATUS_PATH}?light=1`)
     assert.equal(light.status, 200)
@@ -170,7 +182,7 @@ test('宿主入口：注册四个 provider，status v5 与诊断接口可用', a
 
     const reset = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, { action: 'stats-reset' })
     assert.equal(reset.status, 200)
-    assert.equal(reset.body.version, 5)
+    assert.equal(reset.body.version, 6)
 
     // 账号测试在没有模型时给出明确错误，而不是伪造成功。
     const tested = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, {

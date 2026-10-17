@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -42,13 +43,35 @@ test('额度历史：消耗速度与耗尽时间按最近样本计算', () => {
   assert.equal(trend.etaMs, Math.round((400 / 600) * 3600_000))
 })
 
-test('额度历史：同一刷新窗口内的重复样本不重复累计', () => {
+test('额度历史：非整小时时区按本地整点分桶，午夜消耗不会算到昨天', () => {
+  const moduleUrl = new URL('../lib/credit-history.js', import.meta.url).href
+  const script = `
+    import { recordSample, summarizeHistory } from ${JSON.stringify(moduleUrl)}
+    const at = (hour, minute, day) => new Date(2026, 9, day, hour, minute, 0, 0).getTime()
+    let entry = recordSample(undefined, { at: at(23, 50, 18), remain: 100 })
+    entry = recordSample(entry, { at: at(0, 10, 19), remain: 90 })
+    const trend = summarizeHistory(entry, { now: at(0, 20, 19) })
+    process.stdout.write(String(trend.spentToday))
+  `
+  const output = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+    env: { ...process.env, TZ: 'Asia/Kolkata' },
+    encoding: 'utf8',
+  })
+  assert.equal(output, '10')
+})
+
+test('额度历史：同一刷新窗口内数值不变才去重；数值变了是真实消耗', () => {
   let entry = recordSample(undefined, { at: at(9), remain: 100 })
-  entry = recordSample(entry, { at: at(9) + 5_000, remain: 90 })
-  entry = recordSample(entry, { at: at(9) + 10_000, remain: 80 })
-  const trend = summarizeHistory(entry, { now: at(9) + 20_000 })
-  assert.equal(trend.spentToday, 0)
-  assert.equal(trend.points.length, 1)
+  // 数值没变：同一轮刷新，不重复落点。
+  entry = recordSample(entry, { at: at(9) + 5_000, remain: 100 })
+  assert.equal(entry.recent.length, 1)
+  assert.equal(summarizeHistory(entry, { now: at(9) + 5_000 }).spentToday, 0)
+  // 30 秒内余额变了（刚发完一条消息）：必须累计，否则这段消耗会被吞掉。
+  entry = recordSample(entry, { at: at(9) + 10_000, remain: 90 })
+  entry = recordSample(entry, { at: at(9) + 20_000, remain: 80 })
+  const trend = summarizeHistory(entry, { now: at(9) + 25_000 })
+  assert.equal(trend.spentToday, 20)
+  assert.deepEqual(trend.points.map((point) => point.remain), [100, 90, 80])
 })
 
 test('额度历史：时钟回拨不会让样本乱序或产生负消耗', () => {

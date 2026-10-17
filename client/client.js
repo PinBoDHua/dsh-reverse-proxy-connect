@@ -21,7 +21,6 @@ window.__ModuleLoader__.load({
     var SHARED_SECTION_SLOT = 'settings.section'
     var SHARED_SECTION_ID = 'plugin-settings'
     var SHARED_SECTION_ORDER = 900
-    var SHARED_SECTION_LABEL = '插件设置'
     var SHARED_ITEM_SLOT = 'plugin-settings.item'
     var SHARED_ITEM_ID = 'dsh-reverse-proxy-connect'
     var PLUGIN_MANAGER_SLOT = 'plugins.bundle.config'
@@ -194,6 +193,8 @@ window.__ModuleLoader__.load({
       advancedCredits: '额度刷新间隔（秒）',
       advancedStats: '记录用量统计',
       advancedCache: '把模型目录缓存到磁盘（重启后立即有模型）',
+      advancedAlertsEnabled: '启用额度预警（横幅与琥珀色）',
+      advancedProbe: '自动检测账号可用模型（每 6 小时最多一次）',
       advancedSave: '保存高级设置',
       advancedSaved: '已保存',
       imagesOn: '图片输入已启用',
@@ -207,6 +208,12 @@ window.__ModuleLoader__.load({
       accountSourceDesktop: '桌面登录',
       accountSourcePat: 'PAT',
       lastErrorAt: '最近失败 {time}',
+      lastFailure: '最近一次失败：{code} · {model} · {time}',
+      settingsCorrupt: '设置文件读取失败，已使用默认值；原文件已备份，请检查 settings.json。',
+      settingsCorruptBackup: '备份：{path}',
+      consecutiveFailures: '{count} 连败',
+      imagesShort: '图',
+      listSeparator: '、',
       // 1.1.0：额度趋势、预警与账号测试
       trend: '额度趋势',
       trendToday: '今日消耗 {value}',
@@ -397,6 +404,8 @@ window.__ModuleLoader__.load({
       advancedCredits: 'Credits refresh interval (seconds)',
       advancedStats: 'Record usage statistics',
       advancedCache: 'Cache the model catalog on disk (models appear instantly after a restart)',
+      advancedAlertsEnabled: 'Enable low-credit warnings (banner and amber accents)',
+      advancedProbe: 'Probe which models the account can use (at most once per 6 hours)',
       advancedSave: 'Save advanced settings',
       advancedSaved: 'Saved',
       imagesOn: 'Image input enabled',
@@ -410,6 +419,12 @@ window.__ModuleLoader__.load({
       accountSourceDesktop: 'Desktop login',
       accountSourcePat: 'PAT',
       lastErrorAt: 'Last failure {time}',
+      lastFailure: 'Last failure: {code} · {model} · {time}',
+      settingsCorrupt: 'Settings could not be read; defaults are in use. The original file was backed up — check settings.json.',
+      settingsCorruptBackup: 'Backup: {path}',
+      consecutiveFailures: '{count} in a row',
+      imagesShort: 'img',
+      listSeparator: ', ',
       // 1.1.0: credit trend, alerts, account tests
       trend: 'Credit trend',
       trendToday: 'Today {value}',
@@ -451,6 +466,44 @@ window.__ModuleLoader__.load({
       return String(text).replace(/\{(\w+)\}/g, function (_, name) {
         return vars[name] === undefined ? '' : String(vars[name])
       })
+    }
+
+    /**
+     * 诊断面板里可展示的状态副本：去掉写接口控制密钥，并缩掉用户目录。
+     *
+     * `/status` 里的 `key` 能改设置、触发签到/测试/登录，绝不能出现在
+     * 设置页的 `<pre>` 里（截图、共享屏幕都会泄露）。路径同理，至少把
+     * 用户名缩掉，避免排障截图带出本机账号。
+     */
+    function displayStatus(status) {
+      var secretKeys = { key: true, pat: true, token: true, accesstoken: true, refreshtoken: true, authorization: true, cookie: true, secret: true }
+      var redactText = function (text) {
+        return String(text)
+          .replace(/([A-Za-z]:\\Users\\)[^\\\s"']+/g, '$1<user>')
+          .replace(/\/Users\/[^/\s"']+/g, '/Users/<user>')
+          .replace(/\/home\/[^/\s"']+/g, '/home/<user>')
+          .replace(/([?&]state=)[^&\s"']+/g, '$1<redacted>')
+      }
+      var walk = function (value, name) {
+        if (typeof value === 'string') return redactText(value)
+        if (value === null || typeof value !== 'object') return value
+        if (Array.isArray(value)) return value.map(function (item) { return walk(item, name) })
+        var out = {}
+        Object.keys(value).forEach(function (childKey) {
+          if (secretKeys[String(childKey).toLowerCase()] === true) {
+            out[childKey] = '[redacted]'
+            return
+          }
+          out[childKey] = walk(value[childKey], childKey)
+        })
+        return out
+      }
+      return walk(status, '')
+    }
+
+    /** 只保留数组里的对象元素：状态可能来自手改过的磁盘缓存，不能信任。 */
+    function safeArray(value) {
+      return Array.isArray(value) ? value.filter(function (item) { return item !== null && typeof item === 'object' }) : []
     }
 
     /** 数字千分位（模块级，卡片与侧栏小卡共用）。 */
@@ -510,15 +563,43 @@ window.__ModuleLoader__.load({
     /**
      * Qoder Free 的 0 付费额度不是「用尽」：免费模型仍可用，只是排队。
      * 返回 true 时不要把它标成红色/已用尽。
+     *
+     * 优先认宿主写入的 `freePlan`（1.3.0），老宿主/老缓存则看套餐名与 paid。
      */
     function isQoderFreePlan(provider, credits) {
       if (typeof provider !== 'string' || provider.indexOf('qoder') !== 0) return false
       if (credits === undefined || credits === null) return false
-      return credits.planName === 'Free' && !(typeof credits.total === 'number' && credits.total > 0)
+      if (credits.state !== undefined && credits.state !== 'ok') return false
+      if (typeof credits.total === 'number' && credits.total > 0) return false
+      if (credits.freePlan === true) return true
+      if (credits.paid === false) return true
+      var plan = typeof credits.planName === 'string' ? credits.planName.toLowerCase() : ''
+      return plan === 'free' || plan.indexOf('free') !== -1 || plan.indexOf('免费') !== -1
+    }
+
+    /**
+     * 额度是否该亮警示色。
+     *
+     * 三个条件任一成立：已用尽、上游标记超额、或剩余低于阈值。
+     * Qoder Free 的 0 不算；`alerts.enabled === false` 时整个警示色关闭 ——
+     * 1.2.0 只关掉了横幅，侧栏与卡片仍然在亮，属于同一个开关两套行为。
+     *
+     * @param credits - 额度快照。
+     * @param provider - provider id。
+     * @param ratio - 低额度比例。
+     * @param enabled - 预警是否开启。
+     * @returns 是否警示。
+     */
+    function creditsWarning(credits, provider, ratio, enabled) {
+      if (enabled === false) return false
+      if (credits === undefined || credits === null || credits.state !== 'ok') return false
+      if (isQoderFreePlan(provider, credits)) return false
+      return isCreditsLow(credits, ratio)
     }
 
     /** 额度预警等级：优先用宿主算好的，老宿主没有就按同一套规则补。 */
-    function alertOfCredits(credits, ratio, provider) {
+    function alertOfCredits(credits, ratio, provider, enabled) {
+      if (enabled === false) return undefined
       if (credits === undefined || credits === null || credits.state !== 'ok') return undefined
       if (isQoderFreePlan(provider, credits)) return undefined
       if (credits.alert === 'low' || credits.alert === 'exhausted') return credits.alert
@@ -960,9 +1041,24 @@ window.__ModuleLoader__.load({
     }
 
     // ── 网络 ────────────────────────────────────────────────────────
+    /**
+     * 浏览器端请求超时信号。
+     *
+     * 没有超时的 fetch 会让 busy 永远停在「保存中…」；宿主 /settings 在换 PAT 时
+     * 还会 await 一轮目录 + 额度刷新，所以设置保存给 90 秒，状态轮询给 15 秒。
+     */
+    function requestSignal(ms) {
+      try {
+        if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms)
+      } catch (_) {
+        /* 老浏览器没有 AbortSignal.timeout */
+      }
+      return undefined
+    }
+
     function fetchStatus(light) {
       var url = light === true ? STATUS_PATH + '?light=1' : STATUS_PATH
-      return fetch(url, { headers: { Accept: 'application/json' } }).then(function (response) {
+      return fetch(url, { headers: { Accept: 'application/json' }, signal: requestSignal(15_000) }).then(function (response) {
         if (!response.ok) throw new Error('status ' + response.status)
         return response.json()
       })
@@ -973,6 +1069,7 @@ window.__ModuleLoader__.load({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-RPC-Key': key === undefined ? '' : key },
         body: JSON.stringify(body === undefined ? {} : body),
+        signal: requestSignal(90_000),
       }).then(function (response) {
         return response.json().then(function (document) {
           if (!response.ok) throw new Error(document && document.error ? document.error : 'http ' + response.status)
@@ -983,7 +1080,7 @@ window.__ModuleLoader__.load({
 
     /** 拉取脱敏后的诊断文本；失败时由调用方回退。 */
     function fetchDiagnosticsText() {
-      return fetch(DIAGNOSTICS_PATH + '?format=text', { headers: { Accept: 'text/plain' } }).then(function (response) {
+      return fetch(DIAGNOSTICS_PATH + '?format=text', { headers: { Accept: 'text/plain' }, signal: requestSignal(20_000) }).then(function (response) {
         if (!response.ok) throw new Error('diagnostics ' + response.status)
         return response.text()
       })
@@ -1039,6 +1136,7 @@ window.__ModuleLoader__.load({
       var useState = React.useState
       var useEffect = React.useEffect
       var useCallback = React.useCallback
+      var useRef = React.useRef
 
       var statusState = useState(undefined)
       var status = statusState[0]
@@ -1105,6 +1203,15 @@ window.__ModuleLoader__.load({
       var advQueueState = useState('')
       var advQueue = advQueueState[0]
       var setAdvQueue = advQueueState[1]
+      var advAlertsEnabledState = useState(true)
+      var advAlertsEnabled = advAlertsEnabledState[0]
+      var setAdvAlertsEnabled = advAlertsEnabledState[1]
+      var advProbeEnabledState = useState(true)
+      var advProbeEnabled = advProbeEnabledState[0]
+      var setAdvProbeEnabled = advProbeEnabledState[1]
+      // 浏览器登录轮询的取消令牌：切标签/关闭设置/卸载时递增，旧轮询自然失效。
+      var loginPollToken = useRef(0)
+      var loginPollTimer = useRef(undefined)
 
       var load = useCallback(
         function () {
@@ -1130,6 +1237,12 @@ window.__ModuleLoader__.load({
         return function () {
           disposed = true
           clearInterval(timer)
+          // 卸载时让还在等待的登录轮询失效，避免继续请求并 setState。
+          loginPollToken.current += 1
+          if (loginPollTimer.current !== undefined) {
+            clearTimeout(loginPollTimer.current)
+            loginPollTimer.current = undefined
+          }
         }
       }, [load])
 
@@ -1150,21 +1263,30 @@ window.__ModuleLoader__.load({
           if (typeof advanced.idleTimeoutMs === 'number') setAdvIdle(String(Math.round(advanced.idleTimeoutMs / 1000)))
           if (typeof advanced.catalogRefreshMs === 'number') setAdvCatalog(String(Math.round(advanced.catalogRefreshMs / 1000)))
           if (typeof advanced.creditsRefreshMs === 'number') setAdvCredits(String(Math.round(advanced.creditsRefreshMs / 1000)))
+          // 老宿主（没有 advanced）也显示已知默认值，而不是空输入框。
+          if (typeof advanced.idleTimeoutMs !== 'number') setAdvIdle('180')
+          if (typeof advanced.catalogRefreshMs !== 'number') setAdvCatalog('600')
+          if (typeof advanced.creditsRefreshMs !== 'number') setAdvCredits('120')
           setAdvStats(advanced.stats !== false)
           setAdvCache(advanced.catalogCache !== false)
           var alerts = status.settings.alerts || {}
           setAdvAlert(typeof alerts.lowRatio === 'number' ? String(Math.round(alerts.lowRatio * 100)) : '15')
+          setAdvAlertsEnabled(alerts.enabled !== false)
+          setAdvProbeEnabled(status.settings.probe !== false)
           var auto = status.settings.autoSwitch
           var switchRatio = auto !== null && typeof auto === 'object' && typeof auto.thresholdRatio === 'number'
             ? auto.thresholdRatio
             : 0
           setAdvSwitch(String(Math.round(switchRatio * 100)))
           if (typeof advanced.qoderQueueWaitMs === 'number') setAdvQueue(String(Math.round(advanced.qoderQueueWaitMs / 1000)))
+          if (typeof advanced.qoderQueueWaitMs !== 'number') setAdvQueue('60')
         }
         setPatDraft('')
+        setAccLabel('')
+        setAccSecret('')
       }, [activeTab, status === undefined])
 
-      var mutate = function (patch) {
+      var mutate = function (patch, options) {
         if (status === undefined) return Promise.resolve()
         setBusy('save')
         return postJson(SETTINGS_PATH, patch, status.key)
@@ -1172,7 +1294,8 @@ window.__ModuleLoader__.load({
             setStatus(document)
             setError(undefined)
             setBusy(undefined)
-            setPatDraft('')
+            if (options !== undefined && options.clearPatDraft === true) setPatDraft('')
+            if (options !== undefined && typeof options.onSuccess === 'function') options.onSuccess()
           })
           .catch(function (failure) {
             setBusy(undefined)
@@ -1251,13 +1374,19 @@ window.__ModuleLoader__.load({
        */
       var startLogin = function (provider) {
         if (status === undefined) return
+        loginPollToken.current += 1
+        var token = loginPollToken.current
+        if (loginPollTimer.current !== undefined) {
+          clearTimeout(loginPollTimer.current)
+          loginPollTimer.current = undefined
+        }
         setBusy('login')
         postJson(ACTION_PATH, { action: 'login-start', provider: provider }, status.key)
           .then(function (document) {
             setBusy(undefined)
             if (document.status !== undefined) setStatus(document.status)
             setError(undefined)
-            pollLogin(provider, 0)
+            pollLogin(provider, 0, token)
           })
           .catch(function (failure) {
             setBusy(undefined)
@@ -1265,18 +1394,20 @@ window.__ModuleLoader__.load({
           })
       }
 
-      /** 轮询登录进度，直到 done / failed / cancelled。 */
-      var pollLogin = function (provider, attempt) {
-        if (status === undefined || attempt > 150) return
-        setTimeout(function () {
+      /** 轮询登录进度，直到 done / failed / cancelled；token 变化后旧轮询自动停止。 */
+      var pollLogin = function (provider, attempt, token) {
+        if (status === undefined || attempt > 150 || token !== loginPollToken.current) return
+        loginPollTimer.current = setTimeout(function () {
+          if (token !== loginPollToken.current) return
           fetchStatus()
             .then(function (document) {
+              if (token !== loginPollToken.current) return
               setStatus(document)
               var entry = (document.providers || []).find(function (item) { return item.provider === provider })
               var job = entry === undefined ? undefined : entry.login
               if (job === undefined) return
               if (job.phase === 'waiting' || job.phase === 'starting') {
-                pollLogin(provider, attempt + 1)
+                pollLogin(provider, attempt + 1, token)
               }
             })
             .catch(function () {})
@@ -1285,6 +1416,11 @@ window.__ModuleLoader__.load({
 
       var cancelLogin = function (provider) {
         if (status === undefined) return
+        loginPollToken.current += 1
+        if (loginPollTimer.current !== undefined) {
+          clearTimeout(loginPollTimer.current)
+          loginPollTimer.current = undefined
+        }
         postJson(ACTION_PATH, { action: 'login-cancel', provider: provider }, status.key)
           .then(function (document) { setStatus(document) })
           .catch(function () {})
@@ -1399,7 +1535,11 @@ window.__ModuleLoader__.load({
             stats: advStats !== false,
             catalogCache: advCache !== false,
           },
-          alerts: { lowRatio: toPercent(advAlert, 0.15) },
+          alerts: {
+            enabled: advAlertsEnabled !== false,
+            lowRatio: toPercent(advAlert, 0.15),
+          },
+          probe: { enabled: advProbeEnabled !== false },
           autoSwitch: {
             enabled: (status.settings && status.settings.autoSwitch && typeof status.settings.autoSwitch === 'object')
               ? status.settings.autoSwitch.enabled !== false
@@ -1412,6 +1552,21 @@ window.__ModuleLoader__.load({
             setBusy(undefined)
             setError(undefined)
             setAdvSaved(true)
+            // 用服务端夹取后的值回填草稿：用户输入 9999 秒会被夹到 900 秒，
+            // 不能继续显示 9999 却告诉用户「已保存」。
+            var savedAdvanced = (document && document.settings && document.settings.advanced) || {}
+            if (typeof savedAdvanced.idleTimeoutMs === 'number') setAdvIdle(String(Math.round(savedAdvanced.idleTimeoutMs / 1000)))
+            if (typeof savedAdvanced.catalogRefreshMs === 'number') setAdvCatalog(String(Math.round(savedAdvanced.catalogRefreshMs / 1000)))
+            if (typeof savedAdvanced.creditsRefreshMs === 'number') setAdvCredits(String(Math.round(savedAdvanced.creditsRefreshMs / 1000)))
+            if (typeof savedAdvanced.qoderQueueWaitMs === 'number') setAdvQueue(String(Math.round(savedAdvanced.qoderQueueWaitMs / 1000)))
+            var savedAlerts = document && document.settings && document.settings.alerts
+            if (savedAlerts && typeof savedAlerts.lowRatio === 'number') setAdvAlert(String(Math.round(savedAlerts.lowRatio * 100)))
+            if (savedAlerts) setAdvAlertsEnabled(savedAlerts.enabled !== false)
+            if (document && document.settings) setAdvProbeEnabled(document.settings.probe !== false)
+            var savedAuto = document && document.settings && document.settings.autoSwitch
+            if (savedAuto && typeof savedAuto.thresholdRatio === 'number') setAdvSwitch(String(Math.round(savedAuto.thresholdRatio * 100)))
+            setAdvStats(savedAdvanced.stats !== false)
+            setAdvCache(savedAdvanced.catalogCache !== false)
             setTimeout(function () { setAdvSaved(false) }, 1600)
           })
           .catch(function (failure) {
@@ -1450,23 +1605,27 @@ window.__ModuleLoader__.load({
 
       /** 账号池的最小可回传形态（密钥永远不回传，服务端按 id 合并）。 */
       var accountRows = Array.isArray(active && active.accounts) ? active.accounts : []
-      var plainAccounts = function (extra) {
-        return accountRows.map(function (row) {
-          var next = {
-            id: row.id,
-            label: row.label,
-            enabled: row.enabled !== false,
-          }
-          if (row.authFile !== undefined && row.authFile !== '') next.authFile = row.authFile
-          if (extra !== undefined && extra.id === row.id) {
-            if (extra.pat !== undefined) next.pat = extra.pat
-            if (extra.forget === true) next.forget = true
-          }
-          return next
-        })
-      }
 
       var activeRow = accountRows.filter(function (row) { return row.active })[0]
+
+      /**
+       * 只回传「当前账号」这一行。
+       *
+       * 不要传整张旧的账号列表：另一个窗口/CLI 刚删掉或改名的账号会以旧快照
+       * 被 upsert 回来（幽灵账号），这正是 1.0.0 改成增量 upsert 想避免的事。
+       */
+      var activeAccountPatch = function (extra) {
+        if (activeRow === undefined) return undefined
+        var row = { id: activeRow.id, label: activeRow.label, enabled: activeRow.enabled !== false }
+        if (activeRow.authFile !== undefined && activeRow.authFile !== '') row.authFile = activeRow.authFile
+        if (extra !== undefined) {
+          if (extra.pat !== undefined) row.pat = extra.pat
+          if (extra.forget === true) row.forget = true
+        }
+        var patch = { accounts: {} }
+        patch.accounts[active.provider] = [row]
+        return patch
+      }
 
       var savePat = function () {
         if (active === undefined) return
@@ -1475,23 +1634,23 @@ window.__ModuleLoader__.load({
         // 账号池存在时必须写进「当前账号」，否则写的是被忽略的旧字段，
         // 用户会看到「保存成功但状态没变」。
         if (accountRows.length > 0 && activeRow !== undefined) {
-          mutate({ accounts: plainAccounts({ id: activeRow.id, pat: pat }) })
+          mutate(activeAccountPatch({ pat: pat }), { clearPatDraft: true })
           return
         }
         var patch = { qoder: {} }
         patch.qoder[active.provider] = { pat: pat }
-        mutate(patch)
+        mutate(patch, { clearPatDraft: true })
       }
 
       var clearPat = function () {
         if (active === undefined) return
         if (accountRows.length > 0 && activeRow !== undefined) {
-          mutate({ accounts: plainAccounts({ id: activeRow.id, forget: true }) })
+          mutate(activeAccountPatch({ forget: true }), { clearPatDraft: true })
           return
         }
         var patch = { qoder: {} }
         patch.qoder[active.provider] = { pat: '' }
-        mutate(patch)
+        mutate(patch, { clearPatDraft: true })
       }
 
       var saveDesktop = function () {
@@ -1514,9 +1673,7 @@ window.__ModuleLoader__.load({
           // 新版宿主提供脱敏后的纯文本诊断；旧宿主没有这条路由时退回精简 JSON
           // （至少先删掉控制密钥，不能把写接口的钥匙复制出去）。
           fetchDiagnosticsText().then(write, function () {
-            var safe = Object.assign({}, status)
-            delete safe.key
-            write(JSON.stringify(safe, null, 2))
+            write(JSON.stringify(displayStatus(status), null, 2))
           })
           return
         }
@@ -1527,7 +1684,7 @@ window.__ModuleLoader__.load({
         return h(
           'div',
           { style: S.card },
-          h('p', { style: error === undefined ? S.hint : S.hintError }, error === undefined ? bind(t, 'loading') : bind(t, 'error') + '：' + error),
+          h('p', { style: error === undefined ? S.hint : S.hintError }, error === undefined ? bind(t, 'loading') : bind(t, 'error') + ': ' + error),
         )
       }
 
@@ -1535,6 +1692,16 @@ window.__ModuleLoader__.load({
       var alertSettings = (status.settings && status.settings.alerts) || {}
       var alertRatio = typeof alertSettings.lowRatio === 'number' ? alertSettings.lowRatio : LOW_CREDITS_RATIO
       var alertsEnabled = alertSettings.enabled !== false
+      var storage = status.storage || {}
+      var settingsCorrupt = typeof storage.settingsError === 'string' && storage.settingsError !== ''
+        ? h('p', {
+            key: 'settings-corrupt',
+            style: S.hintWarn,
+            title: typeof storage.settingsBackup === 'string' && storage.settingsBackup !== ''
+              ? bind(t, 'settingsCorruptBackup', { path: storage.settingsBackup })
+              : '',
+          }, bind(t, 'settingsCorrupt'))
+        : null
 
       var tabs = providers.map(function (entry) {
         var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
@@ -1544,6 +1711,8 @@ window.__ModuleLoader__.load({
           {
             key: entry.provider,
             type: 'button',
+            role: 'tab',
+            'aria-selected': entry.provider === activeTab,
             style: tabStyle(entry.provider === activeTab),
             title: entry.displayName,
             onClick: function () { setActiveTab(entry.provider) },
@@ -1566,7 +1735,7 @@ window.__ModuleLoader__.load({
         var today = (entry.usage && entry.usage.today) || {}
         var selected = entry.provider === activeTab
         var accent = PROVIDER_ACCENT[entry.provider] || 'currentColor'
-        var low = credits.state === 'ok' && isCreditsLow(credits, alertRatio)
+        var low = creditsWarning(credits, entry.provider, alertRatio, alertsEnabled)
         var valueText = credits.state === 'ok'
           ? credits.unlimited === true ? '∞' : compactNumber(credits.remain)
           : '—'
@@ -1629,18 +1798,18 @@ window.__ModuleLoader__.load({
       // 额度预警：只提醒，不改变行为。真正换号由 autoSwitch.thresholdRatio 控制。
       var alertProviders = alertsEnabled
         ? providers.filter(function (entry) {
-            return entry.enabled !== false && alertOfCredits(entry.credits, alertRatio, entry.provider) !== undefined
+            return entry.enabled !== false && alertOfCredits(entry.credits, alertRatio, entry.provider, alertsEnabled) !== undefined
           })
         : []
       var exhaustedNames = alertProviders
-        .filter(function (entry) { return alertOfCredits(entry.credits, alertRatio, entry.provider) === 'exhausted' })
+        .filter(function (entry) { return alertOfCredits(entry.credits, alertRatio, entry.provider, alertsEnabled) === 'exhausted' })
         .map(function (entry) { return entry.displayName })
       var lowNames = alertProviders
-        .filter(function (entry) { return alertOfCredits(entry.credits, alertRatio, entry.provider) === 'low' })
+        .filter(function (entry) { return alertOfCredits(entry.credits, alertRatio, entry.provider, alertsEnabled) === 'low' })
         .map(function (entry) { return entry.displayName })
       var alertLines = []
-      if (exhaustedNames.length > 0) alertLines.push(bind(t, 'alertBannerExhausted', { names: exhaustedNames.join('、') }))
-      if (lowNames.length > 0) alertLines.push(bind(t, 'alertBannerLow', { names: lowNames.join('、') }))
+      if (exhaustedNames.length > 0) alertLines.push(bind(t, 'alertBannerExhausted', { names: exhaustedNames.join(bind(t, 'listSeparator')) }))
+      if (lowNames.length > 0) alertLines.push(bind(t, 'alertBannerLow', { names: lowNames.join(bind(t, 'listSeparator')) }))
       var alertBanner = alertLines.length === 0
         ? null
         : h('div', {
@@ -1679,14 +1848,17 @@ window.__ModuleLoader__.load({
           h('button', {
             type: 'button',
             style: S.buttonGhost,
+            'aria-expanded': showDiag,
+            'aria-controls': 'dsh-reverse-proxy-diagnostics',
             onClick: function () { setShowDiag(!showDiag) },
           }, bind(t, 'diagnostics'))),
-        error === undefined ? null : h('p', { key: 'err', style: S.hintError }, bind(t, 'error') + '：' + error),
+        error === undefined ? null : h('p', { key: 'err', style: S.hintError }, bind(t, 'error') + ': ' + error),
+        settingsCorrupt,
         alertBanner,
         summaryCards.length === 0
           ? null
           : h('div', { key: 'summary', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 } }, summaryCards),
-        h('div', { key: 'tabs', style: S.tabs }, tabs),
+        h('div', { key: 'tabs', role: 'tablist', style: S.tabs }, tabs),
       ]
 
       if (active === undefined) {
@@ -1718,6 +1890,12 @@ window.__ModuleLoader__.load({
         && !isSameMessage(credentialMessage, active.message)
         ? active.message
         : undefined
+      // 最近一次失败的具体原因（1.3.0 起统计里带 message）。
+      // 健康状态只说「最近失败是什么时候」，这条才回答「为什么失败」。
+      var statusStats = status.stats || {}
+      var lastFailure = (Array.isArray(statusStats.recent) ? statusStats.recent : []).filter(function (entry) {
+        return entry.provider === active.provider && (entry.kind === 'error' || entry.kind === 'incomplete')
+      })[0]
 
       sections.push(
         h('div', { key: 'status', style: S.section },
@@ -1736,7 +1914,7 @@ window.__ModuleLoader__.load({
               style: credential.status === 'signed-in' ? S.badge : S.badgeWarn,
             }, credential.status === 'signed-in' ? bind(t, 'signedIn') : bind(t, 'signedOut')),
             h('span', {
-              title: activeHealth.consecutiveFailures > 0 ? String(activeHealth.consecutiveFailures) + ' 连败' : '',
+              title: activeHealth.consecutiveFailures > 0 ? bind(t, 'consecutiveFailures', { count: activeHealth.consecutiveFailures }) : '',
               style: Object.assign({}, S.badgeSoft, { color: healthColor(activeHealth.state) }),
             }, bind(t, healthTextKey(activeHealth.state))),
             h('span', {
@@ -1753,6 +1931,17 @@ window.__ModuleLoader__.load({
           activeHealth.lastErrorAt > 0 && activeHealth.state !== 'ok'
             ? h('p', { key: 'last', style: S.hintWarn }, bind(t, 'lastErrorAt', { time: formatTime(activeHealth.lastErrorAt) }))
             : null,
+          lastFailure !== undefined
+            ? h('p', {
+                key: 'lastfail',
+                style: S.hintWarn,
+                title: typeof lastFailure.message === 'string' ? lastFailure.message : '',
+              }, bind(t, 'lastFailure', {
+                code: lastFailure.code || 'ERROR',
+                time: formatTime(lastFailure.at),
+                model: lastFailure.model || '—',
+              }))
+            : null,
           extraMessage !== undefined ? h('p', { key: 'msg', style: S.hintWarn }, extraMessage) : null),
       )
 
@@ -1763,6 +1952,9 @@ window.__ModuleLoader__.load({
       accountRows = Array.isArray(active && active.accounts) ? active.accounts : []
       var isPatProvider = active.kind === 'pat'
       var loginJob = active.login
+      var loginWaiting = loginJob !== undefined && (loginJob.phase === 'waiting' || loginJob.phase === 'starting')
+      // 登录等待中也要禁用「新增账号」：否则连点几次会起多个登录任务。
+      var loginBusy = busy === 'login' || loginWaiting
       var accountItems = accountRows.map(function (account, index) {
         var snapshot = account.credits || { state: 'none' }
         var cooling = typeof account.cooldownUntil === 'number' && account.cooldownUntil > Date.now()
@@ -1861,14 +2053,18 @@ window.__ModuleLoader__.load({
         patch.accounts[active.provider] = [next]
         // 新加的账号直接设为当前，省得用户再点一次。
         patch.activeAccount[active.provider] = next.id
-        mutate(patch)
-        setAccLabel('')
-        setAccSecret('')
+        // 只有保存成功才清空输入；失败时保留用户刚粘贴的 PAT。
+        mutate(patch, {
+          onSuccess: function () {
+            setAccLabel('')
+            setAccSecret('')
+          },
+        })
       }
 
       // 签到状态：优先显示「今日已签 / 可领 N 分 / 无活动 / 失败原因」。
       var checkin = active.checkin || {}
-      var checkinResult = checkin.result
+      var checkinResult = checkin.result !== null && typeof checkin.result === 'object' ? checkin.result : undefined
       var checkinLabel
       var checkinTone = 'hintTiny'
       var checkinFailureRaw = ''
@@ -1879,7 +2075,7 @@ window.__ModuleLoader__.load({
       } else {
         var claimedCount = typeof checkinResult.claimed === 'number' ? checkinResult.claimed : 0
         var claimedCredit = typeof checkinResult.credit === 'number' ? checkinResult.credit : 0
-        var kinds = (checkinResult.outcomes || []).map(function (item) { return item.kind })
+        var kinds = safeArray(checkinResult.outcomes).map(function (item) { return item.kind })
         if (claimedCount > 0) {
           checkinLabel = bind(t, 'checkinClaimed', { count: claimedCount, credit: claimedCredit })
         } else if (kinds.indexOf('already') !== -1) {
@@ -1887,7 +2083,7 @@ window.__ModuleLoader__.load({
         } else if (kinds.indexOf('inactive') !== -1) {
           checkinLabel = bind(t, 'checkinInactive')
         } else if (kinds.indexOf('failed') !== -1) {
-          checkinFailureRaw = (checkinResult.outcomes.find(function (item) { return item.kind === 'failed' }) || {}).message || '—'
+          checkinFailureRaw = (safeArray(checkinResult.outcomes).find(function (item) { return item.kind === 'failed' }) || {}).message || '—'
           checkinLabel = bind(t, 'checkinFailed', { reason: shortErrorMessage(checkinFailureRaw, t) })
           checkinTone = 'hintWarn'
         } else {
@@ -1937,9 +2133,9 @@ window.__ModuleLoader__.load({
                 h('button', {
                   type: 'button',
                   style: S.button,
-                  disabled: busy === 'login',
+                  disabled: loginBusy,
                   onClick: function () { startLogin(active.provider) },
-                }, busy === 'login' ? bind(t, 'loginOpening') : bind(t, 'loginAdd')),
+                }, loginBusy ? bind(t, 'loginOpening') : bind(t, 'loginAdd')),
                 loginJob === undefined
                   ? null
                   : h('span', {
@@ -1995,7 +2191,7 @@ window.__ModuleLoader__.load({
 
       // ── 积分 ────────────────────────────────────────────────────
       var credits = active.credits || { state: 'none' }
-      var creditsLow = credits.state === 'ok' && isCreditsLow(credits, alertRatio)
+      var creditsLow = creditsWarning(credits, active.provider, alertRatio, alertsEnabled)
       var qoderFreePlan = isQoderFreePlan(active.provider, credits)
       var creditsHead = h('div', { key: 'h', style: S.sectionHead },
         h('span', { style: S.sectionTitle }, bind(t, 'credits')),
@@ -2104,28 +2300,29 @@ window.__ModuleLoader__.load({
         creditsBody.push(h('p', { key: 'flat', style: S.hint }, creditsText(credits)))
       }
 
-      if (Array.isArray(credits.items) && credits.items.length > 0) {
-        creditsBody.push(
-          h('details', { key: 'pkgs' },
-            h('summary', { style: Object.assign({}, S.hintTiny, { cursor: 'pointer' }) },
-              bind(t, 'creditsPackages', { count: credits.items.length })),
-            h('ul', {
-              style: Object.assign({}, S.modelList, { marginTop: 6 }),
-            },
-            credits.items.map(function (item, index) {
-              return h('li', {
-                key: 'pkg' + index,
-                style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
+        var creditItems = safeArray(credits.items)
+        if (creditItems.length > 0) {
+          creditsBody.push(
+            h('details', { key: 'pkgs' },
+              h('summary', { style: Object.assign({}, S.hintTiny, { cursor: 'pointer' }) },
+                bind(t, 'creditsPackages', { count: creditItems.length })),
+              h('ul', {
+                style: Object.assign({}, S.modelList, { marginTop: 6 }),
               },
-              h('span', { style: S.modelName }, item.name),
-              item.expired ? h('span', { style: S.badge }, bind(t, 'creditsExhausted')) : null,
-              h('span', { style: S.grow }),
-              h('span', { style: S.modelMeta }, formatNumber(item.remain) + ' / ' + formatNumber(item.total)),
-              h('span', { style: S.modelId }, item.endAtMs ? formatTime(item.endAtMs) : ''))
-            })),
-          ),
-        )
-      }
+              creditItems.map(function (item, index) {
+                return h('li', {
+                  key: 'pkg' + index,
+                  style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
+                },
+                h('span', { style: S.modelName }, typeof item.name === 'string' ? item.name : '额度包'),
+                item.expired ? h('span', { style: S.badge }, bind(t, 'creditsExhausted')) : null,
+                h('span', { style: S.grow }),
+                h('span', { style: S.modelMeta }, formatNumber(item.remain) + ' / ' + formatNumber(item.total)),
+                h('span', { style: S.modelId }, item.endAtMs ? formatTime(item.endAtMs) : ''))
+              })),
+            ),
+          )
+        }
       if (credits.fetchedAt > 0) {
         creditsBody.push(h('p', { key: 'at', style: S.hintTiny }, bind(t, 'creditsFetchedAt', { time: formatTime(credits.fetchedAt) })))
       }
@@ -2140,7 +2337,12 @@ window.__ModuleLoader__.load({
       var statsDoc = status.stats || {}
       var providerUsage = active.usage || {}
       var usageToday = providerUsage.today || {}
-      var recentRequests = (statsDoc.recent || []).filter(function (entry) {
+      // 1.3.0 起 stats 按 provider 分开记「当前会话」；老宿主没有这两个字段时
+      // 才退回全局值，避免把另一个 provider 的会话数字挂在当前标签页上。
+      var providerSession = statsDoc.providerCurrentSession !== undefined && statsDoc.providerCurrentSession !== null
+        ? statsDoc.providerCurrentSession[active.provider]
+        : statsDoc.currentSession
+      var recentRequests = safeArray(statsDoc.recent).filter(function (entry) {
         return entry.provider === active.provider
       }).slice(0, 6)
 
@@ -2222,12 +2424,12 @@ window.__ModuleLoader__.load({
               formatDuration(providerUsage.avgDurationMs),
               formatNumber(providerUsage.totalTokens || 0),
             ], true),
-            typeof statsDoc.currentSession === 'object' && statsDoc.currentSession !== null && statsDoc.currentSession.requests > 0
+            typeof providerSession === 'object' && providerSession !== null && providerSession.requests > 0
               ? usageRow('session', bind(t, 'usageSession'), [
-                  formatNumber(statsDoc.currentSession.requests || 0),
-                  rateOf(statsDoc.currentSession),
-                  formatDuration(statsDoc.currentSession.avgDurationMs),
-                  formatNumber(statsDoc.currentSession.totalTokens || 0),
+                  formatNumber(providerSession.requests || 0),
+                  rateOf(providerSession),
+                  formatDuration(providerSession.avgDurationMs),
+                  formatNumber(providerSession.totalTokens || 0),
                 ], true)
               : null),
         )
@@ -2259,8 +2461,14 @@ window.__ModuleLoader__.load({
         }
 
         // 最近 14 天用量：14 根柱子，高度按当天 token 归一化。
-        // 不画坐标轴 —— 它回答的是「哪天用得猛」，不是精确读数。
-        var daily = Array.isArray(statsDoc.daily) ? statsDoc.daily.slice(-14) : []
+        // 优先用这个 provider 自己的每日历史；老宿主只有全局 daily。
+        var providerDaily = statsDoc.providerDaily !== undefined && statsDoc.providerDaily !== null
+          ? statsDoc.providerDaily[active.provider]
+          : undefined
+        var hasProviderDaily = statsDoc.providerDaily !== undefined && statsDoc.providerDaily !== null
+        var daily = hasProviderDaily
+          ? safeArray(providerDaily).slice(-14)
+          : safeArray(statsDoc.daily).slice(-14)
         if (daily.length > 0) {
           var maxDailyTokens = 1
           daily.forEach(function (day) {
@@ -2355,7 +2563,7 @@ window.__ModuleLoader__.load({
                   h('span', { style: Object.assign({}, usageCell, { textAlign: 'right' }) },
                     h('span', {
                       style: failed || entry.kind === 'incomplete' ? S.badgeWarn : S.badgeSoft,
-                      title: entry.code || '',
+                      title: [entry.code, entry.message].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
                     }, bind(t, kindTextKey(entry.kind)))),
                   h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatDuration(entry.durationMs)),
                   h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatNumber(entry.totalTokens || 0)),
@@ -2527,6 +2735,20 @@ window.__ModuleLoader__.load({
                 onChange: function () { setAdvCache(!(advCache !== false)) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedCache'))),
+            h('label', { key: 'alerts', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+              h('input', {
+                type: 'checkbox',
+                checked: advAlertsEnabled !== false,
+                onChange: function () { setAdvAlertsEnabled(!(advAlertsEnabled !== false)) },
+              }),
+              h('span', { style: S.hintTiny }, bind(t, 'advancedAlertsEnabled'))),
+            h('label', { key: 'probe', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+              h('input', {
+                type: 'checkbox',
+                checked: advProbeEnabled !== false,
+                onChange: function () { setAdvProbeEnabled(!(advProbeEnabled !== false)) },
+              }),
+              h('span', { style: S.hintTiny }, bind(t, 'advancedProbe'))),
             h('div', { key: 'btn', style: S.row },
               h('button', {
                 type: 'button',
@@ -2539,7 +2761,7 @@ window.__ModuleLoader__.load({
       )
 
       // ── 模型 ────────────────────────────────────────────────────
-      var models = active.models || []
+      var models = safeArray(active.models)
       var available = models.filter(function (row) { return !row.unavailable || row.forced })
       var unavailable = models.filter(function (row) { return row.unavailable && !row.forced })
       var probe = status.probe || {}
@@ -2555,7 +2777,7 @@ window.__ModuleLoader__.load({
         parts.push(model.reasoningEfforts && model.reasoningEfforts.length > 0
           ? model.reasoningEfforts.join('/')
           : bind(t, 'noReasoning'))
-        if (model.supportsImages) parts.push('图')
+        if (model.supportsImages) parts.push(bind(t, 'imagesShort'))
         if (model.credits) parts.push(model.credits)
         return parts.join(' · ')
       }
@@ -2602,6 +2824,7 @@ window.__ModuleLoader__.load({
                   h('input', {
                     type: 'checkbox',
                     checked: !model.disabled,
+                    'aria-label': model.name,
                     onChange: function () { toggleModel(active, model) },
                   }),
                   h('span', { style: S.modelName, title: model.name }, model.name),
@@ -2636,6 +2859,7 @@ window.__ModuleLoader__.load({
                 h('input', {
                   type: 'checkbox',
                   checked: false,
+                  'aria-label': model.name,
                   onChange: function () { toggleModel(active, model) },
                 }),
                 h('span', { style: S.modelMeta }, model.name),
@@ -2648,7 +2872,7 @@ window.__ModuleLoader__.load({
       }
 
       if (forcedCount(active) > 0) {
-        sections.push(h('p', { key: 'forced', style: S.hintTiny }, bind(t, 'forced') + '：' + forcedCount(active)))
+        sections.push(h('p', { key: 'forced', style: S.hintTiny }, bind(t, 'forced') + ': ' + forcedCount(active)))
       }
 
       // ── 诊断 ────────────────────────────────────────────────────
@@ -2657,11 +2881,11 @@ window.__ModuleLoader__.load({
           h('div', { key: 'h', style: S.sectionHead },
             h('span', { style: S.sectionTitle }, bind(t, 'diagnostics')),
             h('span', { style: S.grow }),
-            h('button', { type: 'button', style: S.buttonGhost, onClick: function () { setShowDiag(!showDiag) } },
+            h('button', { type: 'button', style: S.buttonGhost, 'aria-expanded': showDiag, 'aria-controls': 'dsh-reverse-proxy-diagnostics', onClick: function () { setShowDiag(!showDiag) } },
               showDiag ? bind(t, 'hide') : bind(t, 'show')),
             h('button', { type: 'button', style: S.buttonGhost, onClick: copyDiagnostics },
               copied ? bind(t, 'copied') : bind(t, 'copyDiagnostics'))),
-          showDiag ? h('pre', { key: 'pre', style: S.pre }, JSON.stringify(status, null, 2)) : null),
+          showDiag ? h('pre', { key: 'pre', id: 'dsh-reverse-proxy-diagnostics', style: S.pre }, JSON.stringify(displayStatus(status), null, 2)) : null),
       )
 
       return h('div', { style: S.card }, sections)
@@ -2704,7 +2928,7 @@ window.__ModuleLoader__.load({
                   name: SHARED_SECTION_SLOT,
                   id: SHARED_SECTION_ID,
                   order: SHARED_SECTION_ORDER,
-                  label: function () { return SHARED_SECTION_LABEL },
+                  label: function () { return t('nav') },
                   children: (function () {
                     var children = {}
                     children[SHARED_ITEM_SLOT] = { kind: 'list', scope: 'root' }
@@ -2873,6 +3097,7 @@ window.__ModuleLoader__.load({
         var providers = status && Array.isArray(status.providers) ? status.providers : []
         var sidebarAlertSettings = (status && status.settings && status.settings.alerts) || {}
         var sidebarAlertRatio = typeof sidebarAlertSettings.lowRatio === 'number' ? sidebarAlertSettings.lowRatio : LOW_CREDITS_RATIO
+        var sidebarAlertsEnabled = sidebarAlertSettings.enabled !== false
         var sidebarShowUsage = !(status && status.settings && status.settings.showUsageInSidebar === false)
         var rows = []
         for (var index = 0; index < providers.length; index++) {
@@ -2939,7 +3164,7 @@ window.__ModuleLoader__.load({
         var segments = rows.map(function (row, position) {
           var snapshot = row.credits
           var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
-          var warn = isCreditsLow(snapshot, sidebarAlertRatio)
+          var warn = creditsWarning(snapshot, row.entry.provider, sidebarAlertRatio, sidebarAlertsEnabled)
           var stale = snapshot.stale === true
           var dotColor = warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent
           var label = row.entry.displayName + ' ' + formatCreditsText(snapshot, t) + (stale ? ' · ' + bind(t, 'creditsCached') : '')
@@ -3122,8 +3347,8 @@ window.__ModuleLoader__.load({
           ),
           rows.map(function (row, index) {
             var snapshot = row.credits
-            var warn = isCreditsLow(snapshot, sidebarAlertRatio)
-            var alert = alertOfCredits(snapshot, sidebarAlertRatio, row.entry.provider)
+            var warn = creditsWarning(snapshot, row.entry.provider, sidebarAlertRatio, sidebarAlertsEnabled)
+            var alert = alertOfCredits(snapshot, sidebarAlertRatio, row.entry.provider, sidebarAlertsEnabled)
             var qoderFree = isQoderFreePlan(row.entry.provider, snapshot)
             var exhausted = snapshot.state === 'ok' && (snapshot.exceeded === true || (typeof snapshot.remain === 'number' && snapshot.remain <= 0))
             var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'

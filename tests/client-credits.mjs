@@ -157,7 +157,22 @@ const STATUS = {
       { date: '2026-10-17', requests: 4, totalTokens: 120 },
       { date: '2026-10-18', requests: 4, totalTokens: 100 },
     ],
-    currentSession: { id: 's1', requests: 2, totalTokens: 30, avgDurationMs: 500, successRate: 1 },
+    // 1.3.0：每个 provider 自己的每日/会话维度。WorkBuddy 的 2026-10-18 是 3 次 / 80 tok，
+    // 与全局的 4 次 / 100 tok 不同，用来验证卡片没有拿全局数字串台。
+    providerDaily: {
+      workbuddy: [
+        { date: '2026-10-17', requests: 2, totalTokens: 50 },
+        { date: '2026-10-18', requests: 3, totalTokens: 80 },
+      ],
+      'workbuddy-ai': [{ date: '2026-10-18', requests: 1, totalTokens: 20 }],
+      qoder: [],
+      'qoder-global': [{ date: '2026-10-18', requests: 1, totalTokens: 10 }],
+    },
+    currentSession: { id: 'global-session', requests: 9, totalTokens: 999, avgDurationMs: 999, successRate: 1 },
+    providerCurrentSession: {
+      workbuddy: { id: 's1', requests: 2, totalTokens: 30, avgDurationMs: 500, successRate: 1 },
+      'workbuddy-ai': { id: 's2', requests: 1, totalTokens: 20, avgDurationMs: 800, successRate: 1 },
+    },
     health: {},
     recent: [
       { at: 1792234000000, provider: 'workbuddy', accountId: 'default', model: 'auto', kind: 'stop', durationMs: 1000, totalTokens: 20 },
@@ -396,7 +411,8 @@ if (!collapsedText.includes('WB') || !collapsedText.includes('675')) {
 }
 console.log('✓ 胶囊默认收起，只显示汇总')
 
-// 余额 0 的账号亮警示色，675 / 99 不亮
+// Qoder Free 的 0 是「付费额度为 0」，免费模型仍可用，不能亮警示色。
+// 675 / 1200 与 99 / 100 也不该亮。
 const warned = []
 ;(function walk(node) {
   if (node === null || node === undefined) return
@@ -413,11 +429,10 @@ const warned = []
   }
   walk(node.children)
 })(tree)
-if (!warned.includes('0')) throw new Error(`余额 0 没有警示色：${JSON.stringify(warned)}`)
-if (warned.some((value) => value.includes('675') || value.includes('99'))) {
-  throw new Error(`不该警示的账号变红了：${JSON.stringify(warned)}`)
+if (warned.length !== 0) {
+  throw new Error(`没有任何账号该亮警示色（Qoder Free 的 0 不算）：${JSON.stringify(warned)}`)
 }
-console.log('✓ 只有余额为 0 的账号亮警示色')
+console.log('✓ Qoder Free 的 0 与正常余额都不亮警示色')
 
 // 胶囊必须满宽：收起时也不能缩成内容宽度（否则比展开时窄一截）。
 const collapsedToggle = find(tree, (node) => node.type === 'button' && node.props?.onClick !== undefined)
@@ -573,8 +588,8 @@ const advancedCall = calls[calls.length - 1]
 if (calls.length === beforeAdvanced || !String(advancedCall.body).includes('advanced')) {
   throw new Error('保存高级设置没有发出 advanced 补丁')
 }
-if (!String(advancedCall.body).includes('"alerts"') || !String(advancedCall.body).includes('thresholdRatio') || !String(advancedCall.body).includes('qoderQueueWaitMs')) {
-  throw new Error(`高级设置没有带上预警/换号/排队阈值：${String(advancedCall.body).slice(0, 280)}`)
+if (!String(advancedCall.body).includes('"alerts"') || !String(advancedCall.body).includes('thresholdRatio') || !String(advancedCall.body).includes('qoderQueueWaitMs') || !String(advancedCall.body).includes('"probe"')) {
+  throw new Error(`高级设置没有带上预警/换号/排队/探测开关：${String(advancedCall.body).slice(0, 280)}`)
 }
 console.log('✓ 高级设置会发 advanced 补丁')
 
@@ -667,6 +682,39 @@ if (!trendCardText.includes('trendEta')) throw new Error('没有渲染耗尽预�
 if (find(cardTree, (node) => node.type === 'polyline') === undefined) {
   throw new Error('额度趋势没有折线')
 }
+// 用量热力图与「当前会话」必须用当前 provider 自己的数字，不能拿全局值串台。
+const workbuddyDayBar = find(cardTree, (node) => typeof node.props?.title === 'string'
+  && node.props.title.includes('2026-10-18')
+  && node.props.title.includes('3 次')
+  && node.props.title.includes('80 tok'))
+if (workbuddyDayBar === undefined) {
+  throw new Error('WorkBuddy 热力图没有使用 providerDaily（应显示 3 次 / 80 tok）')
+}
+const sessionRow = find(cardTree, (node) => node.type === 'div'
+  && Array.isArray(node.children)
+  && node.children.length > 0
+  && textOf(node.children[0]) === 'usageSession')
+if (sessionRow === undefined) throw new Error('没有渲染当前会话行')
+const sessionRowText = textOf(sessionRow)
+if (!sessionRowText.includes('30') || sessionRowText.includes('999')) {
+  throw new Error(`当前会话应使用该 provider 的 30 tok，而不是全局的 999：${sessionRowText}`)
+}
+
+// 诊断面板里的原始 JSON 不能带控制密钥（key 能改设置 / 触发签到与测试）。
+const diagButton = findButton(cardTree, 'diagnostics')
+if (diagButton === undefined) throw new Error('找不到诊断按钮')
+diagButton.props.onClick()
+cardTree = await render(card, { t: (key) => key })
+const diagPre = find(cardTree, (node) => node.type === 'pre')
+if (diagPre === undefined) throw new Error('展开诊断后没有 JSON')
+const diagText = textOf(diagPre)
+if (diagText.includes('"key": "k"') || diagText.includes('"key":"k"')) {
+  throw new Error('诊断 JSON 泄露了控制密钥')
+}
+if (!diagText.includes('[redacted]')) throw new Error('诊断 JSON 没有标记脱敏字段')
+const closeDiagButton = findButton(cardTree, 'diagnostics')
+if (closeDiagButton !== undefined) closeDiagButton.props.onClick()
+cardTree = await render(card, { t: (key) => key })
 
 // 真正的低额度账号仍然要有橙色横幅（用临时 5% 的 WorkBuddy AI 验证）。
 const lowProvider = STATUS.providers[1]
@@ -679,6 +727,33 @@ try {
   console.log('✓ 低额度账号仍会触发预警横幅')
 } finally {
   STATUS.providers[1] = lowProvider
+  cardTree = await mount(card, { t: (key) => key })
+}
+
+// 关闭预警开关后：横幅、卡片数字、侧栏颜色都要一起关掉（1.2.0 只关了横幅）。
+STATUS.settings.alerts.enabled = false
+let beforeDisable
+try {
+  beforeDisable = STATUS.providers[1]
+  STATUS.providers[1] = { ...beforeDisable, credits: { ...beforeDisable.credits, remain: 5, total: 100 } }
+  cardTree = await mount(card, { t: (key) => key })
+  const noAlertText = textOf(cardTree)
+  if (noAlertText.includes('alertBannerLow')) throw new Error('关闭预警后仍然渲染了低额度横幅')
+  const stillWarned = []
+  ;(function walk(node) {
+    if (node === null || node === undefined || typeof node !== 'object') return
+    if (Array.isArray(node)) { node.forEach(walk); return }
+    if (typeof node.props?.style?.color === 'string'
+      && node.props.style.color.includes('state-warning')
+      && typeof node.props.style.fontSize === 'number'
+      && node.props.style.fontSize >= 19) stillWarned.push(textOf(node))
+    walk(node.children)
+  })(cardTree)
+  if (stillWarned.length > 0) throw new Error(`关闭预警后仍有琥珀色：${JSON.stringify(stillWarned)}`)
+  console.log('✓ 关闭预警后卡片与侧栏不再亮警示色')
+} finally {
+  if (beforeDisable !== undefined) STATUS.providers[1] = beforeDisable
+  STATUS.settings.alerts.enabled = true
   cardTree = await mount(card, { t: (key) => key })
 }
 for (const label of ['usageSession', 'usageHeatmap', 'usageTopModels', 'usageShowInSidebar']) {
@@ -714,6 +789,17 @@ if (calls.length === beforeUsageToggle || !String(usageCall.body).includes('show
   throw new Error(`切换侧栏用量没有发 display 补丁：${String(usageCall?.body).slice(0, 160)}`)
 }
 console.log('✓ 侧栏用量开关可切换并会发 display 补丁')
+
+// 设置文件读坏时要有明确提示（不能静默重置成默认值）。
+STATUS.storage = { settingsError: 'Unexpected token', settingsBackup: 'C:\\data\\settings.json.corrupt-1' }
+try {
+  cardTree = await mount(card, { t: (key) => key })
+  if (!textOf(cardTree).includes('settingsCorrupt')) throw new Error('设置文件损坏时没有提示')
+  cardTree = await mount(card, { t: (key) => key })
+} finally {
+  delete STATUS.storage
+}
+console.log('✓ 设置文件损坏时会明确提示')
 
 // Qoder Free：0 付费额度要说明「免费模型排队」，而不是让人以为模型坏了。
 const qoderGlobalTab = findButton(cardTree, 'Qoder Global')

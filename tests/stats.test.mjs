@@ -196,6 +196,118 @@ test('统计：每日历史最多保留 30 天', () => {
     }
     assert.equal(stats.snapshot().daily.length, 30)
     assert.equal(stats.snapshot().daily[0].date, dayKey(now - 30 * 24 * 3600_000))
+    // 按 provider 的每日桶也要同步裁剪，不能因为总量没超上限就无限增长。
+    assert.equal(stats.snapshot().providerDaily.qoder.length, 30)
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：午夜后没有新请求，快照也要把今日归零', () => {
+  const dir = tempDir()
+  try {
+    let now = new Date(2026, 9, 18, 23, 50, 0).getTime()
+    const stats = new Stats({ filePath: statsPathOf(dir), enabled: () => true, now: () => now })
+    stats.record({ provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop' })
+    assert.equal(stats.snapshot().today.requests, 1)
+    now = new Date(2026, 9, 19, 0, 10, 0).getTime()
+    const snapshot = stats.snapshot()
+    assert.equal(snapshot.today.date, dayKey(now))
+    assert.equal(snapshot.today.requests, 0)
+    assert.equal(snapshot.providerToday.workbuddy.requests, 0)
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：跨日后启动，旧的 providerToday 不能覆盖已经归零的今日', () => {
+  const dir = tempDir()
+  try {
+    const filePath = statsPathOf(dir)
+    const now = new Date(2026, 9, 18, 12, 0, 0).getTime()
+    const yesterday = dayKey(now - 24 * 3600_000)
+    writeFileSync(filePath, JSON.stringify({
+      version: 3,
+      since: now - 1000,
+      totals: { requests: 4, ok: 4 },
+      today: { requests: 4, ok: 4, date: yesterday },
+      providers: {},
+      providerToday: { workbuddy: { requests: 4, ok: 4, lastAt: now - 24 * 3600_000 } },
+      accounts: {},
+      models: {},
+      daily: { [yesterday]: { requests: 4, ok: 4 } },
+      providerDaily: {},
+      sessions: {},
+      providerSessions: {},
+      recent: [],
+    }))
+    const stats = new Stats({ filePath, enabled: () => true, now: () => now })
+    const snapshot = stats.snapshot()
+    assert.equal(snapshot.today.date, dayKey(now))
+    assert.equal(snapshot.today.requests, 0)
+    assert.equal(snapshot.providerToday.workbuddy.requests, 0)
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：按 provider 拆分的每日/会话维度不会串台', () => {
+  const dir = tempDir()
+  try {
+    let now = new Date(2026, 9, 18, 10, 0, 0).getTime()
+    const stats = new Stats({ filePath: statsPathOf(dir), enabled: () => true, now: () => now })
+    stats.record({ provider: 'workbuddy', accountId: 'a', sessionId: 's1', model: 'auto', kind: 'stop', durationMs: 10, usage: { inputTokens: 10, outputTokens: 20 } })
+    stats.record({ provider: 'workbuddy', accountId: 'a', sessionId: 's1', model: 'auto', kind: 'stop', durationMs: 20, usage: { inputTokens: 1, outputTokens: 2 } })
+    stats.record({ provider: 'qoder', accountId: 'b', sessionId: 's2', model: 'qf', kind: 'stop', durationMs: 30, usage: { inputTokens: 3, outputTokens: 4 } })
+    now += 24 * 3600_000
+    stats.record({ provider: 'workbuddy', accountId: 'a', sessionId: 's3', model: 'auto', kind: 'error', code: 'RATE_LIMIT', message: 'HTTP 429 from upstream', durationMs: 40 })
+    const snapshot = stats.snapshot()
+    // 全局 daily 仍有所有 provider；各 provider 只看到自己的日期与计数。
+    assert.equal(snapshot.daily.length, 2)
+    assert.equal(snapshot.providerDaily.workbuddy.length, 2)
+    assert.equal(snapshot.providerDaily.qoder.length, 1)
+    assert.equal(snapshot.providerDaily.workbuddy[0].requests, 2)
+    assert.equal(snapshot.providerDaily.qoder[0].requests, 1)
+    assert.equal(snapshot.providerDaily.qoder[0].totalTokens, 7)
+    // 会话按 provider 取最近一个，不把 WorkBuddy 的会话挂到 Qoder 上。
+    assert.equal(snapshot.providerCurrentSession.workbuddy.id, 's3')
+    assert.equal(snapshot.providerCurrentSession.qoder.id, 's2')
+    assert.equal(snapshot.currentSession.id, 's3')
+    // 失败原因要带进最近请求，卡片才能回答「为什么失败」。
+    assert.equal(snapshot.recent[0].message, 'HTTP 429 from upstream')
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：v2 文件升级后保留今日 provider 计数，并补出第一条按 provider 的每日历史', () => {
+  const dir = tempDir()
+  try {
+    const filePath = statsPathOf(dir)
+    const now = new Date(2026, 9, 18, 12, 0, 0).getTime()
+    writeFileSync(filePath, JSON.stringify({
+      version: 2,
+      since: now - 1000,
+      totals: { requests: 3, ok: 3 },
+      today: { requests: 2, ok: 2, date: dayKey(now) },
+      providers: {},
+      providerToday: { qoder: { requests: 2, ok: 2, lastAt: now - 100 } },
+      accounts: {},
+      models: {},
+      daily: { [dayKey(now)]: { requests: 2, ok: 2 } },
+      sessions: {},
+      recent: [],
+    }))
+    const stats = new Stats({ filePath, enabled: () => true, now: () => now })
+    const snapshot = stats.snapshot()
+    assert.equal(snapshot.totals.requests, 3)
+    assert.equal(snapshot.providerDaily.qoder.length, 1)
+    assert.equal(snapshot.providerDaily.qoder[0].requests, 2)
+    assert.deepEqual(snapshot.providerCurrentSession, {})
     stats.stop()
   } finally {
     rmSync(dir, { recursive: true, force: true })

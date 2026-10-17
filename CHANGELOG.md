@@ -1,6 +1,203 @@
 # 更新记录
 
+## 1.3.0 — 2026-10-18
+
+这一版的主题是「把 1.2.0 的 Qoder Free 修复补完整，并修掉流式终态、统计串台、
+设置落盘与刷新竞态」。没有引入新的外部依赖。
+
+### 修复：Qoder Free 的 0 付费额度在所有位置都按 Free 处理
+
+1.2.0 只改了顶部横幅与卡片徽标，颜色、自动换号、CLI 仍然把 Free 当成「额度用尽」。
+现在统一到一个判定（`lib/quota.js`）：
+
+- `fetchQoderCredits()` 写入 `freePlan: true`，老缓存由 `planName` / `paid` 兜底；
+- 卡片、账号总览、侧栏数字/圆点/进度条都不再亮琥珀色；
+- `autoSwitch` 不会为了 Free 的 0 切到付费账号；
+- `node lib/bin.js credits|doctor` 显示「Free 套餐：付费额度为 0，免费模型仍可用」；
+- 诊断文本不再把 Free 写成「已用尽」；付费套餐的 0 仍然算用尽。
+
+### 修复：Qoder 流式 usage 落在 finish 之后会丢失
+
+与 1.1.0 修 WorkBuddy SSE 的问题相同，Qoder 的 `parseStream()` 之前一看到
+`finish_reason` 就 `yield finish`，调用方收到 finish 立即收流，后面单独到达的
+usage chunk 永远到不了统计。现在只记终态，等 `[DONE]` / EOF 再发 finish，
+并保证 finish 只出现一次。
+
+### 修复：取消被记成「正常完成」
+
+两个 SSE 解析器在 `signal.aborted` 时直接 `return`，adapter 会补一个
+`kind: stop` 的 finish，DSH 与统计都会把用户主动取消当成成功。现在抛
+`CancelledError`，终态是 `aborted`。
+
+### 修复：流中途失败留下没有结尾的文本/工具块
+
+适配器在 `catch` 里会先 `block-end` 已打开的文本/推理块与工具块，再发失败
+finish。之前只发 finish，渲染器会留下一个永远不结束的块。
+
+### 修复：统计 kind 永远记成 stop
+
+运行时从解析器拿到的是 `event.kind`（`stop` / `tool-calls` / `max-tokens` /
+`error`），1.2.0 却只读 `event.reason?.kind`，导致所有 WorkBuddy 成功请求都
+被记成 `stop`。现在以 `event.kind` 为准，并把失败的 `message` 一并记进
+`stats.json`，卡片状态区多了「最近一次失败：CODE · 模型 · 时间」（悬停看全文）。
+
+### 修复：工具结果里的图片插在并行 tool 消息中间
+
+一次 assistant 发起多个 tool_call、且**非最后一个** tool 结果带图时，旧实现
+会在 tool1 和 tool2 之间插一条 user 消息，破坏「assistant 的每个 tool_call
+必须被连续 tool 响应」的结构。现在先收齐同一轮连续 tool 结果的图片，在最后
+一条 tool 之后只插一条 user 消息；单 tool 场景行为不变。
+
+### 修复：SSE 末行没有换行时丢最后一段
+
+两个解析器都在 `reader.read()` 返回 `done` 时直接退出，没有处理 buffer 里
+残留的最后一行。现在 EOF 时 flush decoder，并把尾包补成完整 data 行再解析；
+最后一段正文、`finish_reason=length` 都不会再丢。
+
+### 修复：损坏的 SSE JSON 帧被静默丢弃
+
+`data:` 行 JSON 解析失败时旧实现直接 `continue`，回答会中间缺一段、最后
+仍然报 `stop`。现在只要 payload 看起来像 JSON（以 `{` / `[` 开头）就抛
+`malformed`，由 DSH 明确报错；上游的注释/心跳行仍然安静忽略。
+
+### 修复：Qoder PAT 失效不会触发换号
+
+`resolveIdentity()` 的 PAT 无效错误只带了 `code: pat-invalid`，`kind` 用了
+构造函数默认的 `server`；`failureCodeOf()` 先看 kind，于是多账号救援在最常见
+的「PAT 过期」场景完全不触发。现在：
+
+- Qoder 令牌交换 / 身份缺失显式抛 `kind: 'auth'`；
+- `failureCodeOf()` 让凭证类 code 优先于默认 kind；
+- 坏 PAT 冷却按 AUTH 的 2 分钟，而不是 SERVER 的 15 秒。
+
+### 修复：Qoder 普通 429 / 402 被归类成 malformed
+
+只有带 `isQueued` / `code:10605` / `code:110` 的响应才会被识别，普通网关
+429/402（空 body 或一句 Too Many Requests）落到 `malformed`，既不换号也不按
+限流/额度退避。现在状态码兜底：429 → `soft-rate`，402 → `quota`，
+408/504/5xx → `server`。
+
+### 修复：Qoder 排队等待上限对流阶段不生效
+
+1.2.0 把首包预算（45 秒）复用到了流阶段的 `reopen()`，所以高级里调到
+60–180 秒对流中排队没用。现在首包仍受 60 秒连接死线约束（实际等待
+`min(上限, 45s)`），流阶段重开按 `qoderQueueWaitMs` 剩余预算执行。
+「重开次数用尽」与「等待时间用尽」也拆成两种文案，不再出现
+「已等待 2 秒，超过 45 秒上限」。
+
+### 修复：凭证续期并发时旧 token 覆盖新 token
+
+同一账号两个并发请求同时命中 5 分钟续期余量时，会各打一次 refresh；后一次
+若失败会回退旧凭证，而旧实现仍无条件写回 settings，覆盖前一次刚拿到的新
+令牌。现在按 `provider::账号` 单飞（single-flight），并且只有 accessToken /
+refreshToken / 过期时间**真的变化**时才写回。
+
+### 修复：设置文件坏掉会静默丢 PAT，写盘失败仍返回 200
+
+- 读设置时兼容 UTF-8 BOM 与 PowerShell 的 UTF-16LE/BE；
+- 解析失败先把原文件复制成 `settings.json.corrupt-<时间戳>`，并在状态/诊断
+  里报告 `loadError` 与备份路径；
+- `writeTextAtomic()` 对 Windows 的 EPERM/EBUSY/EACCES 做有限重试；
+- `SettingsStore.patch()` 写失败会抛错并回滚内存值，`POST /settings` 返回
+  500，不再「界面显示已保存、重启后丢失」；
+- 每次 patch 前检查磁盘 mtime/size：CLI 或另一个进程刚写过设置时，先重读
+  再合并，宿主不会用旧快照覆盖 CLI 新登录的账号。
+
+### 修复：目录刷新与凭证续期的竞态
+
+- 目录刷新按 provider 单飞；带 `force` 的请求遇到后台轮询时会等它结束后
+  补跑一轮，不再被静默吞掉（与额度刷新同一套语义）；
+- 能力探测的每一条请求都接上整轮探测的取消信号，插件卸载后不会继续白跑
+  45 秒；
+- 插件卸载时取消进行中的浏览器登录与签到；登录成功回调也会检查
+  `runtime.stopped`，不会在卸载后写账号池。
+
+### 修复：浏览器登录取消后仍会写入账号
+
+1.2.0 的「取消」只关闭轮询；如果令牌刚好换到，`result.then` 仍会把账号写进
+设置。现在取消会设置 `cancelled`，登录回调和 CLI/GUI 轮询都以此为准；
+`authUrl` 必须是 https 才会被用于打开浏览器或 href。
+
+### 修复：签到完成状态只按 provider 记，新账号当天漏签
+
+现在 `checkin.completedOn` 之外还记录该 provider 的启用账号集合
+（`checkin.accountIds`）。当天新增 / 新启用的账号会让 `checkinDue()` 重新
+返回 true；已签的账号会返回 `already`，不会重复领取。浏览器登录成功后会
+立即触发一次该 provider 的签到。老设置没有账号集合时，1.3.0 会先补跑一次
+（幂等）。
+
+### 修复：PAT 账号之间的可用性判断
+
+`isAccountUsable()` 之前不知道 provider 类型：Qoder 的空 `pat` 因为
+`authFile === undefined` 被误判为可用，请求失败换号时可能选到一个没配令牌
+的账号。现在按桌面 / PAT 分开判断；隐式默认账号仍然允许环境变量 PAT 兜底。
+
+### 修复：WorkBuddy 目录把 disabled 模型复活成 virtual
+
+上游把模型标 `disabled:true` 但仍留在 cli 花名册时，旧实现给它补一份
+128K/32K、`supportsImages:true` 的 virtual 元数据。现在 disabled 与元数据
+非法的 id 都直接跳过，只有「models[] 里完全没有」的虚拟 id（如 `auto`）才
+使用默认值。
+
+### 修复：侧栏与卡片的状态串台
+
+- `stats.json` 升到 v3：新增 `providerDaily` / `providerSessions`；
+  热力图和「当前会话」按 provider 取数，不再把 WorkBuddy 的会话挂到 Qoder；
+- 午夜后即使没有新请求，`/status` 的「今日」也会归零；跨日启动不会再从旧
+  文件把 `providerToday` 读回来；
+- 额度历史的小时桶按**本地**整点对齐，非整小时时区（如 +05:30）的午夜消耗
+  不再记到昨天；
+- 额度缓存里的坏 `items`（null / 非对象）在读取时就被丢掉，不会让整张设置
+  卡片被宿主的 SlotErrorBoundary 替换。
+
+### 修复：客户端可靠性
+
+- 诊断面板的原始 JSON 会脱敏控制密钥、用户目录与登录 state（复制诊断也走
+  同一份脱敏逻辑）；
+- 所有 fetch 加超时（状态 15s / 写操作 60s / 诊断 20s），不会永久卡在
+  「保存中…」；
+- 浏览器登录轮询有取消令牌与卸载清理，等待期间「新增账号」按钮保持禁用；
+- 高级设置保存后用服务端夹取后的值回填草稿，不再显示 9999 秒却提示已保存；
+- 账号/PAT 草稿切换标签时清空，添加账号只在保存成功后清空，失败保留；
+  保存/清除 PAT 只回传当前账号一行，不会用旧快照把已删账号复活；
+- 模型、预警、探测、用量等嵌套数组统一做安全过滤，手改坏的 JSON 不会让
+  卡片崩掉；
+- 共享设置区块的标题走 `locale`，英文界面不再显示中文；模型复选框、provider
+  标签、诊断按钮补了 aria 属性。
+
+### 新增：高级里可以关掉预警与自动探测
+
+1.1.0 的后端已经支持 `alerts.enabled` / `probe.enabled`，但 1.2.0 的界面没有
+入口，而且预警开关只关横幅、不关颜色。现在高级里有两个复选框：
+
+- **启用额度预警（横幅与琥珀色）**：关掉后横幅、卡片数字、侧栏颜色一起关；
+- **自动检测账号可用模型**：关掉后不再每 6 小时自动探测；「检测账号可用模型」
+  按钮仍然可以手动跑一次（`action=probe` 会强制探测）。
+
+### 行为变更（升级前请确认）
+
+1. **状态文档升到 v6**：新增 `storage`、`credits.freePlan`、
+   `stats.providerDaily` / `stats.providerCurrentSession`、`checkin.accountIds`。
+   客户端对缺失字段都有 fallback；按 v5 硬编码的第三方消费者需要同步。
+2. **`stats.json` 升到 v3**：v1/v2 自动迁移，保留累计与今日；更早的按 provider
+   每日历史无法反推，首次升级只补今天的 `providerToday`。
+3. **设置文件仍然兼容 v2**，没有新增必填字段；坏文件会先备份再使用默认值。
+4. **Qoder Free 不再触发自动换号**；付费套餐的 0 仍然会。
+5. **签到按账号集合判断**：当天新增/新启用账号会补签一次，已签账号幂等。
+6. **流阶段 Qoder 排队真正按 `qoderQueueWaitMs` 生效**；首包仍最多等 45 秒。
+
+### 测试
+
+- `node --test tests/*.test.mjs`：**156 条**，新增设置文件 BOM/坏文件/写失败/
+  跨进程合并、Qoder Free 语义、Qoder 429/402、坏 PAT 换号、SSE 末行无换行、
+  取消不伪装成功、多 tool 图片顺序、disabled 模型、statistics v3、跨午夜、
+  provider 维度、签到账号集合、macOS/Linux 布局等用例。
+- `node tests/client-credits.mjs`：**29 项**全部通过，新增 Qoder Free 不亮警示色、
+  关闭预警后不亮色、provider 维度用量/会话、诊断不泄露密钥、设置损坏提示、
+  多 tool/图片等检查。
+
 ## 1.2.0 — 2026-10-18
+
 
 ### 新增：Qoder 排队等待时间可配置
 

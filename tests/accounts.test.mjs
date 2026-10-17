@@ -147,6 +147,11 @@ test('账号可用性：桌面账号允许空路径，PAT 账号必须有令牌'
   assert.equal(isAccountUsable({ id: 'x', enabled: true, pat: '' }), false)
   assert.equal(isAccountUsable({ id: 'x', enabled: true, pat: 'tok' }), true)
   assert.equal(isAccountUsable({ id: 'x', enabled: false, pat: 'tok' }), false)
+  // 带 provider 时必须区分两种凭证类型：PAT 账号的空 authFile 不是「本机登录」。
+  assert.equal(isAccountUsable({ id: 'x', enabled: true }, QG), false, '未配置 PAT 的 Qoder 账号不可用')
+  assert.equal(isAccountUsable({ id: 'x', enabled: true, pat: 'tok' }, QG), true)
+  assert.equal(isAccountUsable({ id: 'x', enabled: true }, WB), true, '桌面账号空路径 = 本机登录')
+  assert.equal(isAccountUsable({ id: 'x', enabled: true, authFile: 'C:/a.info' }, WB), true)
 })
 
 test('额度耗尽判定：0 / 超额 / 不限量', () => {
@@ -155,6 +160,10 @@ test('额度耗尽判定：0 / 超额 / 不限量', () => {
   assert.equal(isExhausted({ state: 'ok', remain: 5, exceeded: true }), true)
   assert.equal(isExhausted({ state: 'ok', remain: 0, unlimited: true }), false)
   assert.equal(isExhausted({ state: 'none' }), false, '读不到不算耗尽')
+  // Qoder Free 的 0 是付费额度为 0，免费模型仍可用，不能算耗尽。
+  assert.equal(isExhausted({ state: 'ok', remain: 0, total: 0, exceeded: true, planName: 'Free' }, QG), false)
+  assert.equal(isExhausted({ state: 'ok', remain: 0, total: 0, exceeded: true, paid: false }, QG), false)
+  assert.equal(isExhausted({ state: 'ok', remain: 0, total: 0, exceeded: true, planName: 'Pro', paid: true }, QG), true)
 })
 
 test('自动切换：优先挑还有余额且可用的账号', () => {

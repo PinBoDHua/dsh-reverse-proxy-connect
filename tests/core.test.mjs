@@ -3,16 +3,18 @@ import test from 'node:test'
 
 import {
   buildChatEnvelope,
+  classifyUpstreamBody,
   encodeBody,
   parseCatalog as parseQoderCatalog,
+  parseStream as parseQoderStream,
   finishKind,
   normalizeUsage,
   translateMessages,
   translateTools,
 } from '../lib/qoder/transport.js'
 import { prepareChatBody, parseCatalog as parseWorkBuddyCatalog, parseRetryAfter } from '../lib/workbuddy/upstream.js'
-import { openAiFinishKind, normalizeOpenAiUsage, parseOpenAiSse, qoderQueueFailure, toOpenAiMessages, toOpenAiTools, accountLimitation } from '../lib/runtime.js'
-import { toModelInfo, toResolvedModelInfo, failureCode, stableFailureCode } from '../lib/adapter.js'
+import { openAiFinishKind, normalizeOpenAiUsage, parseOpenAiSse, qoderQueueFailure, failureCodeOf, isFailoverCode, toOpenAiMessages, toOpenAiTools, accountLimitation } from '../lib/runtime.js'
+import { toModelInfo, toResolvedModelInfo, failureCode, stableFailureCode, ReverseProxyAdapter } from '../lib/adapter.js'
 import { defaults, normalize, providerOptions, isModelVisible } from '../lib/settings.js'
 
 test('Retry-After：秒数与 HTTP 日期都能解析，且夹到 10 分钟', () => {
@@ -205,6 +207,68 @@ test('prepareChatBody 只在模型有隐含档位时补 reasoning_effort', () =>
   assert.equal(off.reasoning_effort, 'medium')
 })
 
+test('Qoder 普通 HTTP 429/402 按限流/额度处理，不再落成 malformed', () => {
+  const limited = classifyUpstreamBody('{"message":"Too Many Requests"}', 429)
+  assert.equal(limited.kind, 'soft-rate')
+  assert.equal(limited.status, 429)
+  const quota = classifyUpstreamBody('', 402)
+  assert.equal(quota.kind, 'quota')
+  assert.equal(quota.status, 402)
+  // 401/403 仍然是认证失败，不受新分支影响。
+  assert.equal(classifyUpstreamBody('<html>forbidden</html>', 403).kind, 'auth')
+})
+
+test('Qoder PAT 失效：错误码优先于默认 kind=server，分类为 AUTH', () => {
+  const failure = classifyUpstreamBody('', 403)
+  assert.equal(failure.kind, 'auth')
+  const patError = Object.assign(new Error('Qoder 拒绝了该个人访问令牌'), {
+    name: 'QoderFailure',
+    code: 'pat-invalid',
+    kind: 'server',
+    status: 401,
+  })
+  assert.equal(failureCodeOf(patError), 'AUTH')
+  assert.equal(isFailoverCode(failureCodeOf(patError)), true)
+})
+
+test('SSE 末行没有换行时也要处理，不能丢最后一段正文/终态', async () => {
+  const encoder = new TextEncoder()
+  const openai = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"tail"}}]}'))
+      controller.close()
+    },
+  })
+  const openaiEvents = []
+  for await (const event of parseOpenAiSse(openai)) openaiEvents.push(event)
+  assert.equal(openaiEvents.map((event) => event.type).join(','), 'text,finish')
+  assert.equal(openaiEvents[0].text, 'tail')
+
+  const qoder = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ statusCodeValue: 200, body: JSON.stringify({ choices: [{ delta: { content: 'tail' }, finish_reason: 'length' }] }) })}`))
+      controller.close()
+    },
+  })
+  const qoderEvents = []
+  for await (const event of parseQoderStream(qoder)) qoderEvents.push(event)
+  assert.equal(qoderEvents.map((event) => event.type).join(','), 'text,finish')
+  assert.equal(qoderEvents.at(-1).kind, 'max-tokens')
+})
+
+test('WorkBuddy 目录：disabled 的模型即使还在花名册里也不能复活成 virtual', () => {
+  const models = parseWorkBuddyCatalog({
+    agents: [{ name: 'cli', models: ['auto', 'retired-model', 'live-model'] }],
+    models: [
+      { id: 'retired-model', name: 'Retired', disabled: true, maxInputTokens: 1000, maxOutputTokens: 100 },
+      { id: 'live-model', name: 'Live', maxInputTokens: 1000, maxOutputTokens: 100 },
+    ],
+  }, 'workbuddy')
+  assert.deepEqual(models.map((model) => model.id), ['auto', 'live-model'])
+  assert.equal(models[0].virtual, true)
+  assert.equal(models[1].supportsImages, false)
+})
+
 test('OpenAI SSE 终态与 usage 归一化', () => {
   assert.equal(openAiFinishKind('stop', true), 'tool-calls')
   assert.equal(openAiFinishKind('length', false), 'max-tokens')
@@ -227,6 +291,9 @@ test('Qoder 排队超时：给出 RATE_LIMIT 与明确文案，而不是空等�
   assert.match(error.message, /排队/)
   assert.match(error.message, /61 秒/)
   assert.match(error.message, /不是令牌失效/)
+  // 次数用尽与时间用尽要能区分，不能出现「已等待 2 秒，超过 45 秒上限」。
+  const attempts = qoderQueueFailure({}, 2_000, 60_000, { attemptsExhausted: true })
+  assert.match(attempts.message, /重开次数已用尽/)
 })
 
 test('OpenAI SSE：finish_reason 之后的 usage 不会丢失，finish 永远在最后', async () => {
@@ -249,6 +316,94 @@ test('OpenAI SSE：finish_reason 之后的 usage 不会丢失，finish 永远在
   assert.equal(events[2].kind, 'stop')
 })
 
+test('Qoder SSE：finish_reason 之后的 usage 不会丢，finish 永远在最后且只出现一次', async () => {
+  const encoder = new TextEncoder()
+  const inner = (value) => `data: ${JSON.stringify({ statusCodeValue: 200, body: JSON.stringify(value) })}\n\n`
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(inner({ choices: [{ delta: { content: 'hi' } }] })))
+      controller.enqueue(encoder.encode(inner({ choices: [{ delta: {}, finish_reason: 'stop' }] })))
+      // Qoder 与 OpenAI 一样，可能先给 finish_reason，再单独给 usage。
+      controller.enqueue(encoder.encode(inner({ choices: [], usage: { prompt_tokens: 10, completion_tokens: 4 } })))
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+      controller.close()
+    },
+  })
+  const events = []
+  for await (const event of parseQoderStream(body)) events.push(event)
+  assert.deepEqual(events.map((event) => event.type), ['text', 'usage', 'finish'])
+  assert.equal(events[1].usage.inputTokens, 10)
+  assert.equal(events[2].kind, 'stop')
+})
+
+test('Qoder SSE：取消不能被当成正常结束（否则 adapter 会补一个成功的 finish）', async () => {
+  const controller = new AbortController()
+  const encoder = new TextEncoder()
+  const body = new ReadableStream({
+    start(streamController) {
+      streamController.enqueue(encoder.encode(`data: ${JSON.stringify({ statusCodeValue: 200, body: JSON.stringify({ choices: [{ delta: { content: 'x' } }] }) })}\n\n`))
+      // 不关闭：模拟上游一直挂着。先 abort 再迭代，解析器必须在循环顶部抛取消。
+      controller.abort()
+    },
+  })
+  await assert.rejects(
+    async () => {
+      for await (const _event of parseQoderStream(body, controller.signal)) {
+        /* 不应该有内容 */
+      }
+    },
+    (error) => error?.code === 'ABORTED',
+  )
+})
+
+test('Qoder SSE：statusCodeValue 是字符串时也能识别 200 / 429', async () => {
+  const encoder = new TextEncoder()
+  const ok = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ statusCodeValue: '200', body: JSON.stringify({ choices: [{ delta: { content: 'ok' } }] }) })}\n\n`))
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+      controller.close()
+    },
+  })
+  const events = []
+  for await (const event of parseQoderStream(ok)) events.push(event)
+  assert.equal(events.map((event) => event.type).join(','), 'text,finish')
+
+  const limited = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ statusCodeValue: '429', body: JSON.stringify({ code: '10605', isQueued: true, retryAfterSeconds: 30 }) })}\n\n`))
+      controller.close()
+    },
+  })
+  await assert.rejects(
+    async () => {
+      for await (const _event of parseQoderStream(limited)) {
+        /* 不应该有内容 */
+      }
+    },
+    (error) => error?.kind === 'soft-rate' && error?.retryAfterMs === 30_000,
+  )
+})
+
+test('OpenAI SSE：取消不能被当成正常结束', async () => {
+  const controller = new AbortController()
+  const encoder = new TextEncoder()
+  const body = new ReadableStream({
+    start(streamController) {
+      streamController.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"x"}}]}\n\n'))
+      controller.abort()
+    },
+  })
+  await assert.rejects(
+    async () => {
+      for await (const _event of parseOpenAiSse(body, controller.signal)) {
+        /* 不应该有内容 */
+      }
+    },
+    (error) => error?.code === 'ABORTED',
+  )
+})
+
 test('DSH 消息 → OpenAI 消息：tool-call 合成 tool_calls，tool 角色带 id', () => {
   const messages = toOpenAiMessages([
     { role: 'system', content: [{ type: 'text', text: 'sys' }] },
@@ -267,6 +422,42 @@ test('DSH 消息 → OpenAI 消息：tool-call 合成 tool_calls，tool 角色�
   assert.equal(messages[2].role, 'tool')
   assert.equal(messages[2].tool_call_id, 'call-1')
   assert.equal(messages[3].content, 'thanks')
+})
+
+test('适配器：流中途失败也要关掉已经打开的文本/工具块', async () => {
+  const adapter = new ReverseProxyAdapter({
+    openStream: async () => ({
+      events: (async function* () {
+        yield { type: 'text', text: 'hi' }
+        yield { type: 'tool', index: 0, id: 'call-1', name: 'f', argumentsDelta: '{}' }
+        throw new Error('连接中断')
+      })(),
+      close: async () => undefined,
+    }),
+    listModels: async () => [],
+    resolveModel: async () => undefined,
+    canAcceptImages: () => false,
+    showRateInModelName: () => false,
+  })
+  const chunks = []
+  for await (const chunk of adapter.streamWithMeta({ provider: 'workbuddy', model: 'm' }, {
+    id: 'm',
+    name: 'M',
+    contextWindow: 1000,
+    maxTokens: 100,
+    inputModalities: ['text'],
+  })) chunks.push(chunk)
+  assert.deepEqual(chunks.map((chunk) => chunk.type), [
+    'block-start',
+    'text-delta',
+    'block-end',
+    'tool-call-delta',
+    'block-end',
+    'finish',
+  ])
+  assert.equal(chunks[2].block.text, 'hi')
+  assert.equal(chunks[4].block.type, 'tool-call')
+  assert.equal(chunks[5].reason.kind, 'error')
 })
 
 test('tools 翻译丢掉 deferLoading 之外的一切无关字段', () => {
@@ -313,6 +504,15 @@ test('设置归一化容忍缺字段与错类型', () => {
   assert.deepEqual(value.providers.workbuddy.disabledModels, ['a'])
   assert.equal(value.qoder.qoder.pat, 'x')
   assert.equal(value.providers.qoder.enabled, true)
+  // 1.0.6 的布尔 autoSwitch 升级后不能丢失用户的选择。
+  assert.equal(normalize({ autoSwitch: false }).autoSwitch.enabled, false)
+  assert.equal(normalize({ autoSwitch: true }).autoSwitch.enabled, true)
+  assert.equal(normalize({ autoSwitch: { enabled: false, thresholdRatio: 0.2 } }).autoSwitch.thresholdRatio, 0.2)
+  // 签到账号集合去重/排序，坏值丢弃。
+  assert.deepEqual(
+    normalize({ checkin: { accountIds: { workbuddy: ['b', 'a', 'a', 3] } } }).checkin.accountIds.workbuddy,
+    ['a', 'b'],
+  )
 })
 
 test('设置默认值四个 provider 都存在且默认启用', () => {

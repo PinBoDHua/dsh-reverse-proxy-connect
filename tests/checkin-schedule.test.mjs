@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { CHECKIN_RETRY_MS, checkinDue, checkinTerminal } from '../lib/checkin-schedule.js'
+import { CHECKIN_RETRY_MS, checkinCompleted, checkinDue, checkinTerminal } from '../lib/checkin-schedule.js'
 
 /** 某个本地日期的中午。 */
 function at(year, month, day, hour = 12, minute = 0) {
@@ -32,6 +32,20 @@ test('自动签到：当天失败后 10 分钟内不重试，之后重试', () =
 test('自动签到：昨天失败过，今天立即重试', () => {
   const checkin = { enabled: true, completedOn: {}, lastAttemptAt: { workbuddy: at(2026, 10, 17, 23, 50) } }
   assert.equal(checkinDue(checkin, 'workbuddy', at(2026, 10, 18, 0, 5)), true)
+})
+
+test('签到按 provider + 账号集合判断：当天新增账号仍会补签', () => {
+  const now = at(2026, 10, 18, 12)
+  const checkin = {
+    enabled: true,
+    completedOn: { workbuddy: '2026-10-18' },
+    accountIds: { workbuddy: ['a'] },
+  }
+  assert.equal(checkinCompleted(checkin, 'workbuddy', now, ['a']), true)
+  assert.equal(checkinDue(checkin, 'workbuddy', now, ['a']), false)
+  assert.equal(checkinDue(checkin, 'workbuddy', now, ['a', 'b']), true, '新增账号 B 后不能整天漏签')
+  // 老设置没有 accountIds：有账号集合时先跑一次（已签账号会返回 already）。
+  assert.equal(checkinDue({ enabled: true, completedOn: { workbuddy: '2026-10-18' } }, 'workbuddy', now, ['a']), true)
 })
 
 test('签到终态：所有账号都到终态才算今天结束', () => {

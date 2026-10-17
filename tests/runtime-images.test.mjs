@@ -82,6 +82,21 @@ test('tool 结果里的图片提升成紧随其后的 user 消息', () => {
   assert.equal(messages[2].content.at(-1).type, 'image_url')
 })
 
+test('多个并行 tool 结果：图片要等最后一条 tool 之后才插 user，不能打断 tool 配对', () => {
+  const messages = toOpenAiMessages([
+    { role: 'assistant', content: [
+      { type: 'tool-call', id: 'c1', name: 'shot', arguments: '{}' },
+      { type: 'tool-call', id: 'c2', name: 'shot2', arguments: '{}' },
+    ] },
+    { role: 'tool', toolCallId: 'c1', content: [{ type: 'text', text: 'first' }, { type: 'image', attachment: REF }] },
+    { role: 'tool', toolCallId: 'c2', content: [{ type: 'text', text: 'second' }] },
+  ], new Map([[REF.attachmentId, IMAGE]]))
+  assert.deepEqual(messages.map((message) => message.role), ['assistant', 'tool', 'tool', 'user'])
+  assert.equal(messages[1].tool_call_id, 'c1')
+  assert.equal(messages[2].tool_call_id, 'c2')
+  assert.equal(messages[3].content.at(-1).type, 'image_url')
+})
+
 test('没有附件服务时图片变成明确占位符，不静默丢失', () => {
   const messages = toOpenAiMessages([
     { role: 'user', content: [{ type: 'image', attachment: REF }] },

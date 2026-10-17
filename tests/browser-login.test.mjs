@@ -7,6 +7,7 @@ import {
   normalizeToken,
   openInBrowser,
   pollAuthToken,
+  requestAuthState,
   safeBrowserUrl,
   startBrowserLogin,
 } from '../lib/workbuddy/browser-login.js'
@@ -45,7 +46,7 @@ test('openInBrowser 把 URL 完整交给浏览器（带 & 的 state 不能被 cm
   const url = 'https://x/login?platform=ide&state=abc'
   const ok = openInBrowser(url, (command, args, options) => {
     calls.push({ command, args, options })
-    return { unref() {} }
+    return { pid: 1001, unref() {} }
   })
   assert.equal(ok, true)
   assert.equal(calls.length, 1)
@@ -70,6 +71,22 @@ test('登录 URL 白名单：只接受 https，拒绝引号与换行', () => {
   assert.equal(safeBrowserUrl('https://x/\nstate'), undefined)
   assert.equal(browserOpenCommand('javascript:alert(1)'), undefined)
   assert.equal(openInBrowser('http://x/login', () => { throw new Error('should not spawn') }), false)
+  // spawn 异步失败时 child.pid 为 undefined，不能谎报「已打开」。
+  assert.equal(openInBrowser('https://x/login', () => ({ pid: undefined, on() {}, unref() {} })), false)
+})
+
+test('申请登录：authUrl 不是 https 时拒绝，避免 javascript: 进 href', async () => {
+  const original = globalThis.fetch
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    text: async () => JSON.stringify({ code: 0, data: { state: 's', authUrl: 'javascript:alert(1)' } }),
+  })
+  try {
+    await assert.rejects(() => requestAuthState('workbuddy'), /https/)
+  } finally {
+    globalThis.fetch = original
+  }
 })
 
 test('轮询 token：11217 未就绪会继续等，成功后返回令牌', async () => {
@@ -140,7 +157,7 @@ test('完整流程：申请地址 → 打开浏览器 → 换 token → 读账�
       timeoutMs: 3000,
       spawn: (command, args, options) => {
         opened.push({ command, args, options })
-        return { unref() {} }
+        return { pid: 1002, unref() {} }
       },
       onUpdate: (patch) => updates.push(patch),
     })

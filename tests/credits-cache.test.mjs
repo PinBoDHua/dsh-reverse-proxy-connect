@@ -65,6 +65,22 @@ test('过期缓存不展示：超过一周的直接丢掉', () => {
   })
 })
 
+test('缓存里的坏套餐行会被丢弃，不能把 null 原样送进 /status', () => {
+  withTempDir((dir) => {
+    writeFileSync(join(dir, 'credits-cache.json'), JSON.stringify({
+      'workbuddy::default': {
+        fetchedAt: NOW,
+        data: { state: 'ok', remain: 10, total: 20, items: [null, 3, { name: 42, remain: 'x' }, { name: 'ok', remain: 5, total: 10 }] },
+      },
+    }), 'utf8')
+    const loaded = loadCreditsCache(dir)
+    const items = loaded.get('workbuddy::default').data.items
+    assert.equal(items.length, 1)
+    assert.equal(items[0].name, 'ok')
+    assert.equal(items[0].remain, 5)
+  })
+})
+
 test('坏文件 / 不存在 / 非对象内容都安静退化成空缓存', () => {
   withTempDir((dir) => {
     assert.equal(loadCreditsCache(dir).size, 0, '目录里没文件')

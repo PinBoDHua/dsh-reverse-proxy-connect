@@ -47,6 +47,13 @@
 > **1.2.0** Qoder 排队等待上限可在「高级」里调到 15–180 秒（默认 60），
 > 让「再等一分钟就放行」的场景真的能等到；Qoder Free 不再被标成
 > 「额度已用尽」，改为「免费模型排队」，并保留付费额度为 0 的说明。
+>
+> **1.3.0** 把 1.2.0 的 Qoder Free 修复补完整（颜色、自动换号、CLI 一致），
+> 并修掉流式终态与观测层的硬伤：Qoder usage 落在 finish 之后会丢、取消被记成
+> 成功、统计 kind 恒为 stop、工具结果图片插断 tool 消息、末行无换行丢尾包、
+> 坏 PAT 不换号、Qoder 429/402 被归成 malformed、凭证续期并发覆盖新 token。
+> 设置文件支持 BOM/UTF-16、坏文件自动备份、写失败不再假装成功，并新增按
+> provider 的每日/会话统计与「关闭预警 / 关闭自动探测」两个开关。
 
 | provider id | 显示名 | 凭证来源 | 实测模型数量级 |
 |---|---|---|---|
@@ -54,6 +61,77 @@
 | `workbuddy-ai` | WorkBuddy AI | 本机登录文件，或浏览器登录 | 27（本账号可用 14） |
 | `qoder` | Qoder | 个人访问令牌（PAT，qoder.cn） | 视账号 |
 | `qoder-global` | Qoder Global | 个人访问令牌（PAT，qoder.com） | 视账号 |
+
+---
+
+## 1.3.0 新增与修复
+
+### Qoder Free 的 0 在所有位置都按 Free 处理
+
+`fetchQoderCredits()` 现在会写 `freePlan: true`，服务端与客户端共用同一套
+判定（老缓存仍可看 `planName` / `paid` 兜底）：
+
+- 卡片数字、账号总览、侧栏圆点/进度条不再亮琥珀色；
+- 自动换号不会为了 Free 的 0 切到付费账号；
+- CLI 与诊断文本显示「Free 套餐：付费额度为 0，免费模型仍可用」；
+- 付费套餐的 0 仍然是「额度已用尽」。
+
+### 流式终态与统计
+
+- **Qoder usage 不再丢**：`finish_reason` 只记终态，`[DONE]`/EOF 才发 finish；
+- **取消不再伪装成功**：两个 SSE 解析器 abort 时抛 `CancelledError`；
+- **中途失败会关块**：适配器在失败前补齐文本/工具块的 `block-end`；
+- **统计 kind 正确**：`stop` / `tool-calls` / `max-tokens` / `error` 与最近失败原因
+  都会进 `stats.json`；
+- **末行无换行也处理**：EOF 时 flush decoder 并解析尾包；
+- **坏 JSON 帧明确报错**：不再静默丢一段后仍报 `stop`。
+
+### 并行工具里的图片顺序
+
+一次 assistant 发起多个 tool_call、且非最后一个 tool 结果带图时，图片会等
+**所有**连续 tool 消息发完才提升成一条 user 消息，不再插在 tool1 与 tool2
+之间破坏配对。
+
+### 多账号与凭证
+
+- Qoder PAT 失效显式归为 `AUTH`，坏 PAT 会换号并按 2 分钟冷却；
+- Qoder 普通 429/402 按 `RATE_LIMIT` / `QUOTA` 处理；
+- 凭证续期按账号单飞，只有 token 真变化才写回，避免并发旧值覆盖新值；
+- `isAccountUsable()` 按桌面/PAT 分开判断，不再把空 PAT 的 Qoder 账号选成
+  换号候选；
+- 浏览器登录取消后不会再写入账号；`authUrl` 只接受 https；
+- 插件卸载会取消进行中的登录与签到。
+
+### 设置与数据更安全
+
+- 读设置兼容 UTF-8 BOM / UTF-16LE/BE；
+- 坏文件先备份成 `settings.json.corrupt-<时间戳>`，状态/诊断显示错误与备份路径；
+- 原子写在 Windows 的 EPERM/EBUSY 会有限重试；写失败会抛错并回滚内存值，
+  `POST /settings` 返回 500；
+- patch 前检查磁盘 mtime/size，宿主与 CLI 同时改设置时先重读再合并。
+
+### 统计与界面
+
+- `stats.json` 升到 v3：`providerDaily` / `providerSessions`，热力图与「当前会话」
+  不再跨 provider 串台；
+- 午夜后没有新请求，`/status` 的「今日」也会归零；
+- 额度历史按本地整点分桶，非整小时时区不再把午夜消耗记到昨天；
+- 高级里新增「启用额度预警」「自动检测账号可用模型」两个开关；
+- 诊断面板与复制诊断都会脱敏控制密钥、用户目录与登录 state；
+- 所有 fetch 有超时；登录轮询可取消；高级设置保存后用服务端夹取值回填；
+- PAT 保存只回传当前账号一行，不会用旧快照复活已删账号；
+- 账号/PAT 草稿按 provider 隔离，保存成功才清空；
+- 模型复选框、provider 标签、诊断按钮补了 aria 属性；共享设置区块标题走
+  locale。
+
+### 行为变更
+
+1. 状态文档升到 **v6**（`storage`、`credits.freePlan`、
+   `stats.providerDaily` / `providerCurrentSession`、`checkin.accountIds`）。
+2. `stats.json` 升到 **v3**，v1/v2 自动迁移；更早的按 provider 每日历史无法反推。
+3. 设置文件仍是 v2，没有新增必填字段；坏文件会先备份。
+4. Qoder Free 的 0 不再触发自动换号；付费套餐的 0 仍然会。
+5. 签到按「provider + 启用账号集合」判断，当天新增账号会补签一次。
 
 ---
 
@@ -406,7 +484,7 @@ POST {endpoint}/v2/billing/meter/daily-checkin             # 需要时再领取
 
 `GET /api/v2/quota/usage` 给 `userQuota{total,used,remaining}`，`/api/v2/user/plan`
 给套餐名，`/api/v3/user/status` 给重置时间。免费套餐的 `total` 就是 0，此时显示
-`0 credits` 并标注「额度已用尽」，而不是留一个空白。
+`0 credits` 并标注「免费模型排队」，而不是留一个空白或报「额度已用尽」。
 
 ### 三条设计原则
 
@@ -436,7 +514,7 @@ GLM-5.3 · x0.79        Hy3 · 免费        Kimi-K3 · x1.62
 - 模型用量榜（按请求数取前 5）与最近 40 条请求；
 - 健康状态：连续 2 次失败 = 降级，连续 3 次 = 不可用；一次成功立即恢复。
 
-`stats.json` 从 v1 升级到 v2 时会保留累计与今日，不会清零。
+`stats.json` 从 v1/v2 升级到 v3 时会保留累计、今日与已有每日历史，不会清零。
 
 命令行也能看：
 
@@ -509,7 +587,7 @@ node lib/bin.js usage workbuddy
 - **每个账号一行「测试」**（真发 1-token 请求）、最近测试结果、冷却截止与「解除冷却」；
 - 今日与累计用量、当前会话、最近 14 天柱状图、模型用量榜、最近请求、重置统计；
 - 填 Qoder PAT（带官方 PAT 页面链接）、填 WorkBuddy 的 App 路径与登录文件路径；
-- 高级设置（超时 / 刷新间隔 / 统计 / 目录缓存 / 预警阈值 / 提前换号阈值 / Qoder 排队等待）；
+- 高级设置（超时 / 刷新间隔 / 统计 / 目录缓存 / 预警阈值与开关 / 提前换号阈值 / 自动探测开关 / Qoder 排队等待）；
 - 「刷新」立刻重拉目录与额度；「诊断」与「复制诊断」输出脱敏文本。
 
 **侧栏底部**还有一枚常驻小卡：
@@ -566,7 +644,7 @@ settings.json          # PAT、账号池、模型开关、探测结果、路径�
 credits-cache.json     # 上一次成功的额度快照（启动秒显）
 credits-history.json   # 额度历史：今日/7 天消耗、速度与耗尽预估（按 provider::账号）
 catalog-cache.json     # 最后一次成功的模型目录（按 provider::账号）
-stats.json             # 用量统计 v2：今日/累计/每日 30 天/当前会话/模型（不含请求内容）
+stats.json             # 用量统计 v3：今日/累计/每日 30 天/按 provider 的每日与会话/模型（不含请求内容）
 .qoder-machine-id      # Qoder 设备标识种子（优先复用 ~/.qoder/.auth/machine_id）
 ```
 

@@ -75,6 +75,19 @@ test('诊断：路径缩写覆盖 APPDATA / home / 其他用户目录', () => {
   assert.ok(text.includes('~'))
 })
 
+test('诊断：不限量账号显示「不限量」，不是 0 / 0', () => {
+  const unlimited = {
+    ...STATUS,
+    providers: [{
+      ...STATUS.providers[0],
+      credits: { state: 'ok', remain: 0, total: 0, unit: 'credits', unlimited: true },
+    }],
+  }
+  const { text } = buildDiagnostics(unlimited)
+  assert.ok(text.includes('不限量'))
+  assert.ok(!text.includes('0 / 0'))
+})
+
 test('诊断：坏输入不抛错', () => {
   assert.equal(redactStatus(null), null)
   const { text } = buildDiagnostics({})
