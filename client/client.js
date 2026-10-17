@@ -105,6 +105,7 @@ window.__ModuleLoader__.load({
       searchPlaceholder: '按名字或 id 过滤…',
       searchEmpty: '没有匹配的模型。',
       pillHint: '点击重新读取额度',
+      creditsStale: '上次结果，正在刷新…',
       catalogBuiltin: '内置兜底列表（上游不可达且没有存档）',
       summary: '账号总览',
     }
@@ -176,6 +177,7 @@ window.__ModuleLoader__.load({
       searchPlaceholder: 'Filter by name or id…',
       searchEmpty: 'No model matches.',
       pillHint: 'Click to re-read credits',
+      creditsStale: 'Last known — refreshing…',
       catalogBuiltin: 'Built-in fallback list (upstream unreachable, no saved catalog)',
       summary: 'Accounts',
     }
@@ -1103,20 +1105,57 @@ window.__ModuleLoader__.load({
 
         useEffect(function () {
           var disposed = false
+          var handles = []
+          var interval
+
+          /** 这份状态里有没有可用的额度数字。 */
+          var hasCredits = function (document) {
+            var list = document && Array.isArray(document.providers) ? document.providers : []
+            for (var index = 0; index < list.length; index++) {
+              var snapshot = list[index].credits
+              if (snapshot !== undefined && snapshot.state === 'ok') return true
+            }
+            return false
+          }
+
           var load = function () {
             fetchStatus()
               .then(function (document) {
-                if (!disposed) setStatus(document)
+                if (disposed) return
+                setStatus(document)
+                // 拿到数字就切回 60 秒常态轮询，不再高频打接口。
+                if (hasCredits(document)) settle()
               })
               .catch(function () {
                 /* 侧栏小卡不该弹错误；读不到就保持原样 */
               })
           }
-          load()
-          var timer = setInterval(load, 60000)
+
+          /** 进入常态轮询（只进一次）。 */
+          var settle = function () {
+            if (interval !== undefined || disposed) return
+            interval = setInterval(load, 60000)
+            handles.push(interval)
+          }
+
+          // 冷启动时宿主可能还没抓完额度（凭证解密 + 上游请求几秒）。
+          // 前 10 秒快速重试，避免「DSH 开了十秒积分才出现」那种空窗。
+          var retries = [0, 600, 1400, 2600, 4200, 7000, 10000].map(function (delay) {
+            return setTimeout(function () {
+              if (!disposed && interval === undefined) load()
+            }, delay)
+          })
+          handles = handles.concat(retries)
+
+          // 兜底：12 秒后无论有没有数据都转常态轮询。
+          handles.push(setTimeout(settle, 12000))
+
           return function () {
             disposed = true
-            clearInterval(timer)
+            handles.forEach(function (handle) {
+              clearTimeout(handle)
+              clearInterval(handle)
+            })
           }
         }, [])
 
@@ -1194,7 +1233,7 @@ window.__ModuleLoader__.load({
                 reset: snapshot.resetAtMs > 0 ? formatTime(snapshot.resetAtMs) : '',
               }
             }),
-            hint: bind(t, 'pillHint'),
+            hint: rows.some(function (row) { return row.credits.stale === true }) ? bind(t, 'creditsStale') : bind(t, 'pillHint'),
           })
         }
 
@@ -1236,6 +1275,8 @@ window.__ModuleLoader__.load({
                   color: warn
                     ? 'var(--dsw-alias-state-warning-primary, #b26b00)'
                     : 'var(--dsw-alias-label-primary, inherit)',
+                  // 磁盘缓存恢复的数字先弱化显示，等新数值到了再转为正常不透明度。
+                  opacity: snapshot.stale === true ? 0.6 : 1,
                 },
               },
               snapshot.unlimited === true ? '∞' : compactNumber(snapshot.remain),

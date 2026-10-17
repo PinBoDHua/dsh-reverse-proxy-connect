@@ -1,0 +1,69 @@
+import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import test from 'node:test'
+
+import { loadCreditsCache, saveCreditsCache } from '../lib/credits-cache.js'
+
+/** 造一个目录，用完删。 */
+function withTempDir(fn) {
+  const dir = mkdtempSync(join(tmpdir(), 'rpc-credits-'))
+  try {
+    return fn(dir)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+}
+
+const NOW = Date.now()
+const sample = {
+  data: { state: 'ok', remain: 675, total: 1200, unit: 'credits', items: [], fetchedAt: NOW },
+  fetchedAt: NOW,
+}
+
+test('额度缓存能存能读，且读回来带 stale 标记', () => {
+  withTempDir((dir) => {
+    assert.equal(saveCreditsCache(dir, new Map([['workbuddy', sample]])), true)
+    const loaded = loadCreditsCache(dir)
+    assert.equal(loaded.size, 1)
+    assert.equal(loaded.get('workbuddy').data.remain, 675)
+    assert.equal(loaded.get('workbuddy').stale, true)
+  })
+})
+
+test('只缓存成功快照：错误态与空快照不写盘', () => {
+  withTempDir((dir) => {
+    saveCreditsCache(dir, new Map([
+      ['workbuddy', { data: { state: 'error', message: 'x' }, fetchedAt: 2000 }],
+      ['qoder', { data: { state: 'none' }, fetchedAt: 0 }],
+      ['workbuddy-ai', sample],
+    ]))
+    const loaded = loadCreditsCache(dir)
+    assert.deepEqual([...loaded.keys()], ['workbuddy-ai'])
+  })
+})
+
+test('过期缓存不展示：超过一周的直接丢掉', () => {
+  withTempDir((dir) => {
+    const old = Date.now() - 8 * 24 * 3600_000
+    saveCreditsCache(dir, new Map([['workbuddy', { data: { ...sample.data, fetchedAt: old }, fetchedAt: old }]]))
+    assert.equal(loadCreditsCache(dir).size, 0)
+  })
+})
+
+test('坏文件 / 不存在 / 非对象内容都安静退化成空缓存', () => {
+  withTempDir((dir) => {
+    assert.equal(loadCreditsCache(dir).size, 0, '目录里没文件')
+    writeFileSync(join(dir, 'credits-cache.json'), '{ not json', 'utf8')
+    assert.equal(loadCreditsCache(dir).size, 0, '坏 JSON')
+    writeFileSync(join(dir, 'credits-cache.json'), '[]', 'utf8')
+    assert.equal(loadCreditsCache(dir).size, 0, '数组')
+    writeFileSync(join(dir, 'credits-cache.json'), '{"workbuddy":{"data":{"state":"ok"},"fetchedAt":0}}', 'utf8')
+    assert.equal(loadCreditsCache(dir).size, 0, '缺 fetchedAt')
+  })
+})
+
+test('写盘失败不抛（目录不可写时返回 false）', () => {
+  assert.equal(saveCreditsCache('', new Map([['workbuddy', sample]])), false)
+})
