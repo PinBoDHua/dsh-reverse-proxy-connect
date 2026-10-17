@@ -108,6 +108,10 @@ window.__ModuleLoader__.load({
       creditsStale: '上次结果，正在刷新…',
       catalogBuiltin: '内置兜底列表（上游不可达且没有存档）',
       summary: '账号总览',
+      secStatus: '状态',
+      secConnection: '连接设置',
+      show: '展开',
+      hide: '收起',
     }
     var en = {
       nav: 'Reverse proxy',
@@ -180,6 +184,10 @@ window.__ModuleLoader__.load({
       creditsStale: 'Last known — refreshing…',
       catalogBuiltin: 'Built-in fallback list (upstream unreachable, no saved catalog)',
       summary: 'Accounts',
+      secStatus: 'Status',
+      secConnection: 'Connection',
+      show: 'Expand',
+      hide: 'Collapse',
     }
 
     function bind(t, key, vars) {
@@ -263,122 +271,242 @@ window.__ModuleLoader__.load({
     }
 
     // ── 极简样式 ────────────────────────────────────────────────────
+    // ── 设计变量 ────────────────────────────────────────────────────
+    //
+    // 排版按 4px 栅格走：间距只用 4/6/8/10/14/18，字号只用
+    // 11.5（辅助）/12.5（正文）/13（强调）/16（标题）四档。
+    // 之前是随手写的，所以「已从上游拉取」「更新于」「上次检测」这些
+    // 同类信息一会儿 12 一会儿 12.5、行高也不一致，越看越乱。
+    var TEXT = {
+      tiny: 11.5,
+      body: 12.5,
+      strong: 13,
+      title: 16,
+    }
+
+    var LINE = {
+      dense: '17px',
+      body: '20px',
+      loose: '22px',
+    }
+
     var S = {
       card: {
         border: '0.5px solid var(--dsw-alias-border-l2)',
-        borderRadius: 10,
-        padding: '12px 14px',
+        borderRadius: 12,
+        padding: '18px 20px 16px',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 16,
+        background: 'var(--dsw-alias-bg-l1, transparent)',
+        boxSizing: 'border-box',
+        maxWidth: '100%',
+      },
+
+      // 页头
+      header: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
+      title: { margin: 0, fontSize: TEXT.title, fontWeight: 600, letterSpacing: '.01em', color: 'var(--dsw-alias-label-primary)' },
+      version: {
+        marginLeft: 'auto',
+        fontSize: TEXT.tiny,
+        fontVariantNumeric: 'tabular-nums',
+        color: 'var(--dsw-alias-label-tertiary)',
+        opacity: 0.75,
+        userSelect: 'text',
+      },
+      intro: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-label-tertiary)', maxWidth: 620 },
+
+      // 分组：统一用一条极淡的上边线分隔，省掉原来三种不同的 divider
+      section: {
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
-        background: 'var(--dsw-alias-bg-l1, transparent)',
+        paddingTop: 14,
+        borderTop: '0.5px solid var(--dsw-alias-border-l2)',
       },
-      header: { display: 'flex', alignItems: 'center', gap: 8 },
-      title: { margin: 0, fontSize: 15, fontWeight: 600, color: 'var(--dsw-alias-label-primary)' },
-      badge: {
-        fontSize: 11.5,
-        lineHeight: '17px',
-        padding: '0 6px',
-        borderRadius: 999,
-        border: '0.5px solid var(--dsw-alias-border-l2)',
+      sectionHead: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+      sectionTitle: {
+        margin: 0,
+        fontSize: TEXT.tiny,
+        fontWeight: 600,
+        letterSpacing: '.08em',
         color: 'var(--dsw-alias-label-tertiary)',
       },
-      badgeWarn: {
-        fontSize: 11.5,
-        lineHeight: '17px',
-        padding: '0 6px',
-        borderRadius: 999,
-        border: '0.5px solid var(--dsw-alias-state-warning-primary, #b26b00)',
-        color: 'var(--dsw-alias-state-warning-primary, #b26b00)',
-      },
-      version: {
-        marginLeft: 'auto',
-        fontSize: 11.5,
+      sectionCount: {
+        fontSize: TEXT.tiny,
         fontVariantNumeric: 'tabular-nums',
         color: 'var(--dsw-alias-label-tertiary)',
         opacity: 0.8,
-        userSelect: 'text',
       },
-      creditsValue: {
-        fontSize: 13,
-        fontWeight: 600,
-        color: 'var(--dsw-alias-label-primary)',
+
+      // 胶囊徽标
+      badge: {
+        fontSize: TEXT.tiny,
+        lineHeight: '18px',
+        padding: '0 7px',
+        borderRadius: 999,
+        border: '0.5px solid var(--dsw-alias-border-l2)',
+        color: 'var(--dsw-alias-label-tertiary)',
+        whiteSpace: 'nowrap',
       },
+      badgeWarn: {
+        fontSize: TEXT.tiny,
+        lineHeight: '18px',
+        padding: '0 7px',
+        borderRadius: 999,
+        border: '0.5px solid var(--dsw-alias-state-warning-primary, #b26b00)',
+        color: 'var(--dsw-alias-state-warning-primary, #b26b00)',
+        whiteSpace: 'nowrap',
+      },
+      badgeSoft: {
+        fontSize: TEXT.tiny,
+        lineHeight: '18px',
+        padding: '0 7px',
+        borderRadius: 999,
+        background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))',
+        color: 'var(--dsw-alias-label-tertiary)',
+        whiteSpace: 'nowrap',
+      },
+
+      // 通用行
       row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+      stack: { display: 'flex', flexDirection: 'column', gap: 6 },
       grow: { flex: 1, minWidth: 0 },
-      hint: { margin: 0, fontSize: 12.5, lineHeight: '19px', color: 'var(--dsw-alias-label-tertiary)' },
-      hintWarn: { margin: 0, fontSize: 12.5, lineHeight: '19px', color: 'var(--dsw-alias-state-warning-primary, #b26b00)' },
-      hintError: { margin: 0, fontSize: 12.5, lineHeight: '19px', color: 'var(--dsw-alias-state-error-primary, #b3261e)' },
+      divider: { height: 0, borderTop: '0.5px solid var(--dsw-alias-border-l2)', margin: '2px 0' },
+      hint: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-label-tertiary)' },
+      hintTiny: { margin: 0, fontSize: TEXT.tiny, lineHeight: LINE.dense, color: 'var(--dsw-alias-label-tertiary)', opacity: 0.85 },
+      hintWarn: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-state-warning-primary, #b26b00)' },
+      hintError: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-state-error-primary, #b3261e)' },
+      label: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))', fontWeight: 500 },
+
+      // 按钮：三种层级，尺寸统一
       button: {
         font: 'inherit',
-        fontSize: 12.5,
-        padding: '3px 10px',
-        borderRadius: 6,
+        fontSize: TEXT.body,
+        lineHeight: '20px',
+        padding: '4px 11px',
+        borderRadius: 7,
         cursor: 'pointer',
         border: '0.5px solid var(--dsw-alias-border-l2)',
         background: 'transparent',
         color: 'var(--dsw-alias-label-primary)',
+        whiteSpace: 'nowrap',
+        flex: '0 0 auto',
       },
       buttonPrimary: {
         font: 'inherit',
-        fontSize: 12.5,
-        padding: '3px 10px',
-        borderRadius: 6,
+        fontSize: TEXT.body,
+        lineHeight: '20px',
+        padding: '4px 12px',
+        borderRadius: 7,
         cursor: 'pointer',
         border: '0.5px solid var(--dsw-alias-state-business-primary, #2f6fed)',
         background: 'var(--dsw-alias-state-business-primary, #2f6fed)',
         color: '#fff',
+        fontWeight: 500,
+        whiteSpace: 'nowrap',
+        flex: '0 0 auto',
       },
+      buttonGhost: {
+        font: 'inherit',
+        fontSize: TEXT.tiny,
+        lineHeight: '18px',
+        padding: '2px 9px',
+        borderRadius: 999,
+        cursor: 'pointer',
+        border: '0.5px solid var(--dsw-alias-border-l2)',
+        background: 'transparent',
+        color: 'var(--dsw-alias-label-tertiary)',
+        whiteSpace: 'nowrap',
+        flex: '0 0 auto',
+      },
+
+      // 输入
+      field: { display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 },
       input: {
         font: 'inherit',
-        fontSize: 12.5,
-        padding: '4px 8px',
-        borderRadius: 6,
+        fontSize: TEXT.body,
+        lineHeight: '20px',
+        padding: '6px 9px',
+        borderRadius: 7,
         border: '0.5px solid var(--dsw-alias-border-l2)',
-        background: 'var(--dsw-alias-bg-l2, transparent)',
+        background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.06))',
         color: 'var(--dsw-alias-label-primary)',
         width: '100%',
         boxSizing: 'border-box',
       },
+
+      // 模型列表
       modelList: {
         display: 'flex',
         flexDirection: 'column',
-        gap: 2,
-        maxHeight: 280,
+        gap: 0,
+        maxHeight: 320,
         overflowY: 'auto',
         margin: 0,
         padding: 0,
         listStyle: 'none',
+        borderRadius: 8,
+        border: '0.5px solid var(--dsw-alias-border-l2)',
       },
-      modelRow: { display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, lineHeight: '21px' },
-      modelName: { color: 'var(--dsw-alias-label-primary)' },
-      modelMeta: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 11.5 },
-      divider: { height: 0, borderTop: '0.5px solid var(--dsw-alias-border-l2)', margin: '2px 0' },
-      tabs: { display: 'flex', gap: 14, borderBottom: '0.5px solid var(--dsw-alias-border-l2)' },
+      modelRow: {
+        display: 'flex',
+        alignItems: 'center',
+        gap: 9,
+        fontSize: TEXT.body,
+        lineHeight: '21px',
+        padding: '5px 10px',
+        minWidth: 0,
+      },
+      modelRowDivider: { borderTop: '0.5px solid var(--dsw-alias-border-l2)' },
+      modelName: { color: 'var(--dsw-alias-label-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+      modelMeta: { color: 'var(--dsw-alias-label-tertiary)', fontSize: TEXT.tiny, whiteSpace: 'nowrap' },
+      modelId: {
+        color: 'var(--dsw-alias-label-tertiary)',
+        fontSize: TEXT.tiny,
+        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+        opacity: 0.8,
+        whiteSpace: 'nowrap',
+      },
+
+      // 标签页：改成胶囊分段，比下划线更贴合宿主的圆角风格
+      tabs: { display: 'flex', gap: 4, flexWrap: 'wrap' },
+
       pre: {
         margin: 0,
-        padding: 8,
-        borderRadius: 6,
+        padding: '10px 12px',
+        borderRadius: 8,
+        border: '0.5px solid var(--dsw-alias-border-l2)',
         background: 'var(--dsw-alias-bg-l2, rgba(0,0,0,.04))',
-        fontSize: 11.5,
-        lineHeight: '17px',
-        maxHeight: 220,
+        fontSize: TEXT.tiny,
+        lineHeight: LINE.dense,
+        maxHeight: 240,
         overflow: 'auto',
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
       },
     }
 
+    /** 小圆点：用来在标签页与统计行里表达状态。 */
+    function dot(color) {
+      return { width: 6, height: 6, borderRadius: 999, background: color, flex: '0 0 auto' }
+    }
+
+    var DOT_OK = 'var(--dsw-alias-state-success-primary, #1a8f5f)'
+    var DOT_OFF = 'var(--dsw-alias-state-warning-primary, #b26b00)'
+
     function tabStyle(active) {
       return {
         font: 'inherit',
-        fontSize: 12,
-        padding: '5px 1px 7px',
-        background: 'none',
-        border: 0,
+        fontSize: TEXT.body,
+        fontWeight: active ? 600 : 500,
+        padding: '5px 11px',
+        borderRadius: 8,
         cursor: 'pointer',
+        border: '0.5px solid ' + (active ? 'var(--dsw-alias-border-l2)' : 'transparent'),
+        background: active ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))' : 'transparent',
         color: active ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)',
-        borderBottom: active ? '2px solid var(--dsw-alias-label-primary)' : '2px solid transparent',
+        whiteSpace: 'nowrap',
       }
     }
 
@@ -662,52 +790,92 @@ window.__ModuleLoader__.load({
       }
 
       if (status === undefined) {
-        return h('div', { style: S.card }, h('p', { style: error === undefined ? S.hint : S.hintError }, error === undefined ? bind(t, 'loading') : bind(t, 'error') + '：' + error))
+        return h(
+          'div',
+          { style: S.card },
+          h('p', { style: error === undefined ? S.hint : S.hintError }, error === undefined ? bind(t, 'loading') : bind(t, 'error') + '：' + error),
+        )
       }
 
       var tabs = providers.map(function (entry) {
+        var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
         return h(
           'button',
           {
             key: entry.provider,
             type: 'button',
             style: tabStyle(entry.provider === activeTab),
+            title: entry.displayName,
             onClick: function () { setActiveTab(entry.provider) },
           },
-          entry.displayName,
-          entry.credential && entry.credential.status === 'signed-in' ? '' : ' ·',
+          h(
+            'span',
+            { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } },
+            h('span', { style: dot(signed ? DOT_OK : DOT_OFF) }),
+            entry.displayName,
+          ),
         )
       })
+
+      // 账号总览：一行小胶囊，不用切标签就能横向对比四家余额。
+      var overview = []
+      for (var overviewIndex = 0; overviewIndex < providers.length; overviewIndex++) {
+        var overviewEntry = providers[overviewIndex]
+        if (overviewEntry.enabled === false) continue
+        var overviewCredits = overviewEntry.credits
+        if (overviewCredits === undefined || overviewCredits.state !== 'ok') continue
+        overview.push(h(
+          'span',
+          {
+            key: overviewEntry.provider,
+            style: {
+              display: 'inline-flex',
+              alignItems: 'baseline',
+              gap: 6,
+              padding: '3px 10px',
+              borderRadius: 999,
+              border: '0.5px solid var(--dsw-alias-border-l2)',
+              background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.06))',
+            },
+          },
+          h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)' } }, overviewEntry.displayName),
+          h('span', {
+            style: {
+              fontSize: TEXT.strong,
+              fontWeight: 600,
+              fontVariantNumeric: 'tabular-nums',
+              color: isCreditsLow(overviewCredits)
+                ? 'var(--dsw-alias-state-warning-primary, #b26b00)'
+                : 'var(--dsw-alias-label-primary)',
+            },
+          }, overviewCredits.unlimited === true ? bind(t, 'creditsUnlimited') : formatNumber(overviewCredits.remain)),
+        ))
+      }
 
       var sections = [
         h('div', { key: 'head', style: S.header },
           h('h3', { style: S.title }, bind(t, 'title')),
           // 版本号：排查问题时第一件要问的就是「你装的是哪一版」。
           h('span', { style: S.version }, 'v' + (status.plugin && status.plugin.version ? status.plugin.version : '?'))),
-        h('p', { key: 'intro', style: S.hint }, bind(t, 'intro')),
-        h('div', { key: 'row', style: S.row },
-          h('button', { type: 'button', style: S.button, onClick: refresh, disabled: busy === 'refresh' },
+        h('p', { key: 'intro', style: S.intro }, bind(t, 'intro')),
+        h('div', { key: 'toolbar', style: S.row },
+          h('button', { type: 'button', style: S.buttonPrimary, onClick: refresh, disabled: busy === 'refresh' },
             busy === 'refresh' ? bind(t, 'refreshing') : bind(t, 'refresh')),
           status.proxy && status.proxy.mode === 'in-process'
-            ? h('span', { style: S.badge }, 'in-process')
-            : null),
-        // 全账号总览：不用切标签就能看到四家各自还剩多少。
-        (function () {
-          var rows = []
-          for (var index = 0; index < providers.length; index++) {
-            var entry = providers[index]
-            if (entry.enabled === false) continue
-            var snapshot = entry.credits
-            if (snapshot === undefined || snapshot.state !== 'ok') continue
-            rows.push(h('span', { key: entry.provider, style: S.badge },
-              entry.displayName + ' ' + (snapshot.unlimited === true ? bind(t, 'creditsUnlimited') : formatNumber(snapshot.remain))))
-          }
-          if (rows.length === 0) return null
-          return h('div', { key: 'summary', style: S.row },
-            h('span', { style: S.modelMeta }, bind(t, 'summary')),
-            ...rows)
-        })(),
+            ? h('span', { style: S.badgeSoft }, 'in-process')
+            : null,
+          h('span', { style: S.grow }),
+          h('button', {
+            type: 'button',
+            style: S.buttonGhost,
+            onClick: function () { setShowDiag(!showDiag) },
+          }, bind(t, 'diagnostics'))),
         error === undefined ? null : h('p', { key: 'err', style: S.hintError }, bind(t, 'error') + '：' + error),
+        overview.length === 0
+          ? null
+          : h('div', { key: 'overview', style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+              h('span', { style: S.sectionTitle }, bind(t, 'summary')),
+              ...overview),
         h('div', { key: 'tabs', style: S.tabs }, tabs),
       ]
 
@@ -716,7 +884,7 @@ window.__ModuleLoader__.load({
         return h('div', { style: S.card }, sections)
       }
 
-      // 服务状态：登录 + 目录来源
+      // ── 状态 ────────────────────────────────────────────────────
       var credential = active.credential || {}
       var catalogText =
         active.catalogSource === 'live'
@@ -728,127 +896,193 @@ window.__ModuleLoader__.load({
               : bind(t, 'catalogNone')
 
       sections.push(
-        h('div', { key: 'svc', style: S.row },
-          h('label', { style: Object.assign({}, S.row, { cursor: 'pointer' }) },
-            h('input', {
-              type: 'checkbox',
-              checked: active.enabled !== false,
-              onChange: function () { toggleProvider(active) },
-            }),
-            h('span', { style: { fontSize: 12 } }, bind(t, 'enabled'))),
-          h('span', { style: S.badge }, active.kind === 'desktop' ? bind(t, 'kindDesktop') : bind(t, 'kindPat')),
-          h('span', {
-            style: credential.status === 'signed-in'
-              ? S.badge
-              : Object.assign({}, S.badge, { color: 'var(--dsw-alias-state-warning-primary, #b26b00)' }),
-          }, credential.status === 'signed-in' ? bind(t, 'signedIn') : bind(t, 'signedOut'))),
-        h('p', { key: 'cat', style: S.hint }, catalogText),
-        credential.status === 'signed-in' && credential.email
-          ? h('p', { key: 'who', style: S.hint }, credential.email)
-          : null,
-        credential.status !== 'signed-in' && credential.message
-          ? h('p', { key: 'why', style: S.hintWarn }, credential.message)
-          : null,
-        active.message ? h('p', { key: 'msg', style: S.hintWarn }, active.message) : null,
+        h('div', { key: 'status', style: S.section },
+          h('div', { key: 'h', style: S.sectionHead },
+            h('span', { style: S.sectionTitle }, bind(t, 'secStatus'))),
+          h('div', { key: 'r', style: S.row },
+            h('label', { style: Object.assign({}, S.row, { cursor: 'pointer', marginRight: 2 }) },
+              h('input', {
+                type: 'checkbox',
+                checked: active.enabled !== false,
+                onChange: function () { toggleProvider(active) },
+              }),
+              h('span', { style: S.label }, bind(t, 'enabled'))),
+            h('span', { style: S.badgeSoft }, active.kind === 'desktop' ? bind(t, 'kindDesktop') : bind(t, 'kindPat')),
+            h('span', {
+              style: credential.status === 'signed-in' ? S.badge : S.badgeWarn,
+            }, credential.status === 'signed-in' ? bind(t, 'signedIn') : bind(t, 'signedOut'))),
+          h('p', { key: 'cat', style: S.hintTiny }, catalogText),
+          credential.status === 'signed-in' && credential.email
+            ? h('p', { key: 'who', style: S.hintTiny }, credential.email)
+            : null,
+          credential.status !== 'signed-in' && credential.message
+            ? h('p', { key: 'why', style: S.hintWarn }, credential.message)
+            : null,
+          active.message ? h('p', { key: 'msg', style: S.hintWarn }, active.message) : null),
       )
 
-      // ── 积分 ──────────────────────────────────────────────────
+      // ── 积分 ────────────────────────────────────────────────────
       var credits = active.credits || { state: 'none' }
-      var creditsLine = []
+      var creditsLow = credits.state === 'ok' && isCreditsLow(credits)
+      var creditsHead = h('div', { key: 'h', style: S.sectionHead },
+        h('span', { style: S.sectionTitle }, bind(t, 'credits')),
+        h('span', { style: S.grow }),
+        h('button', {
+          key: 'b',
+          type: 'button',
+          style: S.buttonGhost,
+          onClick: refreshCredits,
+          disabled: busy === 'credits',
+        }, busy === 'credits' ? bind(t, 'creditsRefreshing') : bind(t, 'creditsRefresh')))
+
+      var creditsBody = []
       if (credits.state === 'ok') {
-        creditsLine.push(h('span', { key: 'v', style: S.creditsValue }, creditsText(credits)))
-        if (credits.planName) creditsLine.push(h('span', { key: 'p', style: S.badge }, credits.planName))
-        if (credits.exceeded) creditsLine.push(h('span', { key: 'e', style: S.badgeWarn }, bind(t, 'creditsExhausted')))
-        if (credits.resetAtMs) creditsLine.push(h('span', { key: 'r', style: S.modelMeta }, bind(t, 'creditsReset') + ' ' + formatTime(credits.resetAtMs)))
+        var creditsRatio = credits.unlimited === true || !(credits.total > 0)
+          ? undefined
+          : Math.max(0, Math.min(1, credits.remain / credits.total))
+        creditsBody.push(
+          h('div', { key: 'stat', style: { display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' } },
+            h('span', {
+              style: {
+                fontSize: 23,
+                lineHeight: '28px',
+                fontWeight: 600,
+                letterSpacing: '-.01em',
+                fontVariantNumeric: 'tabular-nums',
+                color: creditsLow ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : 'var(--dsw-alias-label-primary)',
+                opacity: credits.stale === true ? 0.65 : 1,
+              },
+            }, credits.unlimited === true ? '∞' : formatNumber(credits.remain)),
+            credits.total > 0
+              ? h('span', { style: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-tertiary)' } },
+                  '/ ' + formatNumber(credits.total) + ' ' + bind(t, 'creditsUnit'))
+              : h('span', { style: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-tertiary)' } }, bind(t, 'creditsUnit')),
+            credits.planName ? h('span', { style: S.badge }, credits.planName) : null,
+            credits.exceeded ? h('span', { style: S.badgeWarn }, bind(t, 'creditsExhausted')) : null,
+            credits.stale === true ? h('span', { style: S.badgeSoft }, bind(t, 'creditsStale')) : null),
+        )
+        if (creditsRatio !== undefined) {
+          creditsBody.push(
+            h('div', {
+              key: 'bar',
+              style: {
+                height: 5,
+                borderRadius: 999,
+                background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.16))',
+                overflow: 'hidden',
+                maxWidth: 420,
+              },
+            },
+            h('div', {
+              style: {
+                width: Math.round(creditsRatio * 100) + '%',
+                height: '100%',
+                borderRadius: 999,
+                background: creditsLow
+                  ? 'var(--dsw-alias-state-warning-primary, #b26b00)'
+                  : 'var(--dsw-alias-state-business-primary, #2f6fed)',
+                opacity: 0.9,
+              },
+            })),
+          )
+        }
+        if (credits.resetAtMs > 0) {
+          creditsBody.push(h('p', { key: 'reset', style: S.hintTiny }, bind(t, 'creditsReset') + ' ' + formatTime(credits.resetAtMs)))
+        }
       } else if (credits.state === 'error') {
-        creditsLine.push(h('span', { key: 'v', style: S.hintError }, creditsText(credits)))
+        creditsBody.push(h('p', { key: 'flat', style: S.hintError }, creditsText(credits)))
+        if (credits.message) {
+          creditsBody.push(h('p', { key: 'err', style: S.hintWarn }, bind(t, 'creditsFailed', { message: credits.message })))
+        }
       } else {
-        creditsLine.push(h('span', { key: 'v', style: S.modelMeta }, creditsText(credits)))
+        creditsBody.push(h('p', { key: 'flat', style: S.hint }, creditsText(credits)))
       }
-      creditsLine.push(h('span', { key: 'g', style: S.grow }))
-      creditsLine.push(
-        h('button', { key: 'b', type: 'button', style: S.button, onClick: refreshCredits, disabled: busy === 'credits' },
-          busy === 'credits' ? bind(t, 'creditsRefreshing') : bind(t, 'creditsRefresh')),
-      )
-      sections.push(
-        h('div', { key: 'credits', style: S.row },
-          h('span', { style: S.title }, bind(t, 'credits')),
-          ...creditsLine),
-      )
-      if (credits.state === 'error' && credits.message) {
-        sections.push(h('p', { key: 'creditserr', style: S.hintWarn }, bind(t, 'creditsFailed', { message: credits.message })))
-      }
+
       if (Array.isArray(credits.items) && credits.items.length > 0) {
-        sections.push(
-          h('details', { key: 'creditpkgs' },
-            h('summary', { style: Object.assign({}, S.hint, { cursor: 'pointer' }) },
+        creditsBody.push(
+          h('details', { key: 'pkgs' },
+            h('summary', { style: Object.assign({}, S.hintTiny, { cursor: 'pointer' }) },
               bind(t, 'creditsPackages', { count: credits.items.length })),
-            h('ul', { style: S.modelList },
-              credits.items.map(function (item, index) {
-                return h('li', { key: 'pkg' + index, style: S.modelRow },
-                  h('span', { style: S.modelName }, item.name),
-                  h('span', { style: S.modelMeta }, formatNumber(item.remain) + ' / ' + formatNumber(item.total)),
-                  item.expired ? h('span', { style: S.badge }, bind(t, 'creditsExhausted')) : null,
-                  h('span', { style: S.grow }),
-                  h('span', { style: S.modelMeta }, item.endAtMs ? formatTime(item.endAtMs) : ''))
-              }))),
+            h('ul', {
+              style: Object.assign({}, S.modelList, { marginTop: 6 }),
+            },
+            credits.items.map(function (item, index) {
+              return h('li', {
+                key: 'pkg' + index,
+                style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
+              },
+              h('span', { style: S.modelName }, item.name),
+              item.expired ? h('span', { style: S.badge }, bind(t, 'creditsExhausted')) : null,
+              h('span', { style: S.grow }),
+              h('span', { style: S.modelMeta }, formatNumber(item.remain) + ' / ' + formatNumber(item.total)),
+              h('span', { style: S.modelId }, item.endAtMs ? formatTime(item.endAtMs) : ''))
+            })),
+          ),
         )
       }
       if (credits.fetchedAt > 0) {
-        sections.push(h('p', { key: 'creditsat', style: S.hint }, bind(t, 'creditsFetchedAt', { time: formatTime(credits.fetchedAt) })))
+        creditsBody.push(h('p', { key: 'at', style: S.hintTiny }, bind(t, 'creditsFetchedAt', { time: formatTime(credits.fetchedAt) })))
       }
 
-      // 凭证配置区
+      sections.push(h('div', { key: 'credits', style: S.section }, creditsHead, ...creditsBody))
+
+      // ── 连接设置 ────────────────────────────────────────────────
+      var connectionBody = []
       if (active.kind === 'pat') {
         var configured = status.settings && status.settings.qoder && status.settings.qoder[active.provider] && status.settings.qoder[active.provider].configured
-        sections.push(
-          h('div', { key: 'dv', style: S.divider }),
-          h('p', { key: 'path', style: S.hint }, bind(t, 'pat')),
-          h('input', {
-            key: 'patinput',
-            style: S.input,
-            type: 'password',
-            value: patDraft,
-            placeholder: configured ? bind(t, 'patConfigured', { tail: (credential.patTail || '…') }) : bind(t, 'patPlaceholder'),
-            onChange: function (event) { setPatDraft(event.target.value) },
-          }),
-          h('p', { key: 'pathhint', style: S.hint }, bind(t, 'patHint')),
-          h('div', { key: 'patbtn', style: S.row },
+        connectionBody.push(
+          h('div', { key: 'f', style: S.field },
+            h('span', { style: S.label }, bind(t, 'pat')),
+            h('input', {
+              style: S.input,
+              type: 'password',
+              value: patDraft,
+              placeholder: configured ? bind(t, 'patConfigured', { tail: (credential.patTail || '…') }) : bind(t, 'patPlaceholder'),
+              onChange: function (event) { setPatDraft(event.target.value) },
+            })),
+          h('p', { key: 'h', style: S.hintTiny }, bind(t, 'patHint')),
+          h('div', { key: 'btns', style: S.row },
             h('button', { type: 'button', style: S.buttonPrimary, onClick: savePat, disabled: busy === 'save' || patDraft.trim() === '' },
               busy === 'save' ? bind(t, 'saving') : bind(t, 'save')),
             h('button', { type: 'button', style: S.button, onClick: clearPat, disabled: busy === 'save' || !configured },
               bind(t, 'clear'))),
         )
       } else {
-        sections.push(
-          h('div', { key: 'dv', style: S.divider }),
-          h('p', { key: 'app', style: S.hint }, bind(t, 'appPath')),
-          h('input', {
-            key: 'appinput',
-            style: S.input,
-            type: 'text',
-            value: appPathDraft,
-            placeholder: 'D:\\WorkBuddy\\WorkBuddy.exe',
-            onChange: function (event) { setAppPathDraft(event.target.value) },
-          }),
-          h('p', { key: 'apphint', style: S.hint }, bind(t, 'appPathHint')),
-          h('p', { key: 'auth', style: S.hint }, bind(t, 'authFile')),
-          h('input', {
-            key: 'authinput',
-            style: S.input,
-            type: 'text',
-            value: authFileDraft,
-            placeholder: credential.file || '%LOCALAPPDATA%\\CodeBuddyExtension\\Data\\Public\\auth',
-            onChange: function (event) { setAuthFileDraft(event.target.value) },
-          }),
-          h('p', { key: 'authhint', style: S.hint }, bind(t, 'authFileHint')),
-          h('div', { key: 'deskbtn', style: S.row },
+        connectionBody.push(
+          h('div', { key: 'appf', style: S.field },
+            h('span', { style: S.label }, bind(t, 'appPath')),
+            h('input', {
+              style: S.input,
+              type: 'text',
+              value: appPathDraft,
+              placeholder: 'D:\\WorkBuddy\\WorkBuddy.exe',
+              onChange: function (event) { setAppPathDraft(event.target.value) },
+            }),
+            h('span', { style: S.hintTiny }, bind(t, 'appPathHint'))),
+          h('div', { key: 'authf', style: S.field },
+            h('span', { style: S.label }, bind(t, 'authFile')),
+            h('input', {
+              style: S.input,
+              type: 'text',
+              value: authFileDraft,
+              placeholder: credential.file || '%LOCALAPPDATA%\\CodeBuddyExtension\\Data\\Public\\auth',
+              onChange: function (event) { setAuthFileDraft(event.target.value) },
+            }),
+            h('span', { style: S.hintTiny }, bind(t, 'authFileHint'))),
+          h('div', { key: 'btns', style: S.row },
             h('button', { type: 'button', style: S.buttonPrimary, onClick: saveDesktop, disabled: busy === 'save' },
               busy === 'save' ? bind(t, 'saving') : bind(t, 'save'))),
         )
       }
 
-      // 模型清单
+      sections.push(
+        h('div', { key: 'connection', style: S.section },
+          h('div', { key: 'h', style: S.sectionHead },
+            h('span', { style: S.sectionTitle }, bind(t, 'secConnection'))),
+          ...connectionBody),
+      )
+
+      // ── 模型 ────────────────────────────────────────────────────
       var models = active.models || []
       var available = models.filter(function (row) { return !row.unavailable || row.forced })
       var unavailable = models.filter(function (row) { return row.unavailable && !row.forced })
@@ -859,71 +1093,76 @@ window.__ModuleLoader__.load({
         return row.name.toLowerCase().indexOf(query) !== -1 || row.id.toLowerCase().indexOf(query) !== -1
       }
       var shown = available.filter(matches)
+
+      var modelMetaText = function (model) {
+        var parts = [formatWindow(model.contextWindow)]
+        parts.push(model.reasoningEfforts && model.reasoningEfforts.length > 0
+          ? model.reasoningEfforts.join('/')
+          : bind(t, 'noReasoning'))
+        if (model.supportsImages) parts.push('图')
+        if (model.credits) parts.push(model.credits)
+        return parts.join(' · ')
+      }
+
       sections.push(
-        h('div', { key: 'dv2', style: S.divider }),
-        h('div', { key: 'mh', style: S.row },
-          h('span', { style: S.title }, bind(t, 'models') + '（' + models.length + '）'),
+        h('div', { key: 'models', style: S.section },
+          h('div', { key: 'h', style: S.sectionHead },
+            h('span', { style: S.sectionTitle }, bind(t, 'models')),
+            h('span', { style: S.sectionCount }, String(models.length)),
+            h('span', { style: S.grow }),
+            models.length === 0
+              ? null
+              : h('button', { type: 'button', style: S.buttonGhost, onClick: function () { setAllModels(active, false) }, disabled: busy === 'save' }, bind(t, 'showAll')),
+            models.length === 0
+              ? null
+              : h('button', { type: 'button', style: S.buttonGhost, onClick: function () { setAllModels(active, true) }, disabled: busy === 'save' }, bind(t, 'hideAll'))),
+          models.length > 6
+            ? h('input', {
+                style: S.input,
+                type: 'search',
+                value: searchDraft,
+                placeholder: bind(t, 'searchPlaceholder'),
+                onChange: function (event) { setSearchDraft(event.target.value) },
+              })
+            : null,
+          h('div', { key: 'probe', style: S.row },
+            h('button', { type: 'button', style: S.button, onClick: runProbeNow, disabled: busy === 'probe' || models.length === 0 },
+              busy === 'probe' ? bind(t, 'probing') : bind(t, 'probe')),
+            h('span', { style: S.modelMeta },
+              probe.lastRunAt > 0
+                ? bind(t, 'probeLast', { time: formatTime(probe.lastRunAt) })
+                : bind(t, 'probeNever'))),
+          h('p', { key: 'probehint', style: S.hintTiny }, bind(t, 'probeHint')),
           models.length === 0
-            ? null
-            : h('span', { style: S.grow }),
-          models.length === 0
-            ? null
-            : h('button', { type: 'button', style: S.button, onClick: function () { setAllModels(active, false) }, disabled: busy === 'save' }, bind(t, 'showAll')),
-          models.length === 0
-            ? null
-            : h('button', { type: 'button', style: S.button, onClick: function () { setAllModels(active, true) }, disabled: busy === 'save' }, bind(t, 'hideAll'))),
-        models.length > 6
-          ? h('input', {
-              key: 'search',
-              style: S.input,
-              type: 'search',
-              value: searchDraft,
-              placeholder: bind(t, 'searchPlaceholder'),
-              onChange: function (event) { setSearchDraft(event.target.value) },
-            })
-          : null,
-        h('div', { key: 'probe', style: S.row },
-          h('button', { type: 'button', style: S.button, onClick: runProbeNow, disabled: busy === 'probe' || models.length === 0 },
-            busy === 'probe' ? bind(t, 'probing') : bind(t, 'probe')),
-          h('span', { style: S.modelMeta },
-            probe.lastRunAt > 0
-              ? bind(t, 'probeLast', { time: formatTime(probe.lastRunAt) })
-              : bind(t, 'probeNever'))),
-        h('p', { key: 'probehint', style: S.hint }, bind(t, 'probeHint')),
-        h('label', { key: 'rate', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
-          h('input', {
-            type: 'checkbox',
-            checked: status.settings && status.settings.showRateInModelName !== false,
-            onChange: function () {
-              mutate({ display: { showRateInModelName: !(status.settings && status.settings.showRateInModelName !== false) } })
-            },
-          }),
-          h('span', { style: { fontSize: 12 } }, bind(t, 'modelRateToggle'))),
-        h('p', { key: 'ratehint', style: S.hint }, bind(t, 'modelRateHint')),
-        models.length === 0
-          ? h('p', { key: 'nomodels', style: S.hint }, bind(t, 'noModels'))
-          : shown.length === 0
-            ? h('p', { key: 'nomatch', style: S.hint }, bind(t, 'searchEmpty'))
-            : h('ul', { key: 'list', style: S.modelList },
-              shown.map(function (model) {
-                return h('li', { key: model.id, style: S.modelRow },
+            ? h('p', { key: 'nomodels', style: S.hint }, bind(t, 'noModels'))
+            : shown.length === 0
+              ? h('p', { key: 'nomatch', style: S.hint }, bind(t, 'searchEmpty'))
+              : h('ul', { key: 'list', style: S.modelList },
+                shown.map(function (model, index) {
+                  return h('li', {
+                    key: model.id,
+                    style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
+                  },
                   h('input', {
                     type: 'checkbox',
                     checked: !model.disabled,
                     onChange: function () { toggleModel(active, model) },
                   }),
-                  h('span', { style: S.modelName }, model.name),
-                  h('span', { style: S.modelMeta },
-                    formatWindow(model.contextWindow) + ' · ' +
-                    (model.reasoningEfforts && model.reasoningEfforts.length > 0
-                      ? model.reasoningEfforts.join('/')
-                      : bind(t, 'noReasoning')) +
-                    (model.supportsImages ? ' · 图' : '') +
-                    (model.credits ? ' · ' + model.credits : '')),
+                  h('span', { style: S.modelName, title: model.name }, model.name),
+                  h('span', { style: S.modelMeta }, modelMetaText(model)),
                   h('span', { style: S.grow }),
-                  h('span', { style: S.modelMeta }, model.id),
-                )
-              })),
+                  h('span', { style: S.modelId }, model.id))
+                })),
+          h('label', { key: 'rate', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+            h('input', {
+              type: 'checkbox',
+              checked: status.settings && status.settings.showRateInModelName !== false,
+              onChange: function () {
+                mutate({ display: { showRateInModelName: !(status.settings && status.settings.showRateInModelName !== false) } })
+              },
+            }),
+            h('span', { style: S.label }, bind(t, 'modelRateToggle'))),
+          h('p', { key: 'ratehint', style: S.hintTiny }, bind(t, 'modelRateHint'))),
       )
 
       if (unavailable.length > 0) {
@@ -931,39 +1170,47 @@ window.__ModuleLoader__.load({
           h('details', { key: 'unavail' },
             h('summary', { style: Object.assign({}, S.hintWarn, { cursor: 'pointer' }) },
               bind(t, 'unavailableCount', { count: unavailable.length })),
-            h('p', { style: S.hint }, bind(t, 'unavailableHint')),
-            h('ul', { style: S.modelList },
-              unavailable.map(function (model) {
-                return h('li', { key: model.id, style: S.modelRow },
-                  h('input', {
-                    type: 'checkbox',
-                    checked: false,
-                    onChange: function () { toggleModel(active, model) },
-                  }),
-                  h('span', { style: S.modelMeta }, model.name),
-                  h('span', { style: S.badge }, bind(t, 'unavailable')),
-                  h('span', { style: S.grow }),
-                  h('span', { style: S.modelMeta }, model.id),
-                )
-              }))),
+            h('p', { style: S.hintTiny }, bind(t, 'unavailableHint')),
+            h('ul', { style: Object.assign({}, S.modelList, { marginTop: 6 }) },
+              unavailable.map(function (model, index) {
+                return h('li', {
+                  key: model.id,
+                  style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
+                },
+                h('input', {
+                  type: 'checkbox',
+                  checked: false,
+                  onChange: function () { toggleModel(active, model) },
+                }),
+                h('span', { style: S.modelMeta }, model.name),
+                h('span', { style: S.badge }, bind(t, 'unavailable')),
+                h('span', { style: S.grow }),
+                h('span', { style: S.modelId }, model.id))
+              })),
+          ),
         )
       }
 
       if (forcedCount(active) > 0) {
-        sections.push(h('p', { key: 'forced', style: S.hint }, bind(t, 'forced') + '：' + forcedCount(active)))
+        sections.push(h('p', { key: 'forced', style: S.hintTiny }, bind(t, 'forced') + '：' + forcedCount(active)))
       }
 
-      // 诊断
+      // ── 诊断 ────────────────────────────────────────────────────
       sections.push(
-        h('div', { key: 'dv3', style: S.divider }),
-        h('div', { key: 'diagbtn', style: S.row },
-          h('button', { type: 'button', style: S.button, onClick: function () { setShowDiag(!showDiag) } }, bind(t, 'diagnostics')),
-          h('button', { type: 'button', style: S.button, onClick: copyDiagnostics }, copied ? bind(t, 'copied') : bind(t, 'copyDiagnostics'))),
-        showDiag ? h('pre', { key: 'diag', style: S.pre }, JSON.stringify(status, null, 2)) : null,
+        h('div', { key: 'diag', style: S.section },
+          h('div', { key: 'h', style: S.sectionHead },
+            h('span', { style: S.sectionTitle }, bind(t, 'diagnostics')),
+            h('span', { style: S.grow }),
+            h('button', { type: 'button', style: S.buttonGhost, onClick: function () { setShowDiag(!showDiag) } },
+              showDiag ? bind(t, 'hide') : bind(t, 'show')),
+            h('button', { type: 'button', style: S.buttonGhost, onClick: copyDiagnostics },
+              copied ? bind(t, 'copied') : bind(t, 'copyDiagnostics'))),
+          showDiag ? h('pre', { key: 'pre', style: S.pre }, JSON.stringify(status, null, 2)) : null),
       )
 
       return h('div', { style: S.card }, sections)
     }
+
 
     /**
      * 共享的《插件设置》区块的容器。三个 connect 类插件共用同一套 id：

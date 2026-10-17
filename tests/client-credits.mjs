@@ -219,10 +219,20 @@ function find(tree, predicate) {
   return found
 }
 
-// ---------- 1. 设置卡片显示版本号 ----------
+// ---------- 1. 设置卡片：版本号 + 各分组都在 ----------
 const cardTree = await mount(card, { t: (key) => key })
-if (!textOf(cardTree).includes('v9.9.9')) throw new Error('卡片没有显示版本号')
-console.log('✓ 卡片显示版本号 v9.9.9')
+const cardText = textOf(cardTree)
+if (!cardText.includes('v9.9.9')) throw new Error('卡片没有显示版本号')
+for (const section of ['secStatus', 'secConnection', 'models', 'credits']) {
+  if (!cardText.includes(section)) throw new Error(`卡片缺少分组：${section}`)
+}
+// 账号总览里应能看到两家的余额（Qoder Global 是 0 也在）
+for (const value of ['WorkBuddy', '675', 'WorkBuddy AI', '99']) {
+  if (!cardText.includes(value)) throw new Error(`账号总览缺少 ${value}`)
+}
+// 模型列表要渲染出模型行（auto）
+if (!cardText.includes('auto')) throw new Error('模型列表没有渲染')
+console.log('✓ 卡片分组、总览与模型列表都渲染出来了')
 
 // ---------- 2. 小卡默认收起 ----------
 let tree = await mount(pill, { t: (key) => key, wide: true })
