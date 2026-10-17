@@ -24,11 +24,24 @@ const sample = {
 
 test('额度缓存能存能读，且读回来带 stale 标记', () => {
   withTempDir((dir) => {
-    assert.equal(saveCreditsCache(dir, new Map([['workbuddy', sample]])), true)
+    assert.equal(saveCreditsCache(dir, new Map([['workbuddy::default', sample]])), true)
     const loaded = loadCreditsCache(dir)
     assert.equal(loaded.size, 1)
-    assert.equal(loaded.get('workbuddy').data.remain, 675)
-    assert.equal(loaded.get('workbuddy').stale, true)
+    assert.equal(loaded.get('workbuddy::default').data.remain, 675)
+    assert.equal(loaded.get('workbuddy::default').stale, true)
+  })
+})
+
+test('老格式（键只有 provider）自动迁移到默认账号', () => {
+  withTempDir((dir) => {
+    writeFileSync(
+      join(dir, 'credits-cache.json'),
+      JSON.stringify({ workbuddy: sample }),
+      'utf8',
+    )
+    const loaded = loadCreditsCache(dir)
+    assert.deepEqual([...loaded.keys()], ['workbuddy::default'])
+    assert.equal(loaded.get('workbuddy::default').data.remain, 675)
   })
 })
 
@@ -40,7 +53,7 @@ test('只缓存成功快照：错误态与空快照不写盘', () => {
       ['workbuddy-ai', sample],
     ]))
     const loaded = loadCreditsCache(dir)
-    assert.deepEqual([...loaded.keys()], ['workbuddy-ai'])
+    assert.deepEqual([...loaded.keys()], ['workbuddy-ai::default'])
   })
 })
 

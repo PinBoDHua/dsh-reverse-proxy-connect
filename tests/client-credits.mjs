@@ -84,6 +84,11 @@ const STATUS = {
       provider: 'workbuddy', displayName: 'WorkBuddy', kind: 'desktop', enabled: true,
       catalogSource: 'live', fetchedAt: 1792234000000,
       models: [{ id: 'auto', name: 'Auto', contextWindow: 256000, maxTokens: 32000, supportsImages: true, reasoningEfforts: [], disabled: false, unavailable: false, forced: false }],
+      accounts: [
+        { id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: true, credits: { state: 'ok', remain: 675, total: 1200, unit: 'credits', items: [] } },
+        { id: 'acc-2', label: '备用账号', active: false, kind: 'desktop', configured: true, credits: { state: 'ok', remain: 0, total: 0, unit: 'credits' } },
+      ],
+      autoSwitch: true,
       credits: { state: 'ok', remain: 675, total: 1200, unit: 'credits', resetAtMs: 1793900000000, fetchedAt: 1792234000000, items: [] },
       credential: { status: 'signed-in', uid: 'u' },
     },
@@ -98,6 +103,8 @@ const STATUS = {
       provider: 'qoder-global', displayName: 'Qoder Global', kind: 'pat', enabled: true,
       catalogSource: 'live', fetchedAt: 1792234000000,
       models: [{ id: 'qfmodel', name: 'Qwen3.8-Flash', contextWindow: 200000, maxTokens: 32768, supportsImages: true, reasoningEfforts: [], credits: 'x0', disabled: false }],
+      accounts: [{ id: 'default', label: '默认令牌', active: true, kind: 'pat', configured: true, credits: { state: 'ok', remain: 0, total: 0, unit: 'credits', exceeded: true } }],
+      autoSwitch: true,
       credits: { state: 'ok', remain: 0, total: 0, unit: 'credits', planName: 'Free', resetAtMs: 1794803568608, exceeded: true, items: [], fetchedAt: 1792234000000 },
       credential: { status: 'signed-in', email: 'a@b.c' },
     },
@@ -233,6 +240,43 @@ for (const value of ['WorkBuddy', '675', 'WorkBuddy AI', '99']) {
 // 模型列表要渲染出模型行（auto）
 if (!cardText.includes('auto')) throw new Error('模型列表没有渲染')
 console.log('✓ 卡片分组、总览与模型列表都渲染出来了')
+
+// 账号区：能列出两个账号，并且「使用」会发 activeAccount 补丁
+if (!cardText.includes('secAccounts')) throw new Error('卡片缺少账号分组')
+if (!cardText.includes('本机登录') || !cardText.includes('备用账号')) {
+  throw new Error('账号列表没有渲染出来')
+}
+const useButton = (function findUse(node) {
+  if (node === null || node === undefined) return undefined
+  if (Array.isArray(node)) {
+    for (const child of node) {
+      const hit = findUse(child)
+      if (hit !== undefined) return hit
+    }
+    return undefined
+  }
+  if (typeof node !== 'object') return undefined
+  if (node.type === 'button') {
+    const label = []
+    ;(function collect(child) {
+      if (typeof child === 'string') label.push(child)
+      if (Array.isArray(child)) child.forEach(collect)
+      else if (child && typeof child === 'object') collect(child.children)
+    })(node.children)
+    if (label.join('') === 'useAccount') return node
+  }
+  return findUse(node.children)
+})(cardTree)
+if (useButton === undefined) throw new Error('账号行上没有「使用」按钮')
+const beforeUse = calls.length
+useButton.props.onClick()
+await new Promise((resolve) => setTimeout(resolve, 10))
+const useCall = calls[calls.length - 1]
+if (calls.length === beforeUse || !String(useCall.body).includes('activeAccount')) {
+  throw new Error(`点「使用」没有发出 activeAccount 补丁：${String(useCall?.body).slice(0, 120)}`)
+}
+if (!String(useCall.body).includes('acc-2')) throw new Error('切换目标账号不对')
+console.log('✓ 账号区可切换当前账号')
 
 // ---------- 2. 小卡默认收起 ----------
 let tree = await mount(pill, { t: (key) => key, wide: true })

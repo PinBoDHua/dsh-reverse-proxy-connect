@@ -112,6 +112,19 @@ window.__ModuleLoader__.load({
       secConnection: '连接设置',
       show: '展开',
       hide: '收起',
+      secAccounts: '账号',
+      autoSwitch: '额度用完自动切换',
+      accountsHintPat: '可以为同一个 provider 添加多个 PAT；当前账号积分用完后会按上面的开关自动切换。',
+      accountsHintDesktop: '桌面账号从本机登录文件读取。多个账号请填各自的登录文件路径。',
+      accountLabel: '账号名称',
+      accountPat: '粘贴个人访问令牌（PAT）',
+      accountAuthFile: '登录文件路径（留空 = 读本机登录）',
+      accountSecretHint: '令牌只保存在本机设置里，不会回传到浏览器。',
+      accountDefaultLabel: '新账号',
+      addAccount: '添加账号',
+      useAccount: '使用',
+      removeAccount: '删除',
+      currentAccount: '当前',
     }
     var en = {
       nav: 'Reverse proxy',
@@ -188,6 +201,19 @@ window.__ModuleLoader__.load({
       secConnection: 'Connection',
       show: 'Expand',
       hide: 'Collapse',
+      secAccounts: 'Accounts',
+      autoSwitch: 'Switch when out of credits',
+      accountsHintPat: 'Add more than one PAT per provider; when the current account runs out, it switches automatically.',
+      accountsHintDesktop: 'Desktop accounts are read from local sign-in files; give each extra account its own file path.',
+      accountLabel: 'Account name',
+      accountPat: 'Paste a personal access token',
+      accountAuthFile: 'Sign-in file path (blank = local sign-in)',
+      accountSecretHint: 'Tokens stay in the local settings file and are never sent back to the browser.',
+      accountDefaultLabel: 'New account',
+      addAccount: 'Add account',
+      useAccount: 'Use',
+      removeAccount: 'Remove',
+      currentAccount: 'Current',
     }
 
     function bind(t, key, vars) {
@@ -584,6 +610,12 @@ window.__ModuleLoader__.load({
       var searchState = useState('')
       var searchDraft = searchState[0]
       var setSearchDraft = searchState[1]
+      var accLabelState = useState('')
+      var accLabel = accLabelState[0]
+      var setAccLabel = accLabelState[1]
+      var accSecretState = useState('')
+      var accSecret = accSecretState[0]
+      var setAccSecret = accSecretState[1]
 
       var load = useCallback(
         function () {
@@ -916,6 +948,135 @@ window.__ModuleLoader__.load({
             ? h('p', { key: 'why', style: S.hintWarn }, credential.message)
             : null,
           active.message ? h('p', { key: 'msg', style: S.hintWarn }, active.message) : null),
+      )
+
+      // ── 账号 ────────────────────────────────────────────────────
+      //
+      // 多账号的意义：一个账号的积分用完了，自动/手动切到另一个还能用的账号。
+      // 这里只做「增删与选定」，PAT 本身从不回传给浏览器（状态文档里没有）。
+      var accountRows = Array.isArray(active.accounts) ? active.accounts : []
+      var isPatProvider = active.kind === 'pat'
+      var accountItems = accountRows.map(function (account, index) {
+        var snapshot = account.credits || { state: 'none' }
+        return h('li', {
+          key: account.id,
+          style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
+        },
+        h('span', {
+          style: dot(account.active ? DOT_OK : DOT_OFF),
+          title: account.active ? bind(t, 'currentAccount') : '',
+        }),
+        h('span', {
+          style: Object.assign({}, S.modelName, { fontWeight: account.active ? 600 : 400 }),
+          title: account.label,
+        }, account.label),
+        account.active ? h('span', { style: S.badgeSoft }, bind(t, 'currentAccount')) : null,
+        h('span', { style: S.grow }),
+        h('span', { style: S.modelMeta }, creditsText(snapshot)),
+        account.active
+          ? null
+          : h('button', {
+              type: 'button',
+              style: S.buttonGhost,
+              disabled: busy === 'accounts',
+              onClick: function () {
+                var patch = { activeAccount: {} }
+                patch.activeAccount[active.provider] = account.id
+                mutate(patch)
+              },
+            }, bind(t, 'useAccount')),
+        accountRows.length > 1
+          ? h('button', {
+              type: 'button',
+              style: S.buttonGhost,
+              disabled: busy === 'accounts',
+              onClick: function () {
+                var list = accountRows
+                  .filter(function (row) { return row.id !== account.id })
+                  .map(function (row) {
+                    return {
+                      id: row.id,
+                      label: row.label,
+                      enabled: row.enabled !== false,
+                      ...(row.authFile === undefined || row.authFile === '' ? {} : { authFile: row.authFile }),
+                    }
+                  })
+                var patch = { accounts: {} }
+                patch.accounts[active.provider] = list
+                mutate(patch)
+              },
+            }, bind(t, 'removeAccount'))
+          : null)
+      })
+
+      var addAccount = function () {
+        var secret = accSecret.trim()
+        var label = accLabel.trim() === '' ? bind(t, 'accountDefaultLabel') : accLabel.trim()
+        var list = accountRows.map(function (row) {
+          return {
+            id: row.id,
+            label: row.label,
+            enabled: row.enabled !== false,
+            ...(row.authFile === undefined || row.authFile === '' ? {} : { authFile: row.authFile }),
+          }
+        })
+        var next = { id: 'acc-' + String(Date.now()), label: label, enabled: true }
+        if (isPatProvider) {
+          if (secret === '') return
+          next.pat = secret
+        } else if (secret !== '') {
+          next.authFile = secret
+        }
+        list.push(next)
+        var patch = { accounts: {}, activeAccount: {} }
+        patch.accounts[active.provider] = list
+        // 新加的账号直接设为当前，省得用户再点一次。
+        patch.activeAccount[active.provider] = next.id
+        mutate(patch)
+        setAccLabel('')
+        setAccSecret('')
+      }
+
+      sections.push(
+        h('div', { key: 'accounts', style: S.section },
+          h('div', { key: 'h', style: S.sectionHead },
+            h('span', { style: S.sectionTitle }, bind(t, 'secAccounts')),
+            h('span', { style: S.sectionCount }, String(accountRows.length)),
+            h('span', { style: S.grow }),
+            h('label', { style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+              h('input', {
+                type: 'checkbox',
+                checked: active.autoSwitch !== false,
+                onChange: function () { mutate({ autoSwitch: { enabled: active.autoSwitch === false } }) },
+              }),
+              h('span', { style: S.hintTiny }, bind(t, 'autoSwitch')))),
+          h('p', { key: 'hint', style: S.hintTiny }, bind(t, isPatProvider ? 'accountsHintPat' : 'accountsHintDesktop')),
+          h('ul', { key: 'list', style: S.modelList }, accountItems),
+          h('div', { key: 'add', style: S.stack },
+            h('div', { key: 'row', style: S.row },
+              h('input', {
+                style: Object.assign({}, S.input, { flex: '1 1 140px', width: 'auto' }),
+                type: 'text',
+                value: accLabel,
+                placeholder: bind(t, 'accountLabel'),
+                onChange: function (event) { setAccLabel(event.target.value) },
+              }),
+              h('button', {
+                type: 'button',
+                style: S.button,
+                disabled: busy === 'accounts' || (isPatProvider && accSecret.trim() === ''),
+                onClick: addAccount,
+              }, bind(t, 'addAccount'))),
+            h('input', {
+              key: 'secret',
+              style: S.input,
+              type: isPatProvider ? 'password' : 'text',
+              value: accSecret,
+              placeholder: bind(t, isPatProvider ? 'accountPat' : 'accountAuthFile'),
+              onChange: function (event) { setAccSecret(event.target.value) },
+            }),
+            h('span', { key: 'sec', style: S.hintTiny }, bind(t, 'accountSecretHint'))),
+        ),
       )
 
       // ── 积分 ────────────────────────────────────────────────────

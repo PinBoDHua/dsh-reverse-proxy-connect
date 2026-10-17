@@ -10,6 +10,10 @@
 | `qoder` | Qoder | 个人访问令牌（PAT，qoder.com.cn） | 视账号 | — |
 | `qoder-global` | Qoder Global | 个人访问令牌（PAT，qoder.com） | 视账号 | 0（Free） |
 
+> **0.6.0 重点**：**多账号 + 额度用完自动切换**。同一个 provider 可以挂多个
+> Qoder PAT / WorkBuddy 登录文件，当前账号积分耗尽时自动换到还有余额的那个。
+> 关于「自动签到」：两个上游都没有可用的签到接口，本版没做（详见 CHANGELOG）。
+>
 > **0.5.3 重点**：去掉界面上那枚 `in-process` 内部术语（信息仍在诊断 JSON 里）。
 >
 > **0.5.2 重点**：展开箭头从 9px 的 `▾` 字符换成 14px 内联 SVG 折线，侧栏里一眼可见。
