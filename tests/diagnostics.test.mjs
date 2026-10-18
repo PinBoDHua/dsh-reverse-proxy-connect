@@ -93,3 +93,44 @@ test('诊断：坏输入不抛错', () => {
   const { text } = buildDiagnostics({})
   assert.ok(typeof text === 'string' && text.includes('dsh-reverse-proxy-connect'))
 })
+
+test('诊断：「没读到」与「读失败」都不冒充 0 / 0 credits', () => {
+  const base = STATUS.providers[0]
+  const none = {
+    ...STATUS,
+    providers: [{
+      ...base,
+      provider: 'trae-global',
+      credits: { state: 'none', remain: 0, total: 0, unit: 'credits', items: [], fetchedAt: 0, error: 'Trae 国际版没有提供额度查询接口' },
+    }],
+  }
+  const noneText = buildDiagnostics(none).text
+  assert.ok(noneText.includes('未读取'), '没有额度端点时应写「未读取」并带原因')
+  assert.ok(noneText.includes('没有提供额度查询接口'))
+  assert.ok(!noneText.includes('0 / 0'), '不能把占位的 0 当成余额打印')
+  // 读失败时不该再打一行「今日消耗 0 / 近 7 天 0」的噪音。
+  assert.ok(!noneText.includes('今日消耗'), '没有快照时不打印趋势行')
+
+  const failed = {
+    ...STATUS,
+    providers: [{ ...base, credits: { state: 'error', remain: 0, total: 0, unit: 'credits', items: [], fetchedAt: Date.now(), error: 'HTTP 503' } }],
+  }
+  const failedText = buildDiagnostics(failed).text
+  assert.ok(failedText.includes('读取失败'))
+  assert.ok(failedText.includes('HTTP 503'))
+  assert.ok(!failedText.includes('0 / 0'))
+})
+
+test('诊断：耗尽预估用人类可读时长，不再摊成六位数分钟', () => {
+  // 252 天：旧实现会打印「预计可用: 363476 分钟」。
+  const long = {
+    ...STATUS,
+    providers: [{
+      ...STATUS.providers[0],
+      credits: { ...STATUS.providers[0].credits, trend: { spentToday: 1, spent7d: 2, burnPerHour: 0.03, etaMs: 252 * 86_400_000 } },
+    }],
+  }
+  const text = buildDiagnostics(long).text
+  assert.ok(text.includes('预计可用: 252 天'), text)
+  assert.ok(!text.includes('363476'), '不该出现六位数分钟')
+})

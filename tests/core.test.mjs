@@ -663,12 +663,14 @@ test('设置归一化容忍缺字段与错类型', () => {
   )
 })
 
-test('设置默认值四个 provider 都存在且默认启用', () => {
+test('设置默认值六个 provider 都存在且默认启用', () => {
   const value = defaults()
-  for (const provider of ['workbuddy', 'workbuddy-ai', 'qoder', 'qoder-global']) {
+  for (const provider of ['workbuddy', 'workbuddy-ai', 'qoder', 'qoder-global', 'trae', 'trae-global']) {
     assert.equal(value.providers[provider].enabled, true)
     assert.equal(providerOptions(value, provider).enabled, true)
   }
+  // 只列四个的话，新增的两家即使默认被关掉也测不出来。
+  assert.deepEqual(Object.keys(value.providers).sort(), ['qoder', 'qoder-global', 'trae', 'trae-global', 'workbuddy', 'workbuddy-ai'])
 })
 
 test('模型可见性：用户屏蔽与账号不支持都隐藏，但强制覆盖能救回来', () => {

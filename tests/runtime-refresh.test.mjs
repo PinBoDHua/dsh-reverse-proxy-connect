@@ -10,7 +10,7 @@ import { defaults } from '../lib/settings.js'
 /** 一个只有一个可用账号、其余 provider 关闭的设置。 */
 function settingsForRefresh() {
   const settings = defaults()
-  for (const provider of ['workbuddy-ai', 'qoder', 'qoder-global']) {
+  for (const provider of ['workbuddy-ai', 'qoder', 'qoder-global', 'trae', 'trae-global']) {
     settings.providers[provider].enabled = false
   }
   settings.accounts.workbuddy = [{

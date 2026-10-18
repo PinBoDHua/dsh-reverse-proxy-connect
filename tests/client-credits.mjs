@@ -1117,4 +1117,59 @@ try {
   STATUS.providers[0] = toggleProviderSnapshot
 }
 
+// ---------- 14. 读失败不冒充 0 分 ----------
+//
+// 1.7.x：`credits.state === 'error'` 的 provider 在卡片上走「大号数字」分支，
+// 显示成「0 积分 / 未读取」；CLI 与诊断则拼成「0 / 0 credits」。用户看到的
+// 是一个看起来像真实余额的 0，而不是「读不到」。
+const errorSnapshot = STATUS.providers[0]
+try {
+  STATUS.providers[0] = {
+    ...errorSnapshot,
+    credits: { state: 'error', remain: 0, total: 0, unit: 'credits', items: [], fetchedAt: Date.now(), message: 'HTTP 503', error: 'HTTP 503' },
+  }
+  cardTree = await mount(card, { t: (key) => key })
+  const errorCard = textOf(cardTree)
+  if (errorCard.includes('creditsUnreadable') === false) {
+    throw new Error('额度读失败时卡片没有显示「读取失败」')
+  }
+  // 侧栏胶囊：读失败的 provider 不该占一格（它没有可显示的数字）。
+  // 只断言「这一家不在」——QDG 的 0 是 Free 套餐的真实数字，必须留着。
+  const errorPill = await mount(pill, { t: (key) => key, wide: true })
+  const errorPillSegments = findAll(errorPill, (node) => node.props?.style?.justifyContent === 'flex-start'
+    && typeof node.props?.title === 'string')
+  const errorPillText = errorPillSegments.map((node) => String(node.props.title)).join(' | ')
+  // `displayName` 是「WorkBuddy」而不是「WorkBuddy AI」——用完整前缀区分，
+  // 否则 `startsWith('WorkBuddy ')` 会把 WorkBuddy AI 一起算进去。
+  if (errorPillSegments.some((node) => /^WorkBuddy\s+\d/.test(String(node.props.title)))) {
+    throw new Error(`读失败的 provider 不该在胶囊里出现：${errorPillText}`)
+  }
+  if (!errorPillText.includes('WorkBuddy AI')) {
+    throw new Error(`其余 provider 不该被误删：${errorPillText}`)
+  }
+  console.log('✓ 额度读失败时显示「读取失败」，不冒充 0 分')
+} finally {
+  STATUS.providers[0] = errorSnapshot
+}
+
+// 全部读失败时，胶囊的兜底入口也要说「读取失败」而不是「未读取」。
+const allErrorSnapshot = STATUS.providers.slice()
+try {
+  STATUS.providers = allErrorSnapshot.map((entry) => ({
+    ...entry,
+    credits: { state: 'error', remain: 0, total: 0, unit: 'credits', items: [], fetchedAt: Date.now(), error: 'boom' },
+  }))
+  const fallback = await mount(pill, { t: (key) => key, wide: true })
+  const fallbackText = textOf(fallback)
+  if (!fallbackText.includes('creditsUnreadable')) {
+    throw new Error(`全部读失败时胶囊应显示「读取失败」，实际：${fallbackText}`)
+  }
+  if (fallbackText.includes('creditsNone')) {
+    throw new Error('全部读失败时不该显示「未读取」：那是「还没读过」的意思')
+  }
+  console.log('✓ 全部读失败时胶囊说明「读取失败」')
+} finally {
+  STATUS.providers = allErrorSnapshot
+}
+
 console.log('client-credits: OK')

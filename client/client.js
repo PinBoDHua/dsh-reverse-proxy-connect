@@ -40,7 +40,7 @@ window.__ModuleLoader__.load({
     var zh = {
       nav: '反代连接器',
       title: '反代连接器',
-      intro: '把 WorkBuddy（国内版 / 国际版）与 Qoder（全球版 / 国内版）账号里的模型接进 DSH。',
+      intro: '把 WorkBuddy（国内版 / 国际版）、Qoder（全球版 / 国内版）与 Trae（国内版 / 国际版）账号里的模型接进 DSH。',
       service: '服务',
       refresh: '刷新',
       refreshing: '刷新中…',
@@ -210,7 +210,7 @@ window.__ModuleLoader__.load({
       patOpen: '打开 PAT 页面',
       patLinkHint: '还没有令牌？',
       usageInSidebar: '侧栏显示今日用量',
-      summaryProviders: '四个 provider',
+      summaryProviders: '六个 provider',
       accountSourceBrowser: '浏览器登录',
       accountSourceDesktop: '桌面登录',
       accountSourcePat: 'PAT',
@@ -258,7 +258,7 @@ window.__ModuleLoader__.load({
     var en = {
       nav: 'Reverse proxy',
       title: 'Reverse proxy connector',
-      intro: 'Bring WorkBuddy (CN / international) and Qoder (global / CN) account models into DSH.',
+      intro: 'Bring WorkBuddy (CN / international), Qoder (global / CN) and Trae (CN / international) account models into DSH.',
       service: 'Service',
       refresh: 'Refresh',
       refreshing: 'Refreshing…',
@@ -428,7 +428,7 @@ window.__ModuleLoader__.load({
       patOpen: 'Open the PAT page',
       patLinkHint: 'Need a token first?',
       usageInSidebar: 'Show today’s usage in the sidebar',
-      summaryProviders: 'Four providers',
+      summaryProviders: 'Six providers',
       accountSourceBrowser: 'Browser login',
       accountSourceDesktop: 'Desktop login',
       accountSourcePat: 'PAT',
@@ -772,6 +772,9 @@ window.__ModuleLoader__.load({
      */
     function formatCreditsText(credits, t) {
       if (credits === undefined || credits.state === 'none') return bind(t, 'creditsNone')
+      // 读失败（上游 5xx / 没配凭证）**不能**退化成「0 积分」：
+      // 那看起来像是这个账号真的一分额度都没有了。
+      if (credits.state === 'error') return bind(t, 'creditsUnreadable')
       if (credits.unlimited === true) return bind(t, 'creditsUnlimited')
       var remain = formatNumber(credits.remain)
       var total = credits.total > 0 ? ' / ' + formatNumber(credits.total) : ''
@@ -1817,8 +1820,9 @@ window.__ModuleLoader__.load({
         )
       })
 
-      // 账号总览：四张可点的卡片。比原来一行小胶囊多三样东西：
+      // 账号总览：每家 provider 一张可点的卡片。比原来一行小胶囊多三样东西：
       // 健康圆点、今日用量、当前账号名 —— 不切标签就能判断「该不该点进去」。
+      // 六家之后用 auto-fit 栅格排布：宽屏一行三张、窄屏自动降成一列。
       var summaryCards = providers.map(function (entry) {
         var health = entry.health || { state: 'unknown' }
         var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
@@ -1827,6 +1831,7 @@ window.__ModuleLoader__.load({
         var selected = entry.provider === activeTab
         var accent = PROVIDER_ACCENT[entry.provider] || 'currentColor'
         var low = creditsWarning(credits, entry.provider, alertRatio, alertsEnabled)
+        // 读失败与「真的是 0」必须长得不一样：前者给 `—`，后者才显示 0。
         var valueText = credits.state === 'ok'
           ? credits.unlimited === true ? '∞' : compactNumber(credits.remain)
           : '—'
@@ -2386,36 +2391,52 @@ window.__ModuleLoader__.load({
         }
       } else if (credits.state === 'error') {
         creditsBody.push(h('p', { key: 'flat', style: S.hintError }, creditsText(credits)))
-        if (credits.message) {
-          creditsBody.push(h('p', { key: 'err', style: S.hintWarn }, bind(t, 'creditsFailed', { message: credits.message })))
+        // 原因字段可能是 `message`（上游原始响应）或 `error`（runtime 折过的那份）。
+        var creditError = typeof credits.message === 'string' && credits.message !== ''
+          ? credits.message
+          : typeof credits.error === 'string' && credits.error !== '' ? credits.error : undefined
+        if (creditError !== undefined) {
+          creditsBody.push(h('p', { key: 'err', style: S.hintWarn }, bind(t, 'creditsFailed', { message: creditError })))
         }
       } else {
+        // `state: 'none'` 是「没有可读的额度端点 / 还没配凭证」：正文只写「未读取」，
+        // 原因放在第二行（超长就截断），完整文案进悬停提示 —— 与侧栏面板同一套规则。
         creditsBody.push(h('p', { key: 'flat', style: S.hint }, creditsText(credits)))
+        var creditNoneReason = typeof credits.error === 'string' && credits.error !== ''
+          ? credits.error
+          : typeof credits.message === 'string' && credits.message !== '' ? credits.message : undefined
+        if (creditNoneReason !== undefined) {
+          creditsBody.push(h('p', {
+            key: 'why',
+            style: S.hintTiny,
+            title: creditNoneReason,
+          }, creditNoneReason.length > 60 ? creditNoneReason.slice(0, 60) + '…' : creditNoneReason))
+        }
       }
 
-        var creditItems = safeArray(credits.items)
-        if (creditItems.length > 0) {
-          creditsBody.push(
-            h('details', { key: 'pkgs' },
-              h('summary', { style: Object.assign({}, S.hintTiny, { cursor: 'pointer' }) },
-                bind(t, 'creditsPackages', { count: creditItems.length })),
-              h('ul', {
-                style: Object.assign({}, S.modelList, { marginTop: 6 }),
+      var creditItems = safeArray(credits.items)
+      if (creditItems.length > 0) {
+        creditsBody.push(
+          h('details', { key: 'pkgs' },
+            h('summary', { style: Object.assign({}, S.hintTiny, { cursor: 'pointer' }) },
+              bind(t, 'creditsPackages', { count: creditItems.length })),
+            h('ul', {
+              style: Object.assign({}, S.modelList, { marginTop: 6 }),
+            },
+            creditItems.map(function (item, index) {
+              return h('li', {
+                key: 'pkg' + index,
+                style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
               },
-              creditItems.map(function (item, index) {
-                return h('li', {
-                  key: 'pkg' + index,
-                  style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
-                },
-                h('span', { style: S.modelName }, typeof item.name === 'string' && item.name !== '' ? item.name : bind(t, 'creditsPackageFallback')),
-                item.expired ? h('span', { style: S.badge }, bind(t, 'creditsExhausted')) : null,
-                h('span', { style: S.grow }),
-                h('span', { style: S.modelMeta }, formatNumber(item.remain) + ' / ' + formatNumber(item.total)),
-                h('span', { style: S.modelId }, item.endAtMs ? formatTime(item.endAtMs) : ''))
-              })),
-            ),
-          )
-        }
+              h('span', { style: S.modelName }, typeof item.name === 'string' && item.name !== '' ? item.name : bind(t, 'creditsPackageFallback')),
+              item.expired ? h('span', { style: S.badge }, bind(t, 'creditsExhausted')) : null,
+              h('span', { style: S.grow }),
+              h('span', { style: S.modelMeta }, formatNumber(item.remain) + ' / ' + formatNumber(item.total)),
+              h('span', { style: S.modelId }, item.endAtMs ? formatTime(item.endAtMs) : ''))
+            })),
+          ),
+        )
+      }
       if (credits.fetchedAt > 0) {
         creditsBody.push(h('p', { key: 'at', style: S.hintTiny }, bind(t, 'creditsFetchedAt', { time: formatTime(credits.fetchedAt) })))
       }
@@ -3226,9 +3247,16 @@ window.__ModuleLoader__.load({
           rows.push({ entry: entry, credits: credits })
         }
         if (rows.length === 0) {
-          // 已经拿到状态、但没有任何可用额度时，仍然留一个极淡的入口：
+          // 已经拿到状态、但没有任何可显示额度时，仍然留一个极淡的入口：
           // 完全消失会让用户以为插件没装，反而更困惑。
           if (providers.length === 0) return null
+          // 末尾那句要说清楚「为什么没有数字」：一个 provider 都没有额度端点
+          // 时说「未读取」，全都读失败时说「读取失败」——两者不是同一件事。
+          var emptyLabel = providers.every(function (item) {
+            return item.credits !== undefined && item.credits !== null && item.credits.state === 'error'
+          })
+            ? bind(t, 'creditsUnreadable')
+            : bind(t, 'creditsNone')
           return h(
             'div',
             { style: { display: 'flex', width: '100%', minWidth: 0, boxSizing: 'border-box', margin: '0 0 4px' } },
@@ -3257,7 +3285,7 @@ window.__ModuleLoader__.load({
                 },
               },
               h('span', {}, bind(t, 'summary') + ' —'),
-              h('span', {}, bind(t, 'creditsNone')),
+              h('span', {}, emptyLabel),
             ),
           )
         }

@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { apply } from '../lib/index.js'
+import { apply, thinTrend } from '../lib/index.js'
 import { ACTION_PATH, DATA_DIR_NAME, DIAGNOSTICS_PATH, SETTINGS_PATH, STATUS_PATH } from '../lib/protocol.js'
 
 /** 一个只记录路由的 webServer。 */
@@ -191,6 +191,21 @@ test('宿主入口：注册六个 provider，status v7 与诊断接口可用', a
     const fullAccount = full.body.providers[0].accounts[0]
     assert.ok(fullAccount.credits !== undefined, '完整状态必须带账号级额度（卡片要用）')
     assert.ok('cooldownUntil' in fullAccount, '完整状态必须带冷却时间')
+
+    // 轻量状态的趋势折线只留最后 20 个点（侧栏画 100×24 的迷你折线用不到更多）。
+    // 这里直接验纯函数，避免为了造 60 个样本去写一份额度历史文件。
+    const manyPoints = Array.from({ length: 60 }, (_, index) => ({ at: 1_700_000_000_000 + index * 60_000, remain: 100 - index }))
+    const thinned = thinTrend({ points: manyPoints, sampleCount: 60, spentToday: 3 }, 20)
+    assert.equal(thinned.points.length, 20)
+    assert.equal(thinned.points.at(-1).remain, manyPoints.at(-1).remain, '保留的是最后一段，不是最前一段')
+    assert.equal(thinned.sampleCount, 60, '其余字段原样保留')
+    // 点数本来就少时原样返回（不要制造一个「总是新对象」的假变化）。
+    const short = { points: manyPoints.slice(0, 5), sampleCount: 5 }
+    assert.equal(thinTrend(short, 20), short)
+    // 坏输入不炸。
+    assert.equal(thinTrend(undefined, 20), undefined)
+    assert.equal(thinTrend({ points: 'nope' }, 20)?.points, 'nope')
+    assert.deepEqual(thinTrend({ points: manyPoints }, 0).points, [])
 
     const diagnostics = await get(handlers[DIAGNOSTICS_PATH], DIAGNOSTICS_PATH)
     assert.equal(diagnostics.status, 200)
