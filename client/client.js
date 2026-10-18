@@ -2807,6 +2807,37 @@ window.__ModuleLoader__.load({
         var rateOf = function (counters) {
           return typeof counters.successRate === 'number' ? String(Math.round(counters.successRate * 100)) + '%' : '—'
         }
+        /**
+         * KPI 卡片底部的一行「标签 / 数值」。
+         *
+         * 用两列 grid 而不是 `文本 · 文本 · 文本`：后者在窄卡片里会在
+         * 分隔点前换行，第二行以「·」开头，看起来像排版坏了。
+         */
+        var usageMetric = function (key, label, value, title) {
+          return [
+            h('span', {
+              key: key + '-l',
+              style: {
+                color: 'var(--dsw-alias-label-tertiary)',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              },
+            }, label),
+            h('span', {
+              key: key + '-v',
+              title: title === undefined ? '' : title,
+              style: {
+                color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))',
+                textAlign: 'right',
+                fontVariantNumeric: 'tabular-nums',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+              },
+            }, value),
+          ]
+        }
         var usageCard = function (key, label, counters, present) {
           var data = counters !== null && typeof counters === 'object' ? counters : {}
           return h('div', {
@@ -2842,23 +2873,26 @@ window.__ModuleLoader__.load({
               : h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)' } }, bind(t, 'usageCalls'))),
           h('div', {
             style: {
-              display: 'flex',
-              flexWrap: 'wrap',
-              alignItems: 'baseline',
-              gap: '1px 7px',
+              display: 'grid',
+              gridTemplateColumns: 'auto minmax(0, 1fr)',
+              columnGap: 10,
+              rowGap: 1,
+              marginTop: 5,
+              paddingTop: 6,
+              borderTop: '0.5px solid var(--dsw-alias-border-l2)',
               minWidth: 0,
               fontSize: TEXT.tiny,
               lineHeight: LINE.dense,
-              color: 'var(--dsw-alias-label-tertiary)',
             },
           },
-          h('span', {}, bind(t, 'usageRate') + ' ' + (present === false ? '—' : rateOf(data))),
-          h('span', { style: { opacity: 0.45 } }, '·'),
-          h('span', {}, bind(t, 'usageAvg') + ' ' + (present === false ? '—' : formatDuration(data.avgDurationMs))),
-          h('span', { style: { opacity: 0.45 } }, '·'),
-          h('span', {
-            title: bind(t, 'usageTokenShort') + ' ' + formatNumber(data.totalTokens || 0),
-          }, bind(t, 'usageTokenShort') + ' ' + (present === false ? '—' : compactTokens(data.totalTokens || 0)))))
+          ...usageMetric('rate', bind(t, 'usageRate'), present === false ? '—' : rateOf(data)),
+          ...usageMetric('avg', bind(t, 'usageAvg'), present === false ? '—' : formatDuration(data.avgDurationMs)),
+          ...usageMetric(
+            'tokens',
+            bind(t, 'usageTokenShort'),
+            present === false ? '—' : compactTokens(data.totalTokens || 0),
+            bind(t, 'usageTokenShort') + ' ' + formatNumber(data.totalTokens || 0),
+          )))
         }
         var sessionPresent = typeof providerSession === 'object' && providerSession !== null && providerSession.requests > 0
         usageBody.push(

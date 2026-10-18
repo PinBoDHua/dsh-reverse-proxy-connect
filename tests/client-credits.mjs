@@ -1409,6 +1409,11 @@ if (sessionCard === undefined) throw new Error('缺少「当前会话」KPI 卡�
 const sessionCardText = textOf(sessionCard)
 if (!sessionCardText.includes('30')) throw new Error(`当前会话卡片缺少 tokens 数字：${sessionCardText}`)
 if (!sessionCardText.includes('usageTokenShort')) throw new Error('当前会话卡片缺少 tokens 标签')
+const tokenValue = find(sessionCard, (node) => textOf(node) === '30' && node.props?.style?.textAlign === 'right')
+if (tokenValue === undefined) throw new Error('KPI 指标数值应右对齐，才能跨卡片对齐')
+if (find(sessionCard, (node) => textOf(node) === '·') !== undefined) {
+  throw new Error('KPI 指标不应再用「·」连接（窄卡片换行会以点开头）')
+}
 console.log('✓ 用量汇总改为 KPI 卡片，长中文标签不再被截断')
 
 console.log('client-credits: OK')
