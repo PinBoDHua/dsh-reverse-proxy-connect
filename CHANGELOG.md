@@ -1,5 +1,76 @@
 # 更新记录
 
+## 1.8.1 — 2026-10-18
+
+这一版修的是 `node lib/bin.js test` 里一条**看起来像「账号坏了」**的输出：
+
+```text
+[qoder-global] 默认令牌  ✗ ABORTED  45013ms  aborted
+```
+
+账号其实是好的。同一条命令重跑，有时 36 秒成功。三层原因叠在一起，每一层
+都会把下一层的解释吃掉。
+
+### 原因一：测试死线与排队预算都是 45 秒
+
+`testAccount()` 与 `#probeOne()` 各自 `setTimeout(() => controller.abort(), 45_000)`，
+而 `QODER_OPEN_QUEUE_BUDGET_MS` 也是 45 秒。两个计时器同时到期，先跑的是
+看门狗 —— 于是「免费模型正在排队」那句解释永远轮不到。
+
+现在死线抽成 `TEST_DEADLINE_MS = 60_000`，比 `QODER_OPEN_QUEUE_BUDGET_MS`
+（45 秒）多 15 秒余量：排队预算先到，给出明确结论；死线只在「上游连响应头
+都不给」时兜底。
+
+### 原因二：`abort()` 不带 reason，超时与「用户取消」同形
+
+`AbortController.abort()` 不带参数时 `signal.reason` 是 `AbortError`；用户按
+Esc 取消也是同一个形状。于是「等了 60 秒」被上报成 `ABORTED` + `aborted`，
+既不像超时，也不说明做了什么。
+
+新增 `DeadlineError`（继承 `IdleTimeoutError`，带 `kind/code = 'timeout'`）：
+
+- 内部看门狗用 `abort(new DeadlineError(...))`；
+- `#openUpstream` 的 catch 先看 `deadline.signal.reason`，再认调用方 signal
+  的 reason（宿主的取消不带 reason，走 `CancelledError`），最后才兜底取消。
+
+### 原因三：`sleep()` 把 reason 抹掉了
+
+看门狗 abort 之后，`await sleep(waitMs, signal)` 抛的是 `CancelledError` ——
+上层只看到「取消」，60 秒的 `DeadlineError` 反而被吞掉。现在 `sleep()` 与
+`abortReasonOf()` 一起，把 signal 自带的 reason 原样上抛。
+
+### 原因四：首包排队预算被夹到了死线本身
+
+`openQueueBudgetMs = min(userSetting, 45_000, OPEN_TIMEOUT − 已用 − 2)`。
+最后那一项让预算永远等于 60 秒死线：用户把「Qoder 排队等待」调到 30 秒也不
+生效，报错写的是「超过本地 **60** 秒上限」—— 而 60 秒是死线，不是排队预算。
+现在只取 `min(userSetting, QODER_OPEN_QUEUE_BUDGET_MS)`。
+
+### 顺带：排队预算现在也约束「等响应头」那一刻
+
+`#openQoderQueued` 原来只在**两次重试之间**检查预算。一次挂住不返回的尝试会
+让整轮等到外层死线。现在每次尝试都用
+`AbortSignal.any([signal, budget.signal])` 包住，到点立刻结束并按排队报告。
+
+### 实测
+
+同一条命令，修复前稳定 `ABORTED 60002ms / aborted`；修复后：
+
+```text
+[qoder-global] 默认令牌  ✓ 正常  36262ms
+[qoder-global] 默认令牌  ✗ RATE_LIMIT  60008ms  Qoder 免费模型正在排队
+                                 （已等待 60 秒，超过本地 60 秒上限）。
+                                 这不是令牌失效或模型下线；请稍后重试，避开高峰期。
+```
+
+`ABORTED` → `TIMEOUT`/`RATE_LIMIT`，且都带得出原因；排队结束时请求正常成功。
+
+### 测试
+
+- `node --test tests/*.test.mjs`：**210 条**（新增 3 条：死线只覆盖等响应头、
+  `DeadlineError` 语义、`sleep()` 保留 reason）；
+- `node tests/client-credits.mjs`：35 项，全部通过。
+
 ## 1.8.0 — 2026-10-18
 
 这一版只做一件事：**把「读不到额度」和「额度是 0」彻底分开**。

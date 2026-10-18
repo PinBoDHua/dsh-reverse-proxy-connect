@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -7,6 +7,7 @@ import test from 'node:test'
 import { Runtime } from '../lib/runtime.js'
 import { Stats } from '../lib/stats.js'
 import { defaults } from '../lib/settings.js'
+import { DeadlineError, openDeadline, sleep } from '../lib/timeout.js'
 
 /** 一条最小 SSE 响应。 */
 function sseResponse(text) {
@@ -112,6 +113,94 @@ test('账号测试：读到运行时 finish.kind 才算成功，不能因为字�
     globalThis.fetch = originalFetch
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('测试/探测的死线只覆盖「等响应头」，且长于 Qoder 首包排队预算', async () => {
+  // 实测事故（1.8.0）：`node lib/bin.js test` 里 qoder-global 跑了 45013ms
+  // 后报 `ABORTED` + `aborted` —— 什么都说明不了。两个计时器都设成 45 秒，
+  // 看门狗先到，把「免费模型正在排队」那句解释抢走了。
+  //
+  // 修这条时又发现第二层：死线原来一路套着事件流，而 Qoder 的排队发生在
+  // **读流阶段**（retryQueued 有自己的 qoderQueueWaitMs 预算）。死线不 dispose
+  // 的话，排队解释永远轮不到，用户看到的还是「60 秒内没有给出响应头」。
+  //
+  // 这里验的是源码里的两条硬约束（纯文本断言，不需要真等一分钟）：
+  const runtimeSource = readFileSync(new URL('../lib/runtime.js', import.meta.url), 'utf8')
+  const deadline = Number(/const TEST_DEADLINE_MS = (\d[\d_]*)/.exec(runtimeSource)?.[1]?.replaceAll('_', ''))
+  const queueBudget = Number(/const QODER_OPEN_QUEUE_BUDGET_MS = (\d[\d_]*)/.exec(runtimeSource)?.[1]?.replaceAll('_', ''))
+  assert.ok(Number.isFinite(deadline) && deadline > 0, 'TEST_DEADLINE_MS 必须是数字')
+  assert.ok(Number.isFinite(queueBudget) && queueBudget > 0, 'QODER_OPEN_QUEUE_BUDGET_MS 必须是数字')
+  assert.ok(
+    deadline > queueBudget,
+    `测试/探测死线（${String(deadline)}ms）必须大于 Qoder 首包排队预算（${String(queueBudget)}ms），否则排队解释会被 abort 覆盖`,
+  )
+  assert.ok(deadline - queueBudget >= 10_000, `两者至少留 10 秒余量，实际只差 ${String(deadline - queueBudget)}ms`)
+
+  // 测试账号与能力探测都必须：用 openDeadline(TEST_DEADLINE_MS) 建死线，
+  // 并在拿到 opened 之后立刻 dispose —— 否则排队预算形同虚设。
+  assert.equal(
+    (runtimeSource.match(/const deadline = openDeadline\(TEST_DEADLINE_MS\)/g) ?? []).length,
+    2,
+    '测试账号与能力探测都必须用 openDeadline(TEST_DEADLINE_MS)',
+  )
+  assert.equal(
+    (runtimeSource.match(/deadline\.dispose\(\)\n(?:.|\n){0,80}?for await \(const event of opened\.events\)/g) ?? []).length,
+    2,
+    '拿到 opened 之后必须立刻 dispose：死线不能一路套着事件流',
+  )
+  // 两处的 finally 都要 dispose，避免中途抛错时把计时器留着。
+  assert.equal(
+    (runtimeSource.match(/deadline\.dispose\(\)/g) ?? []).length >= 4,
+    true,
+    'testAccount / #probeOne 的 try 与 finally 都要 dispose',
+  )
+  // 不该再有「用 setTimeout 直接 abort 一个裸 controller」的死线：那种 reason
+  // 会退化成 AbortError，与用户取消同形。（排队预算看门狗是唯一允许的例外，
+  // 它 abort 的是自己的 budget controller，且带 QoderQueueBudgetError。）
+  assert.ok(
+    !/const timer = setTimeout\(\(\) => controller\.abort\(\)/.test(runtimeSource),
+    '不该再有裸 abort() 的死线（reason 会退化成 AbortError）',
+  )
+})
+
+test('DeadlineError 带 timeout 语义，且与用户取消（AbortError）可区分', () => {
+  const deadline = openDeadline(5_000)
+  deadline.abort(new DeadlineError(5_000, '响应头'))
+  const reason = deadline.signal.reason
+  assert.equal(reason.name, 'DeadlineError')
+  // 上层靠 kind/code 判超时；用户取消走 CancelledError，它带 code ABORTED。
+  assert.equal(reason.kind, 'timeout')
+  assert.equal(reason.code, 'timeout')
+  assert.match(reason.message, /5 秒/)
+  assert.match(reason.message, /响应头/)
+  deadline.dispose()
+  // 与普通取消不是同一个形状。
+  const cancelled = new AbortController()
+  cancelled.abort()
+  assert.equal(cancelled.signal.reason.name, 'AbortError', '默认 abort() 的 reason 就是 AbortError —— 这正是要避开的那一种')
+})
+
+test('sleep() 保留 signal 的 reason，不把「测试超时」抹成「用户取消」', async () => {
+  // 第二层根因：看门狗 abort 之后，`await sleep(...)` 抛的是 CancelledError，
+  // 于是外层 catch 只看到「取消」，60 秒的 DeadlineError 反而被吞掉。
+  const controller = new AbortController()
+  const pending = sleep(30_000, controller.signal)
+  controller.abort(new DeadlineError(1_000, '响应头'))
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.name, 'DeadlineError', 'sleep 必须上抛 signal.reason，而不是包成 CancelledError')
+    assert.equal(error.code, 'timeout')
+    return true
+  })
+
+  // 宿主取消（不带 reason）仍然是 CancelledError。
+  const cancelled = new AbortController()
+  const pending2 = sleep(30_000, cancelled.signal)
+  cancelled.abort()
+  await assert.rejects(pending2, (error) => {
+    assert.equal(error.name, 'AbortError')
+    assert.equal(error.code, 'ABORTED')
+    return true
+  })
 })
 
 test('429 限流：只有一个账号时保留上游错误，不伪造成功', async () => {
