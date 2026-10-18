@@ -1682,4 +1682,111 @@ const fallbackArea = find(cardTree, (node) => node.type === 'textarea' && typeof
 if (fallbackArea === undefined) throw new Error('复制失败没有可手动复制的 textarea 兜底')
 console.log('✓ 复制失败有可见反馈与手动复制兜底')
 
+// ── 2.4.0 UI 打磨回归 ────────────────────────────────────────────
+// 18) Qoder Free 的汇总卡大数字显示「免费」，不再显示 0；完整额度留在 title。
+cardTree = await mount(card, { t: (key) => key })
+const freeValueSpan = find(cardTree, (node) => node.type === 'span'
+  && node.props?.style?.fontSize === 20
+  && textOf(node) === 'creditsFree')
+if (freeValueSpan === undefined) throw new Error('Qoder Free 汇总卡仍显示 0，没有显示「免费」')
+if (String(freeValueSpan.props?.title ?? '').indexOf('creditsUnit') === -1) {
+  throw new Error('Qoder Free 汇总卡的 title 没有保留完整额度文案')
+}
+// 19) 侧栏胶囊里的 Qoder Free 显示短版「免费」，title/aria-label 仍是完整文案。
+fixPill = await mount(pill, { t: (key) => key, wide: true })
+if (!textOf(fixPill).includes('creditsFreeShort')) throw new Error('胶囊里的 Qoder Free 没有显示短版「免费」')
+const freeSegment = find(fixPill, (node) => String(node.props?.title ?? '').includes('creditsUnit')
+  && String(node.props.title).indexOf('Qoder Global') !== -1)
+if (freeSegment === undefined) throw new Error('胶囊段的 title 没有保留完整额度文案')
+console.log('✓ Qoder Free 在汇总卡/胶囊显示「免费」，完整额度保留在 title')
+
+// 20) 读不到额度：中性色「—」+ 原因 title，不再用 provider 强调色；不换行保证 6 卡高度稳定。
+const savedCredits01 = STATUS.providers[0].credits
+try {
+  STATUS.providers[0].credits = { state: 'error', error: 'HTTP 503' }
+  cardTree = await mount(card, { t: (key) => key })
+  const unreadableSpan = find(cardTree, (node) => node.type === 'span'
+    && node.props?.style?.fontSize === 20
+    && String(node.props?.title ?? '').indexOf('creditsUnreadable') !== -1)
+  if (unreadableSpan === undefined) throw new Error('读取失败的汇总卡没有给出原因 title')
+  if (String(unreadableSpan.props.title).indexOf('HTTP 503') === -1) throw new Error('读取失败的 title 缺少上游错误')
+  if (!String(unreadableSpan.props.style?.color ?? '').includes('label-tertiary')) {
+    throw new Error(`读不到额度仍在用强调色：${unreadableSpan.props.style?.color}`)
+  }
+  if (unreadableSpan.props.style?.whiteSpace !== 'nowrap') throw new Error('大数字没有 nowrap，卡片高度可能因文案换行')
+  if (textOf(unreadableSpan) !== '—') throw new Error('读不到额度应显示「—」')
+  STATUS.providers[0].credits = { state: 'none' }
+  cardTree = await mount(card, { t: (key) => key })
+  const noneSpan = find(cardTree, (node) => node.type === 'span'
+    && node.props?.style?.fontSize === 20
+    && String(node.props?.title ?? '').indexOf('creditsNone') !== -1)
+  if (noneSpan === undefined) throw new Error('「未读取」与「读取失败」没有区分 title')
+  console.log('✓ 读不到额度用中性色「—」，title 区分未读取/读取失败且不换行')
+} finally {
+  STATUS.providers[0].credits = savedCredits01
+}
+
+// 21) 数字格式一致：10000 以下带千分位（汇总卡 + 胶囊），10000 以上仍 k 缩写。
+const bigValueTexts = (tree) => findAll(tree, (node) => node.type === 'span'
+  && node.props?.style?.fontSize === 20 && node.props?.style?.fontVariantNumeric === 'tabular-nums')
+  .map((node) => textOf(node))
+try {
+  STATUS.providers[0].credits = { state: 'ok', remain: 2388, total: 10000, unit: 'credits' }
+  cardTree = await mount(card, { t: (key) => key })
+  if (!bigValueTexts(cardTree).includes('2,388')) throw new Error('汇总卡 2388 没有千分位')
+  fixPill = await mount(pill, { t: (key) => key, wide: true })
+  if (!textOf(fixPill).includes('2,388')) throw new Error('胶囊 2388 没有千分位')
+  STATUS.providers[0].credits = { state: 'ok', remain: 12345, total: 20000, unit: 'credits' }
+  cardTree = await mount(card, { t: (key) => key })
+  if (!bigValueTexts(cardTree).includes('12.3k')) throw new Error('10000 以上没有保持 k 缩写')
+  if (bigValueTexts(cardTree).includes('12,345')) throw new Error('10000 以上汇总卡不应展开完整数字')
+  console.log('✓ 数字格式统一：<10000 千分位、>=10000 保持 k 缩写')
+} finally {
+  STATUS.providers[0].credits = savedCredits01
+}
+
+// 22) 签到 unconfigured：不能落进默认分支显示「今日已签」，且不影响 failed 优先级。
+const savedCheckin01 = STATUS.providers[0].checkin
+try {
+  STATUS.providers[0].checkin = {
+    ...savedCheckin01,
+    result: { provider: 'workbuddy', claimed: 0, credit: 0, outcomes: [{ accountId: 'default', kind: 'unconfigured' }] },
+  }
+  cardTree = await mount(card, { t: (key) => key })
+  const checkinText = textOf(cardTree)
+  if (!checkinText.includes('checkinUnconfigured')) throw new Error('unconfigured outcome 没有专属文案')
+  if (checkinText.includes('checkinAutoDone')) throw new Error('unconfigured 被当成了「今日已签」')
+  STATUS.providers[0].checkin = {
+    ...savedCheckin01,
+    result: { provider: 'workbuddy', claimed: 0, credit: 0, outcomes: [{ kind: 'failed', message: 'HTTP 500' }, { kind: 'unconfigured' }] },
+  }
+  cardTree = await mount(card, { t: (key) => key })
+  if (!textOf(cardTree).includes('checkinFailed')) throw new Error('failed 优先级被 unconfigured 抢走了')
+  if (textOf(cardTree).includes('checkinUnconfigured')) throw new Error('failed 与 unconfigured 同时出现时应只显示 failed')
+  console.log('✓ 签到 unconfigured outcome 有专属文案，failed 优先级不变')
+} finally {
+  STATUS.providers[0].checkin = savedCheckin01
+}
+
+// 23) 侧栏刷新：失败后 5 秒内再次刷新成功，失败提示要立刻消失。
+fetchFailure = 'action'
+try {
+  fixPill = await mount(pill, { t: (key) => key, wide: true })
+  const expandToggle = find(fixPill, (node) => node.type === 'button' && node.props?.['aria-expanded'] === false)
+  expandToggle.props.onClick({ preventDefault() {} })
+  fixPill = await render(pill, { t: (key) => key, wide: true })
+  let refreshBtn = find(fixPill, (node) => node.type === 'button' && textOf(node) === 'creditsRefresh')
+  refreshBtn.props.onClick({ preventDefault() {} })
+  fixPill = await render(pill, { t: (key) => key, wide: true })
+  if (!textOf(fixPill).includes('refreshFailed')) throw new Error('先制造一次刷新失败的前提不成立')
+  fetchFailure = null
+  refreshBtn = find(fixPill, (node) => node.type === 'button' && textOf(node) === 'creditsRefresh')
+  refreshBtn.props.onClick({ preventDefault() {} })
+  fixPill = await render(pill, { t: (key) => key, wide: true })
+  if (textOf(fixPill).includes('refreshFailed')) throw new Error('刷新成功后失败提示仍然显示')
+  console.log('✓ 刷新成功后立即清掉上一次的失败提示')
+} finally {
+  fetchFailure = null
+}
+
 console.log('client-credits: OK')

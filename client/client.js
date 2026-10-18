@@ -138,6 +138,8 @@ window.__ModuleLoader__.load({
       creditsReset: '最近到期',
       creditsExhausted: '额度已用尽',
       creditsFreeQueue: '免费模型排队',
+      creditsFree: '免费',
+      creditsFreeShort: '免费',
       creditsPackages: '{count} 个套餐包',
       creditsPackageFallback: '额度包',
       usageHeatCell: '{date} · {requests} 次 · {tokens} tok',
@@ -187,6 +189,7 @@ window.__ModuleLoader__.load({
       checkinAlready: '今天已签到',
       checkinInactive: '当前账号没有签到活动',
       checkinFailed: '签到失败：{reason}',
+      checkinUnconfigured: '有账号未登录，已跳过自动签到',
       checkinLastAt: '上次尝试 {time}',
       checkinAuto: '自动签到',
       checkinAutoHint: '每天自动检查一次；失败 10 分钟后重试。关闭后只能手动点。',
@@ -412,6 +415,8 @@ window.__ModuleLoader__.load({
       creditsReset: 'Expires',
       creditsExhausted: 'Quota exhausted',
       creditsFreeQueue: 'Free model queues',
+      creditsFree: 'Free',
+      creditsFreeShort: 'free',
       creditsPackages: '{count} packages',
       creditsPackageFallback: 'Credit package',
       usageHeatCell: '{date} · {requests} requests · {tokens} tok',
@@ -461,6 +466,7 @@ window.__ModuleLoader__.load({
       checkinAlready: 'Already checked in today',
       checkinInactive: 'No check-in activity for this account',
       checkinFailed: 'Check-in failed: {reason}',
+      checkinUnconfigured: 'Some accounts are not signed in, so check-in was skipped',
       checkinLastAt: 'Last attempt {time}',
       checkinAuto: 'Auto check-in',
       checkinAutoHint: 'Checks once a day; failed attempts retry after 10 minutes. Turn it off to check in manually only.',
@@ -695,11 +701,16 @@ window.__ModuleLoader__.load({
       return provider.slice(0, 4).toUpperCase()
     }
 
-    /** 紧凑数字：上万折成 k。 */
+    /**
+     * 紧凑数字：上万折成 k，一万以下仍带千分位。
+     *
+     * 之前 2388 在汇总卡/胶囊显示「2388」、详情却是「2,388」，同一份数据两种
+     * 写法；现在 <10000 走 formatNumber，>=10000 才缩写，保证同屏数字格式一致。
+     */
     function compactNumber(value) {
       if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
       if (value >= 10000) return String(Math.round(value / 100) / 10) + 'k'
-      return String(Math.round(value * 10) / 10)
+      return formatNumber(value)
     }
 
     /** 大数缩写：1.2K / 400.3M / 1.1B（KPI 卡片用，完整数字放 title）。 */
@@ -2230,10 +2241,19 @@ window.__ModuleLoader__.load({
         var selected = entry.provider === activeTab
         var accent = PROVIDER_ACCENT[entry.provider] || 'currentColor'
         var low = creditsWarning(credits, entry.provider, alertRatio, alertsEnabled)
+        // Qoder Free 的 0 付费额度不是「用尽」：大数字显示「免费」，避免被读成额度耗尽。
+        // 完整额度文案仍在 title / aria-label 里，信息不丢。
+        var freePlan = isQoderFreePlan(entry.provider, credits)
         // 读失败与「真的是 0」必须长得不一样：前者给 `—`，后者才显示 0。
         var valueText = credits.state === 'ok'
-          ? credits.unlimited === true ? '∞' : compactNumber(credits.remain)
+          ? credits.unlimited === true ? '∞' : freePlan ? bind(t, 'creditsFree') : compactNumber(credits.remain)
           : '—'
+        // 大数字的完整说明：正常态给完整额度文案；读不到时说明原因（未读取 / 读取失败 + 上游错误）。
+        var valueTitle = credits.state === 'ok'
+          ? formatCreditsText(credits, t)
+          : credits.state === 'error' && typeof credits.error === 'string' && credits.error !== ''
+            ? bind(t, 'creditsUnreadable') + ': ' + credits.error
+            : bind(t, credits.state === 'none' ? 'creditsNone' : 'creditsUnreadable')
         var metaParts = [String(entry.modelCount !== undefined ? entry.modelCount : safeArray(entry.models).length) + ' ' + bind(t, 'models')]
         if (today.requests > 0) metaParts.push(compactNumber(today.totalTokens || 0) + ' tok')
         var activeRow = safeArray(entry.accounts).filter(function (row) { return row.active })[0]
@@ -2275,12 +2295,19 @@ window.__ModuleLoader__.load({
               },
             }, bind(t, healthTextKey(health.state)))),
           h('span', {
+            // 读不到额度时不要用 provider 强调色画「—」：中性色 + 悬停原因，
+            // 避免把「未读取/读取失败」看成某种品牌状态。字号/行高不变，6 张卡高度一致。
+            title: valueTitle,
+            'aria-label': valueTitle,
             style: {
               fontSize: 20,
               lineHeight: '24px',
               fontWeight: 600,
               fontVariantNumeric: 'tabular-nums',
-              color: low ? 'var(--dsh-rpc-warn, #9d5c00)' : accent,
+              whiteSpace: 'nowrap',
+              color: credits.state !== 'ok'
+                ? 'var(--dsw-alias-label-tertiary, #81858c)'
+                : low ? 'var(--dsh-rpc-warn, #9d5c00)' : accent,
             },
           }, valueText),
           h('span', {
@@ -2625,6 +2652,10 @@ window.__ModuleLoader__.load({
           checkinFailureRaw = (safeArray(checkinResult.outcomes).find(function (item) { return item.kind === 'failed' }) || {}).message || '—'
           checkinLabel = bind(t, 'checkinFailed', { reason: shortErrorMessage(checkinFailureRaw, t) })
           checkinTone = 'hintWarn'
+        } else if (kinds.indexOf('unconfigured') !== -1) {
+          // 后端 2.4.0 新增：没有配置登录的账号会被跳过。这里必须单独识别，
+          // 否则会落进默认分支显示成「今日已签」，把跳过说成成功。
+          checkinLabel = bind(t, 'checkinUnconfigured')
         } else {
           checkinLabel = checkin.completedToday === true ? bind(t, 'checkinAutoDone') : bind(t, 'checkinNever')
         }
@@ -4086,6 +4117,9 @@ window.__ModuleLoader__.load({
         var hovered = hoverState[0]
         var setHovered = hoverState[1]
         var rootRef = useRef(undefined)
+        // 失败提示的 5s 自动清除用序号防竞态：成功刷新要立刻清掉失败态，
+        // 旧定时器也不能清掉之后新产生的失败。
+        var failedSeq = useRef(0)
 
         useEffect(function () {
           var disposed = false
@@ -4193,13 +4227,21 @@ window.__ModuleLoader__.load({
             .then(function (document) {
               applyStatus(document)
               setBusy(false)
+              // 失败后 5 秒内又刷新成功：必须立刻清掉失败提示，否则旧定时器
+              // 未到点前界面仍挂着「刷新失败」，看起来像失败但其实成功。
+              failedSeq.current += 1
+              setFailed(false)
             })
             .catch(function (failure) {
               setBusy(false)
               // 刷新失败不能只靠 1.6 秒描边变色：面板底部给一条 5 秒的
               // role=status 文案（原因放 title），色盲/读屏用户也能感知。
+              var seq = failedSeq.current + 1
+              failedSeq.current = seq
               setFailed(String(failure && failure.message ? failure.message : failure))
-              setTimeout(function () { setFailed(false) }, 5000)
+              setTimeout(function () {
+                if (failedSeq.current === seq) setFailed(false)
+              }, 5000)
             })
         }
 
@@ -4294,6 +4336,8 @@ window.__ModuleLoader__.load({
           var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
           var warn = creditsWarning(snapshot, row.entry.provider, sidebarAlertRatio, sidebarAlertsEnabled)
           var stale = snapshot.stale === true
+          // Qoder Free：窄胶囊里显示短版「免费」，完整额度仍在 title / aria-label 里。
+          var freePlan = isQoderFreePlan(row.entry.provider, snapshot)
           var dotColor = warn ? 'var(--dsh-rpc-warn, #9d5c00)' : accent
           var label = row.entry.displayName + ' ' + formatCreditsText(snapshot, t) + (stale ? ' · ' + bind(t, 'creditsCached') : '')
           return h(
@@ -4367,7 +4411,7 @@ window.__ModuleLoader__.load({
                   whiteSpace: 'nowrap',
                 },
               },
-              snapshot.unlimited === true ? '∞' : compactNumber(snapshot.remain),
+              snapshot.unlimited === true ? '∞' : freePlan ? bind(t, 'creditsFreeShort') : compactNumber(snapshot.remain),
             ),
           )
         })

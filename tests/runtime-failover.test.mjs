@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { Runtime, failureCodeOf, isProviderScopedFailure, parseOpenAiSse, qoderQueueFailure, resetHintOf } from '../lib/runtime.js'
+import { EventLog } from '../lib/events.js'
 import { Stats } from '../lib/stats.js'
 import { defaults } from '../lib/settings.js'
 import { DeadlineError, openDeadline, sleep } from '../lib/timeout.js'
@@ -444,6 +445,68 @@ test('正常完成：宿主收到 finish 后立即停止消费，统计仍记 st
       stats.stop()
     }
   } finally {
+    globalThis.fetch = originalFetch
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('额度降噪：未配置（none）不记事件，真失败才 warn，恢复只在成功时记', async () => {
+  // 用户可见行为：事件账本里不再每天出现「额度读取失败：尚未保存 PAT」这种
+  // 预期内 warn；真正的上游失败与恢复仍然要能看见。
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-credits-noise-'))
+  const originalFetch = globalThis.fetch
+  const events = new EventLog({})
+  const settings = defaults()
+  settings.accounts.qoder = [{ id: 'a', label: 'PAT 账号', enabled: true, pat: '' }]
+  settings.activeAccount.qoder = 'a'
+  const runtime = new Runtime({ settings: () => settings, dataDir: dir, logger: {}, events })
+  try {
+    // 1) 未配置 PAT：state none 属于已知状态，不应该进账本。
+    globalThis.fetch = async () => {
+      throw new Error('未配置账号不应该请求上游')
+    }
+    const none = await runtime.refreshCredits('qoder', { force: true })
+    assert.equal(none.state, 'none')
+    assert.equal(events.list({ type: 'credits' }).length, 0, '未配置（none）不该产生事件')
+
+    // 2) 配置了 PAT 但上游 500：这是真失败，必须记 warn。
+    settings.accounts.qoder[0].pat = 'pt-test'
+    runtime.identities.set('qoder::a', {
+      pat: 'pt-test',
+      region: 'china',
+      userID: 'u1',
+      authToken: 'job-token',
+      name: 'tester',
+      email: 'a@b.c',
+      machineID: 'm',
+      expiresAtMs: Date.now() + 3600_000,
+    })
+    globalThis.fetch = async () => new Response('boom', { status: 500 })
+    const failed = await runtime.refreshCredits('qoder', { force: true })
+    // 失败时保留上一次成功值（这里没有），并把原因放进 `error`，而不是伪造数字。
+    assert.ok(typeof failed.error === 'string' && failed.error !== '', '读取失败必须带原因')
+    let creditEvents = events.list({ type: 'credits' })
+    assert.equal(creditEvents.length, 1)
+    assert.equal(creditEvents[0].level, 'warn')
+    assert.match(creditEvents[0].message, /额度读取失败/)
+
+    // 3) 上游恢复：state ok 且此前有 error，才记「已恢复」。
+    globalThis.fetch = async (url) => {
+      const href = String(url)
+      if (href.includes('/api/v2/quota/usage')) return Response.json({ userQuota: { total: 100, used: 10, remaining: 90 } })
+      if (href.includes('/api/v2/user/plan')) return Response.json({ plan_tier_name: 'Pro', is_paid_plan: true })
+      return Response.json({ nextResetAt: Date.now() + 86_400_000 })
+    }
+    const recovered = await runtime.refreshCredits('qoder', { force: true })
+    assert.equal(recovered.state, 'ok')
+    creditEvents = events.list({ type: 'credits' })
+    assert.equal(creditEvents.length, 2)
+    assert.match(creditEvents[0].message, /额度读取已恢复/)
+    assert.equal(creditEvents[0].level, 'info')
+    assert.match(creditEvents[1].message, /额度读取失败/)
+    assert.equal(creditEvents[1].level, 'warn')
+  } finally {
+    runtime.flushCaches()
     globalThis.fetch = originalFetch
     rmSync(dir, { recursive: true, force: true })
   }

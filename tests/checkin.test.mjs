@@ -1,7 +1,14 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import { interpretCheckinStatus, interpretClaim } from '../lib/checkin.js'
+import { checkinTerminal } from '../lib/checkin-schedule.js'
+import { EventLog } from '../lib/events.js'
+import { Runtime } from '../lib/runtime.js'
+import { defaults } from '../lib/settings.js'
 
 test('签到状态：活动进行中且今天已签', () => {
   const value = interpretCheckinStatus({
@@ -74,4 +81,49 @@ test('领取：响应里没给积分数时不编造', () => {
   const value = interpretClaim({ code: 0, data: {} })
   assert.equal(value.kind, 'claimed')
   assert.equal(value.credit, 0)
+})
+
+test('签到降噪：未配置登录的账号记 unconfigured（info、不算失败、不请求上游、不触发重试）', async () => {
+  // 用户可见行为：没登录/没配 PAT 的账号不再每天在事件账本里报「签到失败」，
+  // 也不会每 10 分钟重试一次；卡片上显示的是「未登录，已跳过」这种已知状态。
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-checkin-unconfigured-'))
+  const originalFetch = globalThis.fetch
+  const savedCnToken = process.env.QODER_CN_PERSONAL_ACCESS_TOKEN
+  const savedGlobalToken = process.env.QODER_PERSONAL_ACCESS_TOKEN
+  delete process.env.QODER_CN_PERSONAL_ACCESS_TOKEN
+  delete process.env.QODER_PERSONAL_ACCESS_TOKEN
+
+  const events = new EventLog({})
+  const settings = defaults()
+  const runtime = new Runtime({ settings: () => settings, dataDir: dir, logger: {}, events })
+  let fetchCalls = 0
+  globalThis.fetch = async () => {
+    fetchCalls += 1
+    throw new Error('未配置账号不应该请求上游')
+  }
+  try {
+    const outcome = await runtime.runCheckin('qoder')
+    assert.equal(outcome.outcomes.length, 1)
+    assert.equal(outcome.outcomes[0].kind, 'unconfigured', '未配置账号应记 unconfigured，而不是 failed')
+    assert.match(outcome.outcomes[0].message, /令牌|登录/, '原因要能读懂（未配置登录）')
+    assert.equal(outcome.claimed, 0)
+    assert.equal(fetchCalls, 0, '未配置账号不应该打上游签到接口')
+
+    const checkinEvents = events.list({ type: 'checkin' })
+    assert.equal(checkinEvents.length, 1)
+    assert.equal(checkinEvents[0].level, 'info', '未登录是已知状态，事件级别必须是 info 而不是 warn')
+    assert.match(checkinEvents[0].message, /未登录，已跳过/)
+
+    // index.js 的终态判定：排除 unconfigured 之后才算「今天结束」，
+    // 否则调度器看到非终态会每 10 分钟重试一次。
+    assert.equal(checkinTerminal(outcome), false, '原始结果不算终态（需要 index 过滤）')
+    const settled = { ...outcome, outcomes: outcome.outcomes.filter((item) => item.kind !== 'unconfigured') }
+    assert.equal(checkinTerminal(settled), true, '排除未配置账号后必须是终态，不能触发 10 分钟重试')
+  } finally {
+    runtime.flushCaches()
+    globalThis.fetch = originalFetch
+    if (savedCnToken !== undefined) process.env.QODER_CN_PERSONAL_ACCESS_TOKEN = savedCnToken
+    if (savedGlobalToken !== undefined) process.env.QODER_PERSONAL_ACCESS_TOKEN = savedGlobalToken
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
