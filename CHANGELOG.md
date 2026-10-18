@@ -1,5 +1,44 @@
 # 更新记录
 
+## 2.6.2 — 2026-10-18
+
+第五轮前端审计：继续沿第四轮 `NaN%` 的线索，专查「除法 / 百分比 / 数值插值
+只判 `typeof number`、或判了有限但中间运算仍会溢出」的可见出口（只改
+`client/client.js`）。
+
+### 界面
+
+- **有限大数不再显示成 `Infinity`**：`formatNumber` 先 `value * 10` 再舍入，
+  `1e308` 这类合法有限数会先溢出成 Infinity，额度大数字、`title` / `aria-label`
+  与侧栏胶囊直接显示「Infinity / 6,600」。现在只有缩放结果仍有限才舍入，否则
+  按科学计数法原样显示；卡片、胶囊、用量标题共用同一口径。
+- **成功率与高级设置比例**：`successRate * 100`、`lowRatio * 100` 对
+  `NaN` / `Infinity` / `1e308` 会拼出 `NaN%` / `Infinity%`；高级设置的秒/百分数
+  输入框会把 `NaN / 1000`、`Infinity * 100` 灌进 `value`。现在统一过有限性
+  （比例还要求在 0–1），非法值回 `—` 或已知默认值。
+- **模型上下文窗口与模型数量**：`formatWindow` 只判了「是不是数字、是否 >0」，
+  NaN 原样 `String(NaN)`、Infinity 变 `InfinityM`；汇总卡 `modelCount` 也是原始插值
+  （`Infinity 模型`）。现在非有限回 `—`，模型数量回落到真实数组长度。
+- **额度总量非有限不再误判**：`total = Infinity` 时 `remain / total` 得 0，
+  会误亮低额度色、算出 0%/1% 覆盖率，并在分母处渲染「/ —」。现在百分比、
+  进度条、`formatCreditsText` / `creditsValueParts` 与预警判断都要求
+  `total` 是有限正数。
+- **14 天柱状图**：某一桶 `totalTokens = Infinity` 会让 `tokens / maxDailyTokens`
+  得 NaN，内联样式出现 `height:NaN` / `opacity:NaN`；现在只统计有限值。
+- **原始数字插值**：签到次数/积分（`Infinity 个账号`、`+NaN 积分`）、账号测试
+  延迟（`NaNms`）、用量区标题（`Infinity`）、连续失败提示（`Infinity 连败`）、
+  状态版本告警（`vNaN`）都补上有限性守卫；时间字段（resetAt / fetchedAt /
+  lastRunAt / lastErrorAt / since / cooldown / event.at）也只在有限正数时才渲染，
+  不再出现「… —」的悬空标签。
+
+### 测试
+
+- `node --test tests/*.test.mjs`：**279 条**全部通过（本轮无后端改动）；
+- `node tests/client-credits.mjs`：**80 项**通过（新增 9 项：`formatNumber` /
+  `formatWindow` / `ratioPercent` 的 1e308 溢出、成功率、模型数量与上下文窗口、
+  高级设置 NaN/Infinity/1e308、签到、版本与连败、日用量柱状图、额度总量与
+  `remain=1e308`、今日请求数与测试延迟）。
+
 ## 2.6.1 — 2026-10-18
 
 第四轮审计的一个真实前端缺陷（只改 `client/client.js`）。

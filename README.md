@@ -4,6 +4,13 @@
 **Trae**（国内版 / 国际版）账号里的模型接进 **DeepSeek Harness**。
 一个插件、六个 provider、一张设置卡片、一套账号池。
 
+> **2.6.2 第五轮前端审计：非有限值与有限大数溢出**：`formatNumber(1e308)` 的
+> `*10` 会溢出成字面 `Infinity`，额度大数字/悬停提示/侧栏胶囊会显示
+> 「Infinity / 6,600」；成功率与高级设置比例在 `NaN` / `Infinity` / `1e308` 下
+> 会拼出 `NaN%` / `Infinity%`，或把 `Infinity` 灌进输入框；模型窗口、模型数量、
+> 签到数字、测试延迟、用量标题、状态版本与日用量柱状图也有同类缺口。现在统一
+> 按有限性兜底，日用量柱状图不再产出 `height:NaN`。测试 279 后端 + 80 前端。
+>
 > **2.6.1 修复额度百分比 `NaN%`**：汇总卡/侧栏小卡的百分比与两处进度条，
 > 以前对 `remain` 只判「是不是数字」、未拦非有限值；宿主给出 `state:'ok'`、
 > `total > 0` 但 `remain` 缺省/非数字的快照时会显示字面 `NaN%`，而同卡大数字却是
@@ -95,6 +102,31 @@
 | `trae-global` | Trae Global | 本机 `storage.json`（同上，国际版目录） | 视账号 |
 
 ---
+
+## 2.6.2 第五轮前端审计：非有限值与有限大数溢出
+
+第四轮修的是「`remain` 缺省 → `NaN%`」。这一轮沿同一条线继续查三类出口：
+真 `NaN` / `Infinity`、只判 `typeof number` 的守卫、以及**输入有限但中间乘法
+溢出**（`1e308 * 10` / `1e308 * 100`）。
+
+- **`formatNumber` 的 1e308 溢出**：旧实现 `Math.round(value * 10) / 10`，输入
+  `1e308`（合法有限数）会先变成 `Infinity`，于是额度大数字、`title` /
+  `aria-label`、侧栏胶囊显示「Infinity / 6,600」。现在只有缩放结果仍有限才舍入，
+  否则按科学计数法显示 `1e+308`。
+- **成功率 / 高级设置比例**：`successRate`、`lowRatio`、`thresholdRatio` 乘以
+  100 后遇到 `NaN` / `Infinity` / `1e308` 会渲染 `NaN%` / `Infinity%`，或把
+  `Infinity` 灌进 `number` 输入框。现在统一要求有限且在 0–1，非法回 `—` 或默认值。
+- **模型窗口 / 模型数量**：`formatWindow` 补有限性（NaN 不再原样输出）；汇总卡
+  `modelCount` 非有限时回落到模型数组真实长度。
+- **额度总量非有限**：`total = Infinity` 会因 `remain / total = 0` 误亮低额度色、
+  算出 0%/1% 覆盖率，并在分母处显示「/ —」。百分比、进度条、额度文案与预警
+  判断现在都要求 `total` 是有限正数。
+- **柱状图与原始插值**：日用量 `totalTokens = Infinity` 不再产生 `height:NaN` /
+  `opacity:NaN`；签到次数/积分、测试延迟、用量区标题、连续失败提示、状态版本
+  告警均补有限性守卫；时间字段只在有限正数时才渲染标签。
+
+测试：`node --test tests/*.test.mjs` **279 条**、`node tests/client-credits.mjs`
+**80 项**（新增 9 项回归）。
 
 ## 2.6.1 修复额度百分比 NaN%
 

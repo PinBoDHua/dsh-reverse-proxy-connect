@@ -685,10 +685,22 @@ window.__ModuleLoader__.load({
       return Array.isArray(value) ? value.filter(function (item) { return item !== null && typeof item === 'object' }) : []
     }
 
-    /** 数字千分位（模块级，卡片与侧栏小卡共用）。 */
+    /** 是否为可用于计算与展示的有限数字。 */
+    function isFiniteNumber(value) {
+      return typeof value === 'number' && Number.isFinite(value)
+    }
+
+    /**
+     * 数字千分位（模块级，卡片与侧栏小卡共用）。
+     *
+     * 注意 `value * 10` 本身也能溢出：`formatNumber(1e308)` 会先算出
+     * `Infinity`，再被 String 成字面「Infinity」——输入明明是有限数。
+     * 只有缩放结果仍有限时才做一位小数舍入，否则原样显示（科学计数法）。
+     */
     function formatNumber(value) {
       if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
-      var rounded = Math.round(value * 10) / 10
+      var scaled = value * 10
+      var rounded = Number.isFinite(scaled) ? Math.round(scaled) / 10 : value
       return String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
     }
 
@@ -761,6 +773,18 @@ window.__ModuleLoader__.load({
       return ''
     }
 
+    /** 毫秒值 → 高级设置里的「秒」输入框文本；非有限/非正回落到 fallback。 */
+    function secondsInputOf(value, fallback) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return fallback
+      return String(Math.round(value / 1000))
+    }
+
+    /** 0–1 比例 → 高级设置里的百分数输入框文本；非有限/越界回落到 fallback。 */
+    function percentInputOf(value, fallback) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0 || value > 1) return fallback
+      return String(Math.round(value * 100))
+    }
+
     /**
      * 这份额度是否该亮警示色。
      *
@@ -771,11 +795,11 @@ window.__ModuleLoader__.load({
      * @returns 是否警示。
      */
     function isCreditsLow(credits, ratio) {
-      var threshold = typeof ratio === 'number' && ratio > 0 && ratio < 1 ? ratio : LOW_CREDITS_RATIO
+      var threshold = isFiniteNumber(ratio) && ratio > 0 && ratio < 1 ? ratio : LOW_CREDITS_RATIO
       if (credits.unlimited === true) return false
       if (credits.exceeded === true) return true
-      if (typeof credits.remain === 'number' && credits.remain <= 0) return true
-      if (typeof credits.total === 'number' && credits.total > 0 && typeof credits.remain === 'number') {
+      if (isFiniteNumber(credits.remain) && credits.remain <= 0) return true
+      if (isFiniteNumber(credits.total) && credits.total > 0 && isFiniteNumber(credits.remain)) {
         return credits.remain / credits.total <= threshold
       }
       return false
@@ -791,7 +815,7 @@ window.__ModuleLoader__.load({
       if (typeof provider !== 'string' || provider.indexOf('qoder') !== 0) return false
       if (credits === undefined || credits === null) return false
       if (credits.state !== undefined && credits.state !== 'ok') return false
-      if (typeof credits.total === 'number' && credits.total > 0) return false
+      if (isFiniteNumber(credits.total) && credits.total > 0) return false
       if (credits.freePlan === true) return true
       if (credits.paid === false) return true
       var plan = typeof credits.planName === 'string' ? credits.planName.toLowerCase() : ''
@@ -825,9 +849,9 @@ window.__ModuleLoader__.load({
       if (isQoderFreePlan(provider, credits)) return undefined
       if (credits.alert === 'low' || credits.alert === 'exhausted') return credits.alert
       if (credits.unlimited === true) return undefined
-      if (credits.exceeded === true || (typeof credits.remain === 'number' && credits.remain <= 0)) return 'exhausted'
-      if (typeof credits.total === 'number' && credits.total > 0 && typeof credits.remain === 'number') {
-        var threshold = typeof ratio === 'number' && ratio > 0 && ratio < 1 ? ratio : LOW_CREDITS_RATIO
+      if (credits.exceeded === true || (isFiniteNumber(credits.remain) && credits.remain <= 0)) return 'exhausted'
+      if (isFiniteNumber(credits.total) && credits.total > 0 && isFiniteNumber(credits.remain)) {
+        var threshold = isFiniteNumber(ratio) && ratio > 0 && ratio < 1 ? ratio : LOW_CREDITS_RATIO
         if (credits.remain / credits.total <= threshold) return 'low'
       }
       return undefined
@@ -848,7 +872,7 @@ window.__ModuleLoader__.load({
 
     /** 百分比整数。 */
     function ratioPercent(ratio) {
-      if (typeof ratio !== 'number' || !isFinite(ratio)) return '—'
+      if (typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio < 0 || ratio > 1) return '—'
       return String(Math.round(ratio * 100)) + '%'
     }
 
@@ -861,7 +885,7 @@ window.__ModuleLoader__.load({
      */
     function sparkline(points, color) {
       var valid = (Array.isArray(points) ? points : []).filter(function (point) {
-        return point !== null && typeof point === 'object' && typeof point.remain === 'number' && isFinite(point.remain)
+        return point !== null && typeof point === 'object' && isFiniteNumber(point.remain)
       })
       if (valid.length < 2) return undefined
       var min = valid[0].remain
@@ -893,12 +917,12 @@ window.__ModuleLoader__.load({
       }))
     }
 
-    /** 额度百分比（读不到 / 不限量 / 没有总量 / 余额非有限时返回 undefined）。 */
+    /** 额度百分比（读不到 / 不限量 / 没有总量 / 余额或总量非有限时返回 undefined）。 */
     function creditsPercentOf(credits) {
       if (credits === undefined || credits.state !== 'ok') return undefined
       if (credits.unlimited === true) return undefined
-      if (!(credits.total > 0)) return undefined
-      if (!Number.isFinite(credits.remain)) return undefined
+      if (typeof credits.total !== 'number' || !Number.isFinite(credits.total) || !(credits.total > 0)) return undefined
+      if (typeof credits.remain !== 'number' || !Number.isFinite(credits.remain)) return undefined
       return Math.max(0, Math.min(100, Math.round((credits.remain / credits.total) * 100)))
     }
 
@@ -919,7 +943,7 @@ window.__ModuleLoader__.load({
       if (credits.unlimited === true) return { big: '∞', small: '', unit: bind(t, 'creditsUnit') }
       return {
         big: formatNumber(credits.remain),
-        small: credits.total > 0 ? '/ ' + formatNumber(credits.total) : '',
+        small: isFiniteNumber(credits.total) && credits.total > 0 ? '/ ' + formatNumber(credits.total) : '',
         unit: bind(t, 'creditsUnit'),
       }
     }
@@ -981,7 +1005,7 @@ window.__ModuleLoader__.load({
       if (credits.state === 'error') return bind(t, 'creditsUnreadable')
       if (credits.unlimited === true) return bind(t, 'creditsUnlimited')
       var remain = formatNumber(credits.remain)
-      var total = credits.total > 0 ? ' / ' + formatNumber(credits.total) : ''
+      var total = isFiniteNumber(credits.total) && credits.total > 0 ? ' / ' + formatNumber(credits.total) : ''
       var unit = credits.unit === 'credits' ? bind(t, 'creditsUnit') : ''
       return remain + total + ' ' + unit
     }
@@ -1007,6 +1031,13 @@ window.__ModuleLoader__.load({
       if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '—'
       if (ms < 1000) return String(Math.round(ms)) + 'ms'
       return String(Math.round(ms / 100) / 10) + 's'
+    }
+
+    /** 测试延迟：缺省按 0ms，非有限/负数回 —，绝不让 NaNms 进悬停提示。 */
+    function formatLatency(ms) {
+      if (ms === undefined) return '0ms'
+      if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return '—'
+      return String(Math.round(ms)) + 'ms'
     }
 
     /** 请求终态 → 文案键。 */
@@ -1390,7 +1421,7 @@ window.__ModuleLoader__.load({
     }
 
     function formatWindow(tokens) {
-      if (typeof tokens !== 'number' || tokens <= 0) return '—'
+      if (typeof tokens !== 'number' || !Number.isFinite(tokens) || tokens <= 0) return '—'
       if (tokens >= 1000000) return String(Math.round((tokens / 1000000) * 10) / 10) + 'M'
       if (tokens >= 1000) return String(Math.round(tokens / 1000)) + 'K'
       return String(tokens)
@@ -1653,26 +1684,23 @@ window.__ModuleLoader__.load({
       useEffect(function () {
         if (status === undefined || !status.settings) return
         var advanced = status.settings.advanced || {}
-        if (typeof advanced.idleTimeoutMs === 'number') setAdvIdle(String(Math.round(advanced.idleTimeoutMs / 1000)))
-        if (typeof advanced.catalogRefreshMs === 'number') setAdvCatalog(String(Math.round(advanced.catalogRefreshMs / 1000)))
-        if (typeof advanced.creditsRefreshMs === 'number') setAdvCredits(String(Math.round(advanced.creditsRefreshMs / 1000)))
-        // 老宿主（没有 advanced）也显示已知默认值，而不是空输入框。
-        if (typeof advanced.idleTimeoutMs !== 'number') setAdvIdle('180')
-        if (typeof advanced.catalogRefreshMs !== 'number') setAdvCatalog('600')
-        if (typeof advanced.creditsRefreshMs !== 'number') setAdvCredits('120')
+        // 非有限值不能进输入框：`NaN / 1000` 会显示字面「NaN」，`Infinity * 100`
+        // 会显示「Infinity」。统一走 secondsInputOf / percentInputOf 回落默认值。
+        setAdvIdle(secondsInputOf(advanced.idleTimeoutMs, '180'))
+        setAdvCatalog(secondsInputOf(advanced.catalogRefreshMs, '600'))
+        setAdvCredits(secondsInputOf(advanced.creditsRefreshMs, '120'))
         setAdvStats(advanced.stats !== false)
         setAdvCache(advanced.catalogCache !== false)
         var alerts = status.settings.alerts || {}
-        setAdvAlert(typeof alerts.lowRatio === 'number' ? String(Math.round(alerts.lowRatio * 100)) : '15')
+        setAdvAlert(percentInputOf(alerts.lowRatio, '15'))
         setAdvAlertsEnabled(alerts.enabled !== false)
         setAdvProbeEnabled(status.settings.probe !== false)
         var auto = status.settings.autoSwitch
-        var switchRatio = auto !== null && typeof auto === 'object' && typeof auto.thresholdRatio === 'number'
+        var switchRatio = auto !== null && typeof auto === 'object' && isFiniteNumber(auto.thresholdRatio)
           ? auto.thresholdRatio
           : 0
-        setAdvSwitch(String(Math.round(switchRatio * 100)))
-        if (typeof advanced.qoderQueueWaitMs === 'number') setAdvQueue(String(Math.round(advanced.qoderQueueWaitMs / 1000)))
-        if (typeof advanced.qoderQueueWaitMs !== 'number') setAdvQueue('60')
+        setAdvSwitch(percentInputOf(switchRatio, '0'))
+        setAdvQueue(secondsInputOf(advanced.qoderQueueWaitMs, '60'))
       }, [status === undefined])
 
       /**
@@ -2066,26 +2094,26 @@ window.__ModuleLoader__.load({
             var savedAutoForClamp = document && document.settings && document.settings.autoSwitch
             // 宿主把越界值夹到安全区间时，明确告诉用户最终保存的是什么，而不是假装存了原值。
             var clampLabels = []
-            if (typeof savedAdvanced.idleTimeoutMs === 'number' && savedAdvanced.idleTimeoutMs !== sent.idleTimeoutMs) clampLabels.push(bind(t, 'advancedIdle'))
-            if (typeof savedAdvanced.catalogRefreshMs === 'number' && savedAdvanced.catalogRefreshMs !== sent.catalogRefreshMs) clampLabels.push(bind(t, 'advancedCatalog'))
-            if (typeof savedAdvanced.creditsRefreshMs === 'number' && savedAdvanced.creditsRefreshMs !== sent.creditsRefreshMs) clampLabels.push(bind(t, 'advancedCredits'))
-            if (typeof savedAdvanced.qoderQueueWaitMs === 'number' && savedAdvanced.qoderQueueWaitMs !== sent.qoderQueueWaitMs) clampLabels.push(bind(t, 'advancedQueue'))
-            if (savedAlertsForClamp && typeof savedAlertsForClamp.lowRatio === 'number' && Math.abs(savedAlertsForClamp.lowRatio - sent.lowRatio) > 1e-9) clampLabels.push(bind(t, 'advancedAlert'))
-            if (savedAutoForClamp && typeof savedAutoForClamp.thresholdRatio === 'number' && Math.abs(savedAutoForClamp.thresholdRatio - sent.thresholdRatio) > 1e-9) clampLabels.push(bind(t, 'advancedSwitch'))
+            if (isFiniteNumber(savedAdvanced.idleTimeoutMs) && savedAdvanced.idleTimeoutMs !== sent.idleTimeoutMs) clampLabels.push(bind(t, 'advancedIdle'))
+            if (isFiniteNumber(savedAdvanced.catalogRefreshMs) && savedAdvanced.catalogRefreshMs !== sent.catalogRefreshMs) clampLabels.push(bind(t, 'advancedCatalog'))
+            if (isFiniteNumber(savedAdvanced.creditsRefreshMs) && savedAdvanced.creditsRefreshMs !== sent.creditsRefreshMs) clampLabels.push(bind(t, 'advancedCredits'))
+            if (isFiniteNumber(savedAdvanced.qoderQueueWaitMs) && savedAdvanced.qoderQueueWaitMs !== sent.qoderQueueWaitMs) clampLabels.push(bind(t, 'advancedQueue'))
+            if (savedAlertsForClamp && isFiniteNumber(savedAlertsForClamp.lowRatio) && Math.abs(savedAlertsForClamp.lowRatio - sent.lowRatio) > 1e-9) clampLabels.push(bind(t, 'advancedAlert'))
+            if (savedAutoForClamp && isFiniteNumber(savedAutoForClamp.thresholdRatio) && Math.abs(savedAutoForClamp.thresholdRatio - sent.thresholdRatio) > 1e-9) clampLabels.push(bind(t, 'advancedSwitch'))
             if (clampLabels.length > 0) {
               setAdvNotice(bind(t, 'advancedClamped', { fields: clampLabels.join(bind(t, 'listSeparator')) }))
               setTimeout(function () { setAdvNotice('') }, 6000)
             }
-            if (typeof savedAdvanced.idleTimeoutMs === 'number') setAdvIdle(String(Math.round(savedAdvanced.idleTimeoutMs / 1000)))
-            if (typeof savedAdvanced.catalogRefreshMs === 'number') setAdvCatalog(String(Math.round(savedAdvanced.catalogRefreshMs / 1000)))
-            if (typeof savedAdvanced.creditsRefreshMs === 'number') setAdvCredits(String(Math.round(savedAdvanced.creditsRefreshMs / 1000)))
-            if (typeof savedAdvanced.qoderQueueWaitMs === 'number') setAdvQueue(String(Math.round(savedAdvanced.qoderQueueWaitMs / 1000)))
+            setAdvIdle(secondsInputOf(savedAdvanced.idleTimeoutMs, advIdle))
+            setAdvCatalog(secondsInputOf(savedAdvanced.catalogRefreshMs, advCatalog))
+            setAdvCredits(secondsInputOf(savedAdvanced.creditsRefreshMs, advCredits))
+            setAdvQueue(secondsInputOf(savedAdvanced.qoderQueueWaitMs, advQueue))
             var savedAlerts = document && document.settings && document.settings.alerts
-            if (savedAlerts && typeof savedAlerts.lowRatio === 'number') setAdvAlert(String(Math.round(savedAlerts.lowRatio * 100)))
+            if (savedAlerts) setAdvAlert(percentInputOf(savedAlerts.lowRatio, advAlert))
             if (savedAlerts) setAdvAlertsEnabled(savedAlerts.enabled !== false)
             if (document && document.settings) setAdvProbeEnabled(document.settings.probe !== false)
             var savedAuto = document && document.settings && document.settings.autoSwitch
-            if (savedAuto && typeof savedAuto.thresholdRatio === 'number') setAdvSwitch(String(Math.round(savedAuto.thresholdRatio * 100)))
+            if (savedAuto) setAdvSwitch(percentInputOf(savedAuto.thresholdRatio, advSwitch))
             setAdvStats(savedAdvanced.stats !== false)
             setAdvCache(savedAdvanced.catalogCache !== false)
             setTimeout(function () { setAdvSaved(false) }, 1600)
@@ -2263,7 +2291,9 @@ window.__ModuleLoader__.load({
 
       // 预警阈值由宿主下发；老宿主没有 alerts 时沿用 15%。
       var alertSettings = (status.settings && status.settings.alerts) || {}
-      var alertRatio = typeof alertSettings.lowRatio === 'number' ? alertSettings.lowRatio : LOW_CREDITS_RATIO
+      var alertRatio = isFiniteNumber(alertSettings.lowRatio) && alertSettings.lowRatio > 0 && alertSettings.lowRatio < 1
+        ? alertSettings.lowRatio
+        : LOW_CREDITS_RATIO
       var alertsEnabled = alertSettings.enabled !== false
       var storage = status.storage || {}
       var settingsCorrupt = typeof storage.settingsError === 'string' && storage.settingsError !== ''
@@ -2282,7 +2312,7 @@ window.__ModuleLoader__.load({
             key: 'version-mismatch',
             style: S.hintWarn,
           }, bind(t, 'statusVersionMismatch', {
-            host: status.version === undefined ? '?' : String(status.version),
+            host: isFiniteNumber(status.version) ? String(status.version) : '?',
             client: String(EXPECTED_STATUS_VERSION),
           }))
         : null
@@ -2340,8 +2370,9 @@ window.__ModuleLoader__.load({
           : typeof credits.error === 'string' && credits.error !== ''
             ? bind(t, credits.state === 'error' ? 'creditsUnreadable' : 'creditsNone') + ': ' + credits.error
             : bind(t, credits.state === 'none' ? 'creditsNone' : 'creditsUnreadable')
-        var metaParts = [String(entry.modelCount !== undefined ? entry.modelCount : safeArray(entry.models).length) + ' ' + bind(t, 'models')]
-        if (today.requests > 0) metaParts.push(compactNumber(today.totalTokens || 0) + ' tok')
+        var modelCount = isFiniteNumber(entry.modelCount) ? entry.modelCount : safeArray(entry.models).length
+        var metaParts = [String(modelCount) + ' ' + bind(t, 'models')]
+        if (isFiniteNumber(today.requests) && today.requests > 0) metaParts.push(compactNumber(today.totalTokens || 0) + ' tok')
         var activeRow = safeArray(entry.accounts).filter(function (row) { return row.active })[0]
         if (activeRow !== undefined) metaParts.push(activeRow.label)
         return h(
@@ -2554,7 +2585,9 @@ window.__ModuleLoader__.load({
               ? bind(t, 'signedIn')
               : credential.status === 'disabled' ? bind(t, 'disabled') : bind(t, 'signedOut')),
             h('span', {
-              title: activeHealth.consecutiveFailures > 0 ? bind(t, 'consecutiveFailures', { count: activeHealth.consecutiveFailures }) : '',
+              title: isFiniteNumber(activeHealth.consecutiveFailures) && activeHealth.consecutiveFailures > 0
+                ? bind(t, 'consecutiveFailures', { count: activeHealth.consecutiveFailures })
+                : '',
               style: Object.assign({}, S.badgeSoft, { color: healthColor(activeHealth.state) }),
             }, bind(t, healthTextKey(activeHealth.state))),
             h('span', {
@@ -2568,7 +2601,7 @@ window.__ModuleLoader__.load({
           credentialMessage !== undefined
             ? h('p', { key: 'why', style: S.hintWarn }, credentialMessage)
             : null,
-          activeHealth.lastErrorAt > 0 && activeHealth.state !== 'ok'
+          isFiniteNumber(activeHealth.lastErrorAt) && activeHealth.lastErrorAt > 0 && activeHealth.state !== 'ok'
             ? h('p', { key: 'last', style: S.hintWarn }, bind(t, 'lastErrorAt', { time: formatTime(activeHealth.lastErrorAt) }))
             : null,
           lastFailure !== undefined
@@ -2610,7 +2643,7 @@ window.__ModuleLoader__.load({
       }
       var accountItems = accountRows.map(function (account, index) {
         var snapshot = account.credits || { state: 'none' }
-        var cooling = typeof account.cooldownUntil === 'number' && account.cooldownUntil > Date.now()
+        var cooling = isFiniteNumber(account.cooldownUntil) && account.cooldownUntil > Date.now()
         var lastTest = account.lastTest
         var testKey = 'test:' + account.id
         var resetKey = 'reset:' + account.id
@@ -2648,7 +2681,7 @@ window.__ModuleLoader__.load({
               style: Object.assign({}, S.modelMeta, { color: lastTest.ok ? healthColor('ok') : healthColor('degraded') }),
               title: lastTest.error === undefined ? '' : String(lastTest.error),
             }, lastTest.ok
-              ? bind(t, 'testOk', { ms: String(lastTest.latencyMs || 0) + 'ms' })
+              ? bind(t, 'testOk', { ms: formatLatency(lastTest.latencyMs) })
               : bind(t, 'testFailed', { reason: shortErrorMessage(lastTest.error, t) }))
           : null,
         h('span', { style: S.modelMeta }, creditsText(snapshot)),
@@ -2748,8 +2781,8 @@ window.__ModuleLoader__.load({
       } else if (checkinResult === undefined) {
         checkinLabel = checkin.completedToday === true ? bind(t, 'checkinAutoDone') : bind(t, 'checkinNever')
       } else {
-        var claimedCount = typeof checkinResult.claimed === 'number' ? checkinResult.claimed : 0
-        var claimedCredit = typeof checkinResult.credit === 'number' ? checkinResult.credit : 0
+        var claimedCount = isFiniteNumber(checkinResult.claimed) ? checkinResult.claimed : 0
+        var claimedCredit = isFiniteNumber(checkinResult.credit) ? checkinResult.credit : 0
         var kinds = safeArray(checkinResult.outcomes).map(function (item) { return item.kind })
         if (claimedCount > 0) {
           checkinLabel = bind(t, 'checkinClaimed', { count: claimedCount, credit: claimedCredit })
@@ -2807,7 +2840,7 @@ window.__ModuleLoader__.load({
               h('span', { style: S.hintTiny }, bind(t, 'checkinAuto'))),
             h('span', { style: S[checkinTone], title: checkinFailureRaw !== '' ? checkinFailureRaw : '' }, checkinLabel),
             checkinFailed ? h('span', { style: S.hintTiny }, bind(t, 'checkinRetryHint')) : null,
-            checkin.lastRunAt > 0
+            isFiniteNumber(checkin.lastRunAt) && checkin.lastRunAt > 0
               ? h('span', { style: S.modelMeta }, bind(t, 'checkinLastAt', { time: formatTime(checkin.lastRunAt) }))
               : null),
           h('p', { key: 'checkinhint', style: S.hintTiny }, bind(t, 'checkinAutoHint')),
@@ -2894,8 +2927,8 @@ window.__ModuleLoader__.load({
 
       var creditsBody = []
       if (credits.state === 'ok') {
-        var creditsRatio = credits.unlimited === true || !(credits.total > 0)
-          || !Number.isFinite(credits.remain)
+        var creditsRatio = credits.unlimited === true || !isFiniteNumber(credits.total) || !(credits.total > 0)
+          || !isFiniteNumber(credits.remain)
           ? undefined
           : Math.max(0, Math.min(1, credits.remain / credits.total))
         creditsBody.push(
@@ -2911,7 +2944,7 @@ window.__ModuleLoader__.load({
                 opacity: credits.stale === true ? 0.65 : 1,
               },
             }, credits.unlimited === true ? '∞' : formatNumber(credits.remain)),
-            credits.total > 0
+            isFiniteNumber(credits.total) && credits.total > 0
               ? h('span', { style: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-secondary)' } },
                   '/ ' + formatNumber(credits.total) + ' ' + bind(t, 'creditsUnit'))
               : h('span', { style: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-secondary)' } }, bind(t, 'creditsUnit')),
@@ -2944,7 +2977,7 @@ window.__ModuleLoader__.load({
             })),
           )
         }
-        if (credits.resetAtMs > 0) {
+        if (isFiniteNumber(credits.resetAtMs) && credits.resetAtMs > 0) {
           creditsBody.push(h('p', { key: 'reset', style: S.hintTiny }, bind(t, 'creditsReset') + ' ' + formatTime(credits.resetAtMs)))
         }
         if (qoderFreePlan) {
@@ -2956,16 +2989,16 @@ window.__ModuleLoader__.load({
         if (trend !== null && typeof trend === 'object' && (trend.sampleCount > 0 || safeArray(trend.points).length > 1)) {
           var trendChips = []
           trendChips.push(h('span', { key: 'td', style: microChip() }, bind(t, 'trendToday', { value: formatNumber(trend.spentToday || 0) })))
-          if (trend.spent7d > 0) {
+          if (isFiniteNumber(trend.spent7d) && trend.spent7d > 0) {
             trendChips.push(h('span', { key: 'tw', style: microChip() }, bind(t, 'trendWeek', { value: formatNumber(trend.spent7d) })))
           }
-          if (trend.topupToday > 0) {
+          if (isFiniteNumber(trend.topupToday) && trend.topupToday > 0) {
             trendChips.push(h('span', { key: 'tu', style: microChip() }, bind(t, 'trendTopup', { value: formatNumber(trend.topupToday) })))
           }
-          if (typeof trend.burnPerHour === 'number' && trend.burnPerHour > 0) {
+          if (isFiniteNumber(trend.burnPerHour) && trend.burnPerHour > 0) {
             trendChips.push(h('span', { key: 'tr', style: microChip() }, bind(t, 'trendRate', { value: formatNumber(trend.burnPerHour) })))
           }
-          if (typeof trend.etaMs === 'number' && trend.etaMs > 0) {
+          if (isFiniteNumber(trend.etaMs) && trend.etaMs > 0) {
             trendChips.push(h('span', { key: 'te', style: microChip(creditsLow ? 'var(--dsh-rpc-warn, #9d5c00)' : undefined) }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) })))
           }
           creditsBody.push(
@@ -3023,12 +3056,12 @@ window.__ModuleLoader__.load({
               item.expired ? h('span', { style: S.badge }, bind(t, 'creditsExhausted')) : null,
               h('span', { style: S.grow }),
               h('span', { style: S.modelMeta }, formatNumber(item.remain) + ' / ' + formatNumber(item.total)),
-              h('span', { style: S.modelId }, item.endAtMs ? formatTime(item.endAtMs) : ''))
+              h('span', { style: S.modelId }, isFiniteNumber(item.endAtMs) && item.endAtMs > 0 ? formatTime(item.endAtMs) : ''))
             })),
           ),
         )
       }
-      if (credits.fetchedAt > 0) {
+      if (isFiniteNumber(credits.fetchedAt) && credits.fetchedAt > 0) {
         creditsBody.push(h('p', { key: 'at', style: S.hintTiny }, bind(t, 'creditsFetchedAt', { time: formatTime(credits.fetchedAt) })))
       }
 
@@ -3097,7 +3130,11 @@ window.__ModuleLoader__.load({
         usageBody.push(h('p', { key: 'off', style: S.hintTiny }, bind(t, 'usageDisabled')))
       } else {
         var rateOf = function (counters) {
-          return typeof counters.successRate === 'number' ? String(Math.round(counters.successRate * 100)) + '%' : '—'
+          var rate = counters.successRate
+          // 成功率是 0–1 的比例：非有限值、或有限但越界（含 1e308 * 100 溢出），
+          // 都不能拼成「NaN% / Infinity% / 12000%」。
+          if (!isFiniteNumber(rate) || rate < 0 || rate > 1) return '—'
+          return String(Math.round(rate * 100)) + '%'
         }
         /**
          * KPI 卡片底部的一行「标签 / 数值」。
@@ -3186,7 +3223,7 @@ window.__ModuleLoader__.load({
             bind(t, 'usageTokenShort') + ' ' + formatNumber(data.totalTokens || 0),
           )))
         }
-        var sessionPresent = typeof providerSession === 'object' && providerSession !== null && providerSession.requests > 0
+        var sessionPresent = typeof providerSession === 'object' && providerSession !== null && isFiniteNumber(providerSession.requests) && providerSession.requests > 0
         usageBody.push(
           h('div', {
             key: 'summary',
@@ -3219,7 +3256,7 @@ window.__ModuleLoader__.load({
               disabled: isBusy('stats'),
             }, isBusy('stats') ? bind(t, 'usageResetting') : bind(t, 'usageReset'))),
         )
-        if (statsDoc.since > 0) {
+        if (isFiniteNumber(statsDoc.since) && statsDoc.since > 0) {
           usageBody.push(h('p', { key: 'since', style: S.hintTiny }, bind(t, 'usageSince', { time: formatTime(statsDoc.since) })))
         }
 
@@ -3257,7 +3294,7 @@ window.__ModuleLoader__.load({
           }
           var maxDailyTokens = 1
           buckets.forEach(function (day) {
-            if (typeof day.totalTokens === 'number' && day.totalTokens > maxDailyTokens) maxDailyTokens = day.totalTokens
+            if (isFiniteNumber(day.totalTokens) && day.totalTokens > maxDailyTokens) maxDailyTokens = day.totalTokens
           })
           usageBody.push(
             h('div', { key: 'heat', style: { display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 2 } },
@@ -3267,7 +3304,7 @@ window.__ModuleLoader__.load({
                 h('span', { style: S.hintTiny }, '14d')),
               h('div', { style: { display: 'flex', alignItems: 'flex-end', gap: 3, height: 34, paddingTop: 2 } },
                 buckets.map(function (day) {
-                  var tokens = typeof day.totalTokens === 'number' ? day.totalTokens : 0
+                  var tokens = isFiniteNumber(day.totalTokens) ? day.totalTokens : 0
                   var height = tokens > 0 ? Math.max(4, Math.round((tokens / maxDailyTokens) * 28)) : 3
                   return h('div', {
                     key: 'd' + day.date,
@@ -3309,7 +3346,7 @@ window.__ModuleLoader__.load({
           Object.keys(statsDoc.models).forEach(function (key) {
             if (key.indexOf(active.provider + '::') !== 0) return
             var counters = statsDoc.models[key]
-            if (counters === null || typeof counters !== 'object' || !(counters.requests > 0)) return
+            if (counters === null || typeof counters !== 'object' || !isFiniteNumber(counters.requests) || !(counters.requests > 0)) return
             modelStats.push({ model: key.slice(active.provider.length + 2), counters: counters })
           })
         }
@@ -3370,7 +3407,7 @@ window.__ModuleLoader__.load({
               && counters.provider === active.provider
               && typeof counters.accountId === 'string'
               && typeof counters.model === 'string'
-              && counters.requests > 0
+              && isFiniteNumber(counters.requests) && counters.requests > 0
           })
         }
         var hasAllPairs = hasProviderPairs(accountModelAllSource)
@@ -3398,7 +3435,7 @@ window.__ModuleLoader__.load({
             // 快照里已经拆好三段（provider / accountId / model），不再自己拆键。
             if (counters.provider !== active.provider) return
             if (typeof counters.accountId !== 'string' || typeof counters.model !== 'string') return
-            if (!(counters.requests > 0)) return
+            if (!isFiniteNumber(counters.requests) || !(counters.requests > 0)) return
             accountModelCovered += counters.requests
             accountModelRows.push({
               accountId: counters.accountId,
@@ -3414,8 +3451,8 @@ window.__ModuleLoader__.load({
         }
         // 上方那张汇总表用的是同一个口径（今日 / 累计），直接拿来当分母。
         var accountModelTotal = effectiveAccountModelRange === 'all'
-          ? (typeof providerUsage.requests === 'number' ? providerUsage.requests : 0)
-          : (typeof usageToday.requests === 'number' ? usageToday.requests : 0)
+          ? (isFiniteNumber(providerUsage.requests) ? providerUsage.requests : 0)
+          : (isFiniteNumber(usageToday.requests) ? usageToday.requests : 0)
         var accountModelCoverage = accountModelRows.length > 0 && accountModelTotal > 0 && accountModelCovered < accountModelTotal
           ? bind(t, 'usageAccountModelCoverage', {
             covered: formatNumber(accountModelCovered),
@@ -3452,7 +3489,7 @@ window.__ModuleLoader__.load({
               if (test.ok === true) {
                 badge = h('span', {
                   style: S.badgeSoft,
-                  title: bind(t, 'testOk', { ms: String(test.latencyMs ?? 0) + 'ms' }),
+                  title: bind(t, 'testOk', { ms: formatLatency(test.latencyMs) }),
                 }, bind(t, 'modelTestOk'))
               } else if (limitCodes[test.code] === true) {
                 badge = h('span', {
@@ -3614,7 +3651,7 @@ window.__ModuleLoader__.load({
         h('div', { key: 'usage', style: S.section },
           h('div', { key: 'h', style: S.sectionHead },
             h('span', { style: S.sectionTitle }, bind(t, 'usage')),
-            h('span', { style: S.sectionCount }, String(usageToday.requests || 0))),
+            h('span', { style: S.sectionCount }, formatNumber(usageToday.requests || 0))),
           ...usageBody),
       )
 
@@ -3918,7 +3955,7 @@ window.__ModuleLoader__.load({
             h('button', { type: 'button', style: S.button, onClick: runProbeNow, disabled: isBusy('probe') || models.length === 0 },
               isBusy('probe') ? bind(t, 'probing') : bind(t, 'probe')),
             h('span', { style: S.modelMeta },
-              probe.lastRunAt > 0
+              isFiniteNumber(probe.lastRunAt) && probe.lastRunAt > 0
                 ? bind(t, 'probeLast', { time: formatTime(probe.lastRunAt) })
                 : bind(t, 'probeNever'))),
           h('p', { key: 'probehint', style: S.hintTiny }, bind(t, 'probeHint')),
@@ -4005,7 +4042,7 @@ window.__ModuleLoader__.load({
       if (eventDoc !== null && typeof eventDoc === 'object' && Array.isArray(eventDoc.items)) {
         var allEvents = eventDoc.items.filter(function (event) {
           return event !== null && typeof event === 'object'
-            && typeof event.at === 'number' && typeof event.type === 'string'
+            && isFiniteNumber(event.at) && typeof event.type === 'string'
         })
         var eventFilters = [
           { id: 'all', label: 'eventAll', count: allEvents.length },
@@ -4108,7 +4145,7 @@ window.__ModuleLoader__.load({
             h('p', { key: 'hint', style: S.hintTiny }, bind(t, 'eventHint')),
             // count 是历史总数、items 是宿主真实保留的条数：两者不同时明确告诉用户，
             // 避免「标题写 63、列表只有 50」看起来像丢事件。
-            typeof eventDoc.count === 'number' && eventDoc.count > allEvents.length
+            isFiniteNumber(eventDoc.count) && eventDoc.count > allEvents.length
               ? h('p', { key: 'retained', style: S.hintTiny }, bind(t, 'eventRetained', { count: allEvents.length }))
               : null,
             h('div', { key: 'filters', style: Object.assign({}, S.row, { flexWrap: 'wrap' }) }, eventFilters.map(eventFilterButton)),
@@ -4400,7 +4437,9 @@ window.__ModuleLoader__.load({
 
         var providers = safeArray(status && status.providers)
         var sidebarAlertSettings = (status && status.settings && status.settings.alerts) || {}
-        var sidebarAlertRatio = typeof sidebarAlertSettings.lowRatio === 'number' ? sidebarAlertSettings.lowRatio : LOW_CREDITS_RATIO
+        var sidebarAlertRatio = isFiniteNumber(sidebarAlertSettings.lowRatio) && sidebarAlertSettings.lowRatio > 0 && sidebarAlertSettings.lowRatio < 1
+          ? sidebarAlertSettings.lowRatio
+          : LOW_CREDITS_RATIO
         var sidebarAlertsEnabled = sidebarAlertSettings.enabled !== false
         var sidebarShowUsage = !(status && status.settings && status.settings.showUsageInSidebar === false)
         var rows = []
@@ -4693,7 +4732,7 @@ window.__ModuleLoader__.load({
         var latestFetched = 0
         var anyStale = false
         rows.forEach(function (row) {
-          if (typeof row.credits.fetchedAt === 'number' && row.credits.fetchedAt > latestFetched) latestFetched = row.credits.fetchedAt
+          if (isFiniteNumber(row.credits.fetchedAt) && row.credits.fetchedAt > latestFetched) latestFetched = row.credits.fetchedAt
           if (row.credits.stale === true) anyStale = true
         })
 
@@ -4735,7 +4774,7 @@ window.__ModuleLoader__.load({
             var warn = creditsWarning(snapshot, row.entry.provider, sidebarAlertRatio, sidebarAlertsEnabled)
             var alert = alertOfCredits(snapshot, sidebarAlertRatio, row.entry.provider, sidebarAlertsEnabled)
             var qoderFree = isQoderFreePlan(row.entry.provider, snapshot)
-            var exhausted = snapshot.state === 'ok' && (snapshot.exceeded === true || (typeof snapshot.remain === 'number' && snapshot.remain <= 0))
+            var exhausted = snapshot.state === 'ok' && (snapshot.exceeded === true || (isFiniteNumber(snapshot.remain) && snapshot.remain <= 0))
             var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
             var percent = creditsPercentOf(snapshot)
             var parts = creditsValueParts(snapshot, t)
@@ -4759,15 +4798,15 @@ window.__ModuleLoader__.load({
             if (snapshot.planName !== undefined && snapshot.planName !== '') meta.push(h('span', { key: 'plan', style: microChip() }, snapshot.planName))
             if (percent !== undefined) meta.push(h('span', { key: 'pct', style: microChip(warn ? 'var(--dsh-rpc-warn, #9d5c00)' : accent) }, bind(t, 'creditsPercent', { percent: percent })))
             if (activeAccount !== undefined && problem === undefined) meta.push(h('span', { key: 'acc', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bind(t, 'creditsCurrent', { label: activeAccount.label })))
-            if (snapshot.resetAtMs > 0) meta.push(h('span', { key: 'reset', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsResetShort', { date: formatShortDate(snapshot.resetAtMs) })))
-            if (sidebarShowUsage && todayUsage !== undefined && todayUsage.requests > 0) meta.push(h('span', { key: 'today', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsToday', { count: todayUsage.requests, tokens: formatNumber(todayUsage.totalTokens || 0) })))
+            if (isFiniteNumber(snapshot.resetAtMs) && snapshot.resetAtMs > 0) meta.push(h('span', { key: 'reset', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsResetShort', { date: formatShortDate(snapshot.resetAtMs) })))
+            if (sidebarShowUsage && todayUsage !== undefined && isFiniteNumber(todayUsage.requests) && todayUsage.requests > 0) meta.push(h('span', { key: 'today', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsToday', { count: formatNumber(todayUsage.requests), tokens: formatNumber(todayUsage.totalTokens || 0) })))
             if (snapshot.stale === true) meta.push(h('span', { key: 'cached', style: microChip() }, bind(t, 'creditsCached')))
             var trend = snapshot.trend
             var hasTrend = trend !== null && typeof trend === 'object' && trend.sampleCount > 0
             var trendLine = hasTrend
               ? h('div', { key: 'trend', style: { display: 'flex', alignItems: 'center', gap: 7, marginTop: 5, minWidth: 0 } },
                   h('span', { style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'trendToday', { value: formatNumber(trend.spentToday || 0) })),
-                  typeof trend.etaMs === 'number' && trend.etaMs > 0
+                  isFiniteNumber(trend.etaMs) && trend.etaMs > 0
                     ? h('span', { style: { fontSize: 10.5, color: warn ? 'var(--dsh-rpc-warn, #9d5c00)' : 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) }))
                     : null,
                   h('span', { style: { flex: '1 1 40px', minWidth: 24, display: 'flex', alignItems: 'center' } },

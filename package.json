@@ -1,6 +1,6 @@
 {
   "name": "dsh-reverse-proxy-connect",
-  "version": "2.6.1",
+  "version": "2.6.2",
   "description": "把 WorkBuddy（国内版 / 国际版）、Qoder（全球版 / 国内版）与 Trae（国内版 / 国际版）账号里的模型接入 DeepSeek Harness：多账号池、额度趋势与耗尽预测、429 自动换号、每日签到、图片输入、用量历史、事件账本与账号测试。Bring WorkBuddy, Qoder and Trae account models into DeepSeek Harness with multi-account failover, credit forecast, daily check-in, image input, usage history, an event journal and account tests.",
   "type": "module",
   "main": "lib/index.js",

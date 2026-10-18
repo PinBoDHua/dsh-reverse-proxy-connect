@@ -294,17 +294,27 @@ vm.createContext(sandbox)
 vm.runInContext(source, sandbox)
 
 const registered = []
+// 捕获真实 locale 表：新用例要断言插值后的数字（如「成功率 50%」），
+// 只返回 key 的假 t 会把 {percent} 之类直接吞掉。
+let realLocale
 const ctx = {
   slots: {
     register(options, component) { registered.push({ options, component }); return () => {} },
     inject(name, callback) { callback() },
     entries() { return [] },
   },
-  locale: { register: () => () => {}, bind: () => (key) => key },
+  locale: {
+    register: (namespace, value) => { realLocale = value; return () => {} },
+    // 保持原来的 key-only 行为：侧栏组件内部用 ctx.locale.bind，而不是 props.t。
+    // 新用例要真实插值文本时显式用 realT（只传给卡片）。
+    bind: () => (key) => key,
+  },
   effect: (fn) => { const d = fn(); return () => { if (typeof d === 'function') d() } },
   inject: (names, cb) => cb(ctx),
 }
 captured.apply(ctx)
+
+const realT = (key) => (realLocale && realLocale.zh && realLocale.zh[key] !== undefined ? realLocale.zh[key] : key)
 
 const card = registered.find((entry) => entry.options.name === 'plugin-settings.item')?.component
 const pill = registered.find((entry) => entry.options.name === 'sidebar.footer.action')?.component
@@ -383,6 +393,35 @@ function findAll(tree, predicate) {
     walk(node.children)
   })(tree)
   return out
+}
+
+/**
+ * 扫描整棵树里所有用户可见的数值出口：文本、title、aria-label、input value
+ * 与内联样式。任何 NaN / Infinity 都算可视化缺陷（上一轮 NaN% 的同类）。
+ */
+function badNumbersIn(tree) {
+  const bad = []
+  const check = (where, value) => {
+    const text = String(value)
+    if (/NaN|Infinity/.test(text)) bad.push(where + ': ' + text.slice(0, 160))
+  }
+  check('text', textOf(tree))
+  for (const node of findAll(tree, () => true)) {
+    const props = node.props ?? {}
+    for (const key of ['title', 'aria-label', 'value', 'placeholder']) {
+      if (props[key] !== undefined) check(key, props[key])
+    }
+    for (const [key, value] of Object.entries(props.style ?? {})) {
+      if (typeof value === 'number' && !Number.isFinite(value)) bad.push('style.' + key + ': ' + String(value))
+      else if (typeof value === 'string' && /NaN|Infinity/.test(value)) bad.push('style.' + key + ': ' + value)
+    }
+  }
+  return [...new Set(bad)]
+}
+
+function assertNoBadNumbers(tree, label) {
+  const bad = badNumbersIn(tree)
+  if (bad.length > 0) throw new Error(`${label} 仍渲染出非有限值：${bad.slice(0, 4).join(' | ')}`)
 }
 
 // ---------- 1. 设置卡片：版本号 + 各分组都在 ----------
@@ -1975,6 +2014,258 @@ try {
   if (creditsPercentOf({ state: 'ok', total: 0 }) !== undefined) throw new Error('total=0 应返回 undefined')
   if (creditsPercentOf({ state: 'ok', total: 100, remain: 25 }) !== 25) throw new Error('正常百分比被改坏')
   console.log('✓ creditsPercentOf 对缺省/非有限 remain 返回 undefined，不再产出 NaN%')
+}
+
+// ── 第五轮：有限但会溢出的数值 / 只判 typeof number 的可见出口 ─────────
+// 上一轮修的是「remain 缺省 → NaN%」。这一轮沿同一条线继续挖：
+//   A. 输入是有限数，但中间运算（*10 / *100）溢出成 Infinity；
+//   B. 守卫只写了 typeof === 'number'，NaN / Infinity 照样进模板或样式。
+
+/** 从 client.js 抽出顶层纯函数（内部不能依赖闭包里的其它函数）。 */
+function extractFn(header) {
+  const start = source.indexOf(header)
+  if (start < 0) throw new Error(`client.js 里找不到 ${header}`)
+  const name = header.slice('function '.length, header.indexOf('('))
+  let depth = 0
+  let end = start
+  for (let i = source.indexOf('{', start); i < source.length; i++) {
+    if (source[i] === '{') depth++
+    else if (source[i] === '}') { depth--; if (depth === 0) { end = i + 1; break } }
+  }
+  return new Function(`${source.slice(start, end)}; return ${name}`)()
+}
+
+// 31) 纯格式化函数：有限但极大（1e308）不能因中间乘法溢出成字面 Infinity。
+{
+  const formatNumber = extractFn('function formatNumber(value) {')
+  const formatWindow = extractFn('function formatWindow(tokens) {')
+  const ratioPercent = extractFn('function ratioPercent(ratio) {')
+  if (formatNumber(2388) !== '2,388') throw new Error('formatNumber 正常千分位被改坏：' + formatNumber(2388))
+  if (formatNumber(Number.NaN) !== '—' || formatNumber(Number.POSITIVE_INFINITY) !== '—') throw new Error('formatNumber 非有限值应回 —')
+  for (const huge of [1e308, Number.MAX_VALUE, -1e308]) {
+    const out = formatNumber(huge)
+    if (/Infinity/.test(out)) throw new Error(`formatNumber(${huge}) 仍输出 ${out}`)
+  }
+  if (formatWindow(256000) !== '256K' || formatWindow(1000000) !== '1M') throw new Error('formatWindow 正常缩写被改坏')
+  if (formatWindow(Number.NaN) !== '—' || formatWindow(Number.POSITIVE_INFINITY) !== '—' || formatWindow(0) !== '—') {
+    throw new Error('formatWindow 非有限/非正值应回 —')
+  }
+  if (ratioPercent(0.25) !== '25%') throw new Error('ratioPercent 正常值被改坏')
+  if (ratioPercent(1e308) !== '—' || ratioPercent(Number.NaN) !== '—' || ratioPercent(2) !== '—') {
+    throw new Error('ratioPercent 越界/非有限应回 —')
+  }
+  console.log('✓ 格式化函数：1e308 等有限大数不再溢出成 Infinity，非有限值统一回 —')
+}
+
+// 32) 成功率：NaN / Infinity / 1e308 都不能拼成「NaN% / Infinity%」。
+{
+  const usageSnapshot = STATUS.providers[0].usage
+  try {
+    STATUS.providers[0].usage = { ...usageSnapshot, successRate: 0.5 }
+    let tree = await mount(card, { t: realT })
+    if (!textOf(tree).includes('50%')) throw new Error('正常成功率 0.5 没有渲染成 50%')
+    assertNoBadNumbers(tree, 'successRate=0.5')
+    for (const rate of [Number.NaN, Number.POSITIVE_INFINITY, 1e308, -1]) {
+      STATUS.providers[0].usage = { ...usageSnapshot, successRate: rate }
+      tree = await mount(card, { t: realT })
+      assertNoBadNumbers(tree, `successRate=${String(rate)}`)
+    }
+    console.log('✓ 成功率对 NaN / Infinity / 1e308 一律回 —，不再出现 NaN% / Infinity%')
+  } finally {
+    STATUS.providers[0].usage = usageSnapshot
+  }
+}
+
+// 33) 汇总卡：modelCount 原始插值与模型 contextWindow 的非有限值。
+{
+  const modelsSnapshot = STATUS.providers[0].models
+  const modelCountSnapshot = STATUS.providers[0].modelCount
+  try {
+    const baseModel = modelsSnapshot[0]
+    STATUS.providers[0].models = [{ ...baseModel, contextWindow: Number.NaN }]
+    STATUS.providers[0].modelCount = Number.POSITIVE_INFINITY
+    let tree = await mount(card, { t: realT })
+    assertNoBadNumbers(tree, 'modelCount=Infinity / contextWindow=NaN')
+    if (textOf(tree).includes('Infinity 模型')) throw new Error('modelCount 非有限值仍被插值成「Infinity 模型」')
+    if (!textOf(tree).includes('1 模型')) throw new Error('modelCount 非有限时没有回落到模型数组长度')
+
+    STATUS.providers[0].models = [{ ...baseModel, contextWindow: Number.POSITIVE_INFINITY }]
+    STATUS.providers[0].modelCount = Number.NaN
+    tree = await mount(card, { t: realT })
+    assertNoBadNumbers(tree, 'modelCount=NaN / contextWindow=Infinity')
+    console.log('✓ 模型数量与上下文窗口对非有限值回 —/真实条数，不再渲染 NaN / InfinityM')
+  } finally {
+    STATUS.providers[0].models = modelsSnapshot
+    STATUS.providers[0].modelCount = modelCountSnapshot
+  }
+}
+
+// 34) 高级设置输入框：宿主给 NaN / Infinity / 有限大数时不能把坏数字灌进 value。
+{
+  const settingsSnapshot = STATUS.settings
+  try {
+    STATUS.settings = {
+      ...settingsSnapshot,
+      advanced: {
+        ...settingsSnapshot.advanced,
+        idleTimeoutMs: Number.NaN,
+        catalogRefreshMs: Number.POSITIVE_INFINITY,
+        creditsRefreshMs: Number.NaN,
+        qoderQueueWaitMs: Number.POSITIVE_INFINITY,
+      },
+      alerts: { ...settingsSnapshot.alerts, lowRatio: Number.NaN },
+      autoSwitch: { ...settingsSnapshot.autoSwitch, thresholdRatio: Number.POSITIVE_INFINITY },
+    }
+    const tree = await mount(card, { t: realT })
+    assertNoBadNumbers(tree, '高级设置非有限值')
+    const inputValue = (labelKey) => {
+      const input = find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === realT(labelKey))
+      if (input === undefined) throw new Error(`找不到输入框 ${labelKey}`)
+      return input.props.value
+    }
+    const expected = [['advancedIdle', '180'], ['advancedCatalog', '600'], ['advancedCredits', '120'], ['advancedAlert', '15'], ['advancedSwitch', '0'], ['advancedQueue', '60']]
+    for (const [key, value] of expected) {
+      if (inputValue(key) !== value) throw new Error(`${key} 应回默认 ${value}，实际 ${inputValue(key)}`)
+    }
+
+    // 有限但极大：lowRatio=1e308 的 *100 也会溢出，必须同样回默认。
+    STATUS.settings = {
+      ...settingsSnapshot,
+      alerts: { ...settingsSnapshot.alerts, lowRatio: 1e308 },
+      autoSwitch: { ...settingsSnapshot.autoSwitch, thresholdRatio: 1e308 },
+    }
+    const hugeTree = await mount(card, { t: realT })
+    assertNoBadNumbers(hugeTree, '高级设置 1e308')
+    const hugeValue = (labelKey) => {
+      const input = find(hugeTree, (node) => node.type === 'input' && node.props?.['aria-label'] === realT(labelKey))
+      return input?.props.value
+    }
+    if (hugeValue('advancedAlert') !== '15' || hugeValue('advancedSwitch') !== '0') {
+      throw new Error(`1e308 比例应回默认值，实际 alert=${hugeValue('advancedAlert')} switch=${hugeValue('advancedSwitch')}`)
+    }
+    console.log('✓ 高级设置对 NaN / Infinity / 1e308 的比例与毫秒值回默认，输入框不再出现 NaN/Infinity')
+  } finally {
+    STATUS.settings = settingsSnapshot
+  }
+}
+
+// 35) 签到：claimed / credit 原始插值，NaN / Infinity 不能进「+N 积分」。
+{
+  const checkinSnapshot = STATUS.providers[0].checkin
+  try {
+    STATUS.providers[0].checkin = {
+      enabled: true,
+      lastRunAt: 1792234000000,
+      result: { claimed: 1, credit: Number.NaN, outcomes: [] },
+    }
+    let tree = await mount(card, { t: realT })
+    assertNoBadNumbers(tree, 'checkin credit=NaN')
+    if (!textOf(tree).includes('1 个账号')) throw new Error('签到成功文案被改坏')
+
+    STATUS.providers[0].checkin = {
+      enabled: true,
+      lastRunAt: 1792234000000,
+      result: { claimed: Number.POSITIVE_INFINITY, credit: Number.POSITIVE_INFINITY, outcomes: [] },
+    }
+    tree = await mount(card, { t: realT })
+    assertNoBadNumbers(tree, 'checkin claimed/credit=Infinity')
+    console.log('✓ 签到次数/积分对 NaN / Infinity 不再插值成「Infinity 个账号 / +NaN 积分」')
+  } finally {
+    STATUS.providers[0].checkin = checkinSnapshot
+  }
+}
+
+// 36) 状态版本与连续失败次数：原始插值同样要过有限性。
+{
+  const versionSnapshot = STATUS.version
+  const healthSnapshot = STATUS.providers[0].health
+  try {
+    STATUS.version = Number.NaN
+    STATUS.providers[0].health = { ...healthSnapshot, consecutiveFailures: Number.POSITIVE_INFINITY }
+    const tree = await mount(card, { t: realT })
+    assertNoBadNumbers(tree, 'version=NaN / consecutiveFailures=Infinity')
+    const text = textOf(tree)
+    if (text.includes('vNaN') || text.includes('vInfinity')) throw new Error('状态版本仍插值出 vNaN / vInfinity')
+    if (!text.includes('宿主 v?')) throw new Error('非法版本号没有回落到 ?')
+    const badge = find(tree, (node) => node.type === 'span' && node.props?.title !== undefined && /连败/.test(node.props.title))
+    if (badge !== undefined) throw new Error('非有限连续失败次数仍生成「Infinity 连败」提示')
+    console.log('✓ 状态版本与连续失败次数对非有限值回 ?/空，不再渲染 vNaN / Infinity 连败')
+  } finally {
+    STATUS.version = versionSnapshot
+    STATUS.providers[0].health = healthSnapshot
+  }
+}
+
+// 37) 14 天柱状图：某个桶 totalTokens=Infinity 会让 height/opacity 变成 NaN。
+{
+  const providerDailySnapshot = STATUS.stats.providerDaily
+  try {
+    STATUS.stats.providerDaily = {
+      ...providerDailySnapshot,
+      workbuddy: [
+        { date: '2026-10-17', requests: 2, totalTokens: 50 },
+        { date: '2026-10-18', requests: 3, totalTokens: Number.POSITIVE_INFINITY },
+      ],
+    }
+    const tree = await mount(card, { t: realT })
+    assertNoBadNumbers(tree, 'daily totalTokens=Infinity')
+    console.log('✓ 日用量柱状图对 Infinity 不再产出 height:NaN / opacity:NaN')
+  } finally {
+    STATUS.stats.providerDaily = providerDailySnapshot
+  }
+}
+
+// 38) 额度总量：total=Infinity 不能触发 0% / 低额度，也不能让大数缩放出 Infinity；
+//     remain=1e308 这类有限大数同样不能经 formatNumber 的 *10 溢出。
+{
+  const creditsSnapshot = STATUS.providers[0].credits
+  try {
+    STATUS.providers[0].credits = { ...creditsSnapshot, remain: 2388, total: Number.POSITIVE_INFINITY }
+    let tree = await mount(card, { t: realT })
+    assertNoBadNumbers(tree, 'credits.total=Infinity')
+    if (textOf(tree).includes(realT('alertLow'))) throw new Error('total=Infinity 被误判成低额度')
+
+    STATUS.providers[0].credits = { ...creditsSnapshot, remain: 1e308, total: 6600 }
+    tree = await mount(card, { t: realT })
+    assertNoBadNumbers(tree, 'credits.remain=1e308')
+    if (!textOf(tree).includes('1e+308')) throw new Error('1e308 余额没有按科学计数法显示，可能仍溢出')
+
+    const pillTree = await mount(pill, { t: realT, wide: true })
+    assertNoBadNumbers(pillTree, 'pill credits.remain=1e308')
+    console.log('✓ 额度总量/余额对 Infinity 与 1e308 不再渲染 Infinity、不再误判低额度')
+  } finally {
+    STATUS.providers[0].credits = creditsSnapshot
+  }
+}
+
+// 39) 今日请求数 / 测试延迟 / 侧栏用量：原始数字插值统一兜底。
+{
+  const usageSnapshot = STATUS.providers[0].usage
+  const accountsSnapshot = STATUS.providers[0].accounts
+  try {
+    STATUS.providers[0].usage = { ...usageSnapshot, today: { ...usageSnapshot.today, requests: Number.POSITIVE_INFINITY } }
+    let tree = await mount(card, { t: realT })
+    assertNoBadNumbers(tree, 'usage.today.requests=Infinity')
+
+    const pillTree = await mount(pill, { t: realT, wide: true })
+    assertNoBadNumbers(pillTree, 'pill usage.today.requests=Infinity')
+
+    STATUS.providers[0].accounts = accountsSnapshot.map((account, index) => index === 0
+      ? { ...account, lastTest: { ok: true, latencyMs: Number.POSITIVE_INFINITY } }
+      : account)
+    tree = await mount(card, { t: realT })
+    assertNoBadNumbers(tree, 'lastTest.latencyMs=Infinity')
+
+    STATUS.providers[0].accounts = accountsSnapshot.map((account, index) => index === 0
+      ? { ...account, modelTests: { auto: { ok: true, latencyMs: Number.NaN } } }
+      : account)
+    tree = await mount(card, { t: realT })
+    assertNoBadNumbers(tree, 'modelTests.latencyMs=NaN')
+    console.log('✓ 今日请求数、测试延迟与侧栏用量对非有限值回 —，不再出现 Infinity 次 / NaNms')
+  } finally {
+    STATUS.providers[0].usage = usageSnapshot
+    STATUS.providers[0].accounts = accountsSnapshot
+  }
 }
 
 console.log('client-credits: OK')
