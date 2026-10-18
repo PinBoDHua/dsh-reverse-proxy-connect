@@ -752,21 +752,34 @@ if (!String(patCall.body).includes('"accounts"') || !String(patCall.body).includ
 }
 console.log('✓ 有账号池时 PAT 会写进当前账号')
 
-// ---------- 8b. 删除账号走 removedAccounts（避免旧列表覆盖新账号） ----------
+// ---------- 8b. 删除账号：两步确认，确认后才走 removedAccounts ----------
 const wbTab = findButton(cardTree, 'WorkBuddy')
 if (wbTab === undefined) throw new Error('找不到 WorkBuddy 标签')
 wbTab.props.onClick()
 cardTree = await render(card, { t: (key) => key })
 const removeButtons = findAll(cardTree, (node) => node.type === 'button' && textOf(node) === 'removeAccount')
 if (removeButtons.length !== 2) throw new Error(`应有 2 个删除按钮，实际 ${removeButtons.length}`)
-const beforeRemove = calls.length
+const removePosts = () => calls.filter((call) => call.method === 'POST' && String(call.url).includes('/settings')
+  && String(call.body).includes('removedAccounts')).length
+const beforeRemovePosts = removePosts()
 removeButtons[1].props.onClick()
+cardTree = await render(card, { t: (key) => key })
+if (removePosts() !== beforeRemovePosts) throw new Error('第一次点删除就发了 removedAccounts 请求，缺少二次确认')
+const confirmButtons = findAll(cardTree, (node) => node.type === 'button' && textOf(node) === 'removeConfirm')
+if (confirmButtons.length !== 1) throw new Error(`第一次点击后应只有 1 个按钮进入确认态，实际 ${confirmButtons.length}`)
+confirmButtons[0].props.onClick()
 await new Promise((resolve) => setTimeout(resolve, 10))
-const removeCall = calls[calls.length - 1]
-if (calls.length === beforeRemove || !String(removeCall.body).includes('removedAccounts') || !String(removeCall.body).includes('acc-2')) {
+const removeCall = calls.filter((call) => call.method === 'POST' && String(call.url).includes('/settings')
+  && String(call.body).includes('removedAccounts')).pop()
+if (removePosts() !== beforeRemovePosts + 1 || !String(removeCall.body).includes('acc-2')) {
   throw new Error(`删除账号应发 removedAccounts：${String(removeCall?.body).slice(0, 200)}`)
 }
-console.log('✓ 删除账号走 removedAccounts')
+console.log('✓ 删除账号两步确认：第一次不发请求，第二次才发 removedAccounts')
+// aria-label 带账号名（用支持 {name} 插值的 t 验证真实的 aria-label 文本）
+cardTree = await mount(card, { t: (key) => (key === 'removeAccountAria' ? '{name}' : key) })
+const namedRemoveButtons = findAll(cardTree, (node) => node.type === 'button' && node.props?.['aria-label'] !== undefined && node.props['aria-label'].indexOf('本机登录') !== -1)
+if (namedRemoveButtons.length === 0) throw new Error('删除按钮的 aria-label 没有带账号名')
+console.log('✓ 删除按钮 aria-label 带账号名，多账号不混淆')
 
 // ---------- 9. 侧栏小卡用轻量状态，不再拉整份模型清单 ----------
 if (!calls.some((call) => String(call.url).includes('?light=1'))) {
@@ -1787,6 +1800,126 @@ try {
   console.log('✓ 刷新成功后立即清掉上一次的失败提示')
 } finally {
   fetchFailure = null
+}
+
+// ── 2.5.0 UI 修复回归 ────────────────────────────────────────────
+// 24) 事件账本：计数统一 items.length；有历史总数时说明只保留最近 N 条；展开渲染全部。
+const eventsSnapshotR3 = STATUS.events
+try {
+  const baseEvents = eventsSnapshotR3.items
+  const manyEvents = Array.from({ length: 8 }, (_, i) => ({ ...baseEvents[i % baseEvents.length], id: 'ev-many-' + i, at: baseEvents[0].at - i * 60000 }))
+  STATUS.events = { ...eventsSnapshotR3, count: 63, items: manyEvents }
+  cardTree = await mount(card, { t: (key) => key })
+  const evText = textOf(cardTree)
+  if (!evText.includes('eventRetained')) throw new Error('有历史总数时没有提示只保留最近 N 条')
+  if (evText.includes('eventTitle | 63')) throw new Error('事件区块计数仍在用历史总数 63')
+  if (!evText.includes('eventTitle | 8')) throw new Error('事件区块计数没有用 items.length')
+  if (!findAll(cardTree, (n) => n.type === 'button' && textOf(n).includes('eventAll 8')).length) {
+    throw new Error('「全部」筛选计数没有用 items.length')
+  }
+  const expandEventBtn = findAll(cardTree, (n) => n.type === 'button' && textOf(n).includes('eventMore'))[0]
+  if (expandEventBtn === undefined) throw new Error('事件超过 6 条时没有展开按钮')
+  expandEventBtn.props.onClick()
+  cardTree = await render(card, { t: (key) => key })
+  const eventRows = findAll(cardTree, (n) => n.type === 'li'
+    && (n.children || []).some((c) => c && c.type === 'span' && typeof c.props?.title === 'string' && /^\d{4}\//.test(c.props.title)))
+  if (eventRows.length !== 8) throw new Error(`展开后应渲染全部 8 条，实际 ${eventRows.length}`)
+  if (textOf(cardTree).includes('eventMore')) throw new Error('展开后仍显示「展开全部」')
+  console.log('✓ 事件账本计数统一 items.length，展开渲染全部筛选结果')
+} finally {
+  STATUS.events = eventsSnapshotR3
+}
+
+// 25) 无额度端点：title 透出宿主 credits.error；error 态逻辑不变。
+const creditsNoneSnapshot = STATUS.providers[0].credits
+try {
+  STATUS.providers[0].credits = { state: 'none', error: 'Trae 国际版没有提供额度查询接口，额度请在 Trae 客户端里查看。' }
+  cardTree = await mount(card, { t: (key) => key })
+  const noneTitleSpans = findAll(cardTree, (n) => n.type === 'span'
+    && n.props?.style?.fontSize === 20
+    && typeof n.props?.title === 'string' && n.props.title.includes('creditsNone'))
+  if (noneTitleSpans.length === 0) throw new Error('state=none 的大数字没有 creditsNone title')
+  if (!String(noneTitleSpans[0].props.title).includes('没有提供额度查询接口')) {
+    throw new Error(`state=none 的 title 没有透出宿主原因：${noneTitleSpans[0].props.title}`)
+  }
+  STATUS.providers[0].credits = { state: 'error', error: 'HTTP 503' }
+  cardTree = await mount(card, { t: (key) => key })
+  const errTitleSpan = findAll(cardTree, (n) => n.type === 'span'
+    && n.props?.style?.fontSize === 20
+    && typeof n.props?.title === 'string' && n.props.title.includes('creditsUnreadable'))[0]
+  if (errTitleSpan === undefined || !String(errTitleSpan.props.title).includes('HTTP 503')) {
+    throw new Error('error 态的 creditsUnreadable + 上游错误逻辑被改坏')
+  }
+  console.log('✓ 无额度端点的「—」title 透出宿主原因，error 态保持原逻辑')
+} finally {
+  STATUS.providers[0].credits = creditsNoneSnapshot
+}
+
+// 26) 高级设置非法/空值：aria-invalid + 行内提示 + 禁用保存 + 不发请求。
+cardTree = await mount(card, { t: (key) => key })
+const advIdleInput = findAll(cardTree, (n) => n.type === 'input' && n.props?.['aria-label'] === 'advancedIdle')[0]
+if (advIdleInput === undefined) throw new Error('找不到 idle 超时输入框')
+advIdleInput.props.onChange({ target: { value: '5' } })
+// 跳过 effect 重跑：真实 React 里草稿 effect 不会因为我们输入而重跑，
+// 这个测试 harness 每轮都会执行 effect，会把草稿覆盖回服务端值。
+cardTree = await render(card, { t: (key) => key }, true)
+const invalidIdleInput = findAll(cardTree, (n) => n.type === 'input' && n.props?.['aria-label'] === 'advancedIdle')[0]
+if (invalidIdleInput.props['aria-invalid'] !== true) throw new Error('非法输入没有 aria-invalid')
+if (!textOf(cardTree).includes('advancedInvalid')) throw new Error('非法输入没有行内提示')
+const blockedSaveBtn = findButton(cardTree, 'advancedSave')
+if (blockedSaveBtn.props.disabled !== true) throw new Error('存在非法输入时保存按钮仍可点')
+const beforeInvalidSave = calls.filter((c) => c.method === 'POST' && String(c.url).includes('/settings')).length
+blockedSaveBtn.props.onClick()
+await new Promise((resolve) => setTimeout(resolve, 10))
+const afterInvalidSave = calls.filter((c) => c.method === 'POST' && String(c.url).includes('/settings')).length
+if (afterInvalidSave !== beforeInvalidSave) throw new Error('非法输入仍然发出了保存请求')
+const advCatalogInput = findAll(cardTree, (n) => n.type === 'input' && n.props?.['aria-label'] === 'advancedCatalog')[0]
+advCatalogInput.props.onChange({ target: { value: '' } })
+cardTree = await render(card, { t: (key) => key }, true)
+const emptyCatalogInput = findAll(cardTree, (n) => n.type === 'input' && n.props?.['aria-label'] === 'advancedCatalog')[0]
+if (emptyCatalogInput.props['aria-invalid'] !== true) throw new Error('空值没有 aria-invalid')
+console.log('✓ 高级设置非法/空值有 aria-invalid + 行内提示且禁用保存')
+
+// 27) 高级设置夹取提示：前端范围合法但宿主夹取时，提示最终保存值；「已保存」只在成功后出现。
+const advancedSnapshot = STATUS.settings.advanced
+try {
+  STATUS.settings.advanced = { ...advancedSnapshot, idleTimeoutMs: 180000 }
+  cardTree = await mount(card, { t: (key) => key })
+  const idleForClamp = findAll(cardTree, (n) => n.type === 'input' && n.props?.['aria-label'] === 'advancedIdle')[0]
+  idleForClamp.props.onChange({ target: { value: '300' } })
+  cardTree = await render(card, { t: (key) => key }, true)
+  const clampSaveBtn = findButton(cardTree, 'advancedSave')
+  if (clampSaveBtn.props.disabled === true) throw new Error('合法数值却禁用了保存')
+  clampSaveBtn.props.onClick()
+  cardTree = await render(card, { t: (key) => key }, true)
+  if (!textOf(cardTree).includes('advancedClamped')) throw new Error('宿主夹取后没有提示最终保存值')
+  if (!textOf(cardTree).includes('advancedSaved')) throw new Error('保存成功后没有「已保存」反馈')
+  console.log('✓ 宿主夹取时提示最终保存值，「已保存」只在成功回调后出现')
+} finally {
+  STATUS.settings.advanced = advancedSnapshot
+}
+
+// 28) 模型搜索：只命中不可用模型与完全无匹配两种空状态文案不同。
+const searchModelsSnapshot = STATUS.providers[0].models
+try {
+  const manyModels = Array.from({ length: 7 }, (_, i) => ({ id: 'm' + i, name: 'M' + i, contextWindow: 1000, maxTokens: 100, supportsImages: false, reasoningEfforts: [], credits: 'x1', disabled: false }))
+  manyModels.push({ id: 'ghost-model', name: 'Ghost', contextWindow: 1000, maxTokens: 100, supportsImages: false, reasoningEfforts: [], credits: 'x1', disabled: false, unavailable: true })
+  STATUS.providers[0].models = manyModels
+  cardTree = await mount(card, { t: (key) => key })
+  const modelSearchInput = findAll(cardTree, (n) => n.type === 'input' && n.props?.type === 'search')[0]
+  if (modelSearchInput === undefined) throw new Error('模型 >6 时没有搜索框')
+  modelSearchInput.props.onChange({ target: { value: 'ghost' } })
+  cardTree = await render(card, { t: (key) => key })
+  const onlyUnavailableText = textOf(cardTree)
+  if (!onlyUnavailableText.includes('searchOnlyUnavailable')) throw new Error('只命中不可用模型时没有专属文案')
+  if (onlyUnavailableText.includes('searchEmpty')) throw new Error('只命中不可用模型时仍显示「没有匹配的模型」')
+  const modelSearchInput2 = findAll(cardTree, (n) => n.type === 'input' && n.props?.type === 'search')[0]
+  modelSearchInput2.props.onChange({ target: { value: 'zzzz-nothing' } })
+  cardTree = await render(card, { t: (key) => key })
+  if (!textOf(cardTree).includes('searchEmpty')) throw new Error('完全没有匹配时没有显示原空状态')
+  console.log('✓ 搜索空状态区分「只命中不可用模型」与「完全没有匹配」')
+} finally {
+  STATUS.providers[0].models = searchModelsSnapshot
 }
 
 console.log('client-credits: OK')

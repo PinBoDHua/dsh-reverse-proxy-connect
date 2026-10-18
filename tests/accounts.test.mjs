@@ -7,6 +7,7 @@ import {
   isAccountUsable,
   isBelowThreshold,
   isExhausted,
+  isUnconfiguredCredential,
   mergeAccountSecrets,
   newAccountId,
   normalizeAccount,
@@ -229,4 +230,28 @@ test('normalizeAccount 丢弃非对象与超长标签', () => {
   assert.equal(normalizeAccount(QG, 'x', 0), undefined)
   const long = normalizeAccount(QG, { id: 'a', label: 'x'.repeat(80), pat: 'p' }, 0)
   assert.equal(long.label.length, 40)
+})
+
+test('凭证 reason 分类：只有静态未配置才算 unconfigured，瞬时失败必须重试', () => {
+  // 用户可见行为：没登录/没装 App 只提示「未配置」；临时读取失败不能被当成
+  // 未配置（否则当天签到被跳过、doctor 漏报真问题）。
+  for (const reason of ['no-credential', 'app-not-found', 'app-ambiguous', 'app-path-invalid', 'region-mismatch']) {
+    assert.equal(isUnconfiguredCredential(reason), true, `${reason} 应视为「未配置」`)
+  }
+  for (const reason of [
+    'credential-unreadable',
+    'credential-expired',
+    'pat-invalid',
+    'upstream-error',
+    'timeout',
+    'ABORTED',
+    'proxy-down',
+    undefined,
+    null,
+    '',
+    123,
+    {},
+  ]) {
+    assert.equal(isUnconfiguredCredential(reason), false, `${String(reason)} 不得视为「未配置」`)
+  }
 })

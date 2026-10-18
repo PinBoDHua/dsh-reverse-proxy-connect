@@ -338,6 +338,12 @@ window.__ModuleLoader__.load({
       eventEvents: '账本',
       eventTest: '账号测试',
       eventUnknown: '事件',
+      eventRetained: '仅保留最近 {count} 条，更早的事件已轮转。',
+      searchOnlyUnavailable: '没有可用的匹配模型；{count} 个「账号不支持」的模型匹配，可在下方勾选强制显示。',
+      advancedInvalid: '超出允许范围：{min}–{max}。',
+      advancedClamped: '已按宿主安全范围保存：{fields}。',
+      removeConfirm: '再次点击确认删除',
+      removeAccountAria: '删除账号 {name}',
       // 2.3.0：失败重试、a11y 与国际化补齐
       imagesShortOff: '无图',
       statusLoadFailed: '读取状态失败',
@@ -615,6 +621,12 @@ window.__ModuleLoader__.load({
       eventEvents: 'Journal',
       eventTest: 'Account test',
       eventUnknown: 'Event',
+      eventRetained: 'Only the latest {count} events are kept; older entries have rotated out.',
+      searchOnlyUnavailable: 'No available model matches; {count} model(s) not in this plan match — expand the list below to force-show one.',
+      advancedInvalid: 'Out of range: {min}–{max}.',
+      advancedClamped: 'Saved with host-safe values: {fields}.',
+      removeConfirm: 'Click again to confirm',
+      removeAccountAria: 'Remove account {name}',
       // 2.3.0: failure retry, a11y and i18n
       imagesShortOff: 'no img',
       statusLoadFailed: 'Failed to load status',
@@ -724,6 +736,30 @@ window.__ModuleLoader__.load({
 
     /** 低于这个比例就提前提醒，别等到真的见底。 */
     var LOW_CREDITS_RATIO = 0.15
+
+    /**
+     * 高级设置的前端校验区间，与 lib/settings.js 的 ADVANCED_LIMITS 对齐
+     * （毫秒换算成秒：idle 15-900、catalog 120-86400、credits 30-21600、
+     * queue 15-180；另外两个是百分数：预警 1-95、自动换号 0-50）。
+     * 后端保存时还会再夹一次，前端先校验是为了把「静默回退」变成行内提示。
+     */
+    var ADVANCED_LIMITS = {
+      idle: { min: 15, max: 900 },
+      catalog: { min: 120, max: 86400 },
+      credits: { min: 30, max: 21600 },
+      queue: { min: 15, max: 180 },
+      alert: { min: 1, max: 95 },
+      switchRatio: { min: 0, max: 50 },
+    }
+    /** 返回 'empty' / 'nan' / 'range' / ''（合法）。 */
+    function advancedInputError(value, limit) {
+      var text = String(value === undefined || value === null ? '' : value).trim()
+      if (text === '') return 'empty'
+      var parsed = Number(text)
+      if (!Number.isFinite(parsed)) return 'nan'
+      if (parsed < limit.min || parsed > limit.max) return 'range'
+      return ''
+    }
 
     /**
      * 这份额度是否该亮警示色。
@@ -1456,6 +1492,11 @@ window.__ModuleLoader__.load({
       var eventsExpandedState = useState(false)
       var eventsExpanded = eventsExpandedState[0]
       var setEventsExpanded = eventsExpandedState[1]
+      // 删除账号二次确认：第一次点击只进入确认态，3 秒后自动复原。
+      var deleteConfirmState = useState(undefined)
+      var deleteConfirm = deleteConfirmState[0]
+      var setDeleteConfirm = deleteConfirmState[1]
+      var deleteConfirmTimer = useRef(undefined)
       var accLabelState = useState('')
       var accLabel = accLabelState[0]
       var setAccLabel = accLabelState[1]
@@ -1481,6 +1522,10 @@ window.__ModuleLoader__.load({
       var advSavedState = useState(false)
       var advSaved = advSavedState[0]
       var setAdvSaved = advSavedState[1]
+      // 宿主夹取后的提示（例如「已按宿主安全范围保存：流空闲超时」）。
+      var advNoticeState = useState('')
+      var advNotice = advNoticeState[0]
+      var setAdvNotice = advNoticeState[1]
       // 1.1.0：两个比例阈值（预警 / 自动换号），以百分数展示。
       var advAlertState = useState('')
       var advAlert = advAlertState[0]
@@ -1948,9 +1993,26 @@ window.__ModuleLoader__.load({
           })
       }
 
-      /** 保存高级设置：秒 → 毫秒，非法输入交给宿主夹取。 */
+      /** 六个数字字段的校验结果：非法值不再静默回退到旧值。 */
+      var advancedFieldErrors = function () {
+        return {
+          idle: advancedInputError(advIdle, ADVANCED_LIMITS.idle),
+          catalog: advancedInputError(advCatalog, ADVANCED_LIMITS.catalog),
+          credits: advancedInputError(advCredits, ADVANCED_LIMITS.credits),
+          queue: advancedInputError(advQueue, ADVANCED_LIMITS.queue),
+          alert: advancedInputError(advAlert, ADVANCED_LIMITS.alert),
+          switchRatio: advancedInputError(advSwitch, ADVANCED_LIMITS.switchRatio),
+        }
+      }
+      var advancedSaveBlocked = function () {
+        var errors = advancedFieldErrors()
+        return Object.keys(errors).some(function (key) { return errors[key] !== '' })
+      }
+
+      /** 保存高级设置：秒 → 毫秒；先做与宿主一致的区间校验，再交给宿主夹取。 */
       var saveAdvanced = function () {
         if (status === undefined || busyNow('advanced')) return
+        if (advancedSaveBlocked()) return
         var toMs = function (value, fallback) {
           var parsed = Number(String(value).trim())
           if (!isFinite(parsed) || parsed <= 0) return fallback
@@ -1962,7 +2024,17 @@ window.__ModuleLoader__.load({
           if (!isFinite(parsed) || parsed < 0) return fallback
           return Math.max(0, Math.min(95, Math.round(parsed))) / 100
         }
+        var sent = {
+          idleTimeoutMs: toMs(advIdle, current.idleTimeoutMs || 180000),
+          catalogRefreshMs: toMs(advCatalog, current.catalogRefreshMs || 600000),
+          creditsRefreshMs: toMs(advCredits, current.creditsRefreshMs || 120000),
+          qoderQueueWaitMs: toMs(advQueue, current.qoderQueueWaitMs || 60000),
+          lowRatio: toPercent(advAlert, 0.15),
+          thresholdRatio: toPercent(advSwitch, 0),
+        }
         beginBusy('advanced')
+        setAdvSaved(false)
+        setAdvNotice('')
         postJson(SETTINGS_PATH, {
           advanced: {
             idleTimeoutMs: toMs(advIdle, current.idleTimeoutMs || 180000),
@@ -1988,10 +2060,25 @@ window.__ModuleLoader__.load({
             applyStatus(document)
             endBusy('advanced')
             setError(undefined)
+            // 只有真的保存成功才显示「已保存」。
             setAdvSaved(true)
             // 用服务端夹取后的值回填草稿：用户输入 9999 秒会被夹到 900 秒，
             // 不能继续显示 9999 却告诉用户「已保存」。
             var savedAdvanced = (document && document.settings && document.settings.advanced) || {}
+            var savedAlertsForClamp = document && document.settings && document.settings.alerts
+            var savedAutoForClamp = document && document.settings && document.settings.autoSwitch
+            // 宿主把越界值夹到安全区间时，明确告诉用户最终保存的是什么，而不是假装存了原值。
+            var clampLabels = []
+            if (typeof savedAdvanced.idleTimeoutMs === 'number' && savedAdvanced.idleTimeoutMs !== sent.idleTimeoutMs) clampLabels.push(bind(t, 'advancedIdle'))
+            if (typeof savedAdvanced.catalogRefreshMs === 'number' && savedAdvanced.catalogRefreshMs !== sent.catalogRefreshMs) clampLabels.push(bind(t, 'advancedCatalog'))
+            if (typeof savedAdvanced.creditsRefreshMs === 'number' && savedAdvanced.creditsRefreshMs !== sent.creditsRefreshMs) clampLabels.push(bind(t, 'advancedCredits'))
+            if (typeof savedAdvanced.qoderQueueWaitMs === 'number' && savedAdvanced.qoderQueueWaitMs !== sent.qoderQueueWaitMs) clampLabels.push(bind(t, 'advancedQueue'))
+            if (savedAlertsForClamp && typeof savedAlertsForClamp.lowRatio === 'number' && Math.abs(savedAlertsForClamp.lowRatio - sent.lowRatio) > 1e-9) clampLabels.push(bind(t, 'advancedAlert'))
+            if (savedAutoForClamp && typeof savedAutoForClamp.thresholdRatio === 'number' && Math.abs(savedAutoForClamp.thresholdRatio - sent.thresholdRatio) > 1e-9) clampLabels.push(bind(t, 'advancedSwitch'))
+            if (clampLabels.length > 0) {
+              setAdvNotice(bind(t, 'advancedClamped', { fields: clampLabels.join(bind(t, 'listSeparator')) }))
+              setTimeout(function () { setAdvNotice('') }, 6000)
+            }
             if (typeof savedAdvanced.idleTimeoutMs === 'number') setAdvIdle(String(Math.round(savedAdvanced.idleTimeoutMs / 1000)))
             if (typeof savedAdvanced.catalogRefreshMs === 'number') setAdvCatalog(String(Math.round(savedAdvanced.catalogRefreshMs / 1000)))
             if (typeof savedAdvanced.creditsRefreshMs === 'number') setAdvCredits(String(Math.round(savedAdvanced.creditsRefreshMs / 1000)))
@@ -2249,10 +2336,12 @@ window.__ModuleLoader__.load({
           ? credits.unlimited === true ? '∞' : freePlan ? bind(t, 'creditsFree') : compactNumber(credits.remain)
           : '—'
         // 大数字的完整说明：正常态给完整额度文案；读不到时说明原因（未读取 / 读取失败 + 上游错误）。
+        // state==='none' 也可能是「该 provider 没有额度接口」：宿主会把原因放进
+        // credits.error（如 Trae 国际版），这里必须透出，否则用户会反复刷新白等。
         var valueTitle = credits.state === 'ok'
           ? formatCreditsText(credits, t)
-          : credits.state === 'error' && typeof credits.error === 'string' && credits.error !== ''
-            ? bind(t, 'creditsUnreadable') + ': ' + credits.error
+          : typeof credits.error === 'string' && credits.error !== ''
+            ? bind(t, credits.state === 'error' ? 'creditsUnreadable' : 'creditsNone') + ': ' + credits.error
             : bind(t, credits.state === 'none' ? 'creditsNone' : 'creditsUnreadable')
         var metaParts = [String(entry.modelCount !== undefined ? entry.modelCount : safeArray(entry.models).length) + ' ' + bind(t, 'models')]
         if (today.requests > 0) metaParts.push(compactNumber(today.totalTokens || 0) + ' tok')
@@ -2509,6 +2598,19 @@ window.__ModuleLoader__.load({
       var loginWaiting = loginJob !== undefined && (loginJob.phase === 'waiting' || loginJob.phase === 'starting')
       // 登录等待中也要禁用「新增账号」：否则连点几次会起多个登录任务。
       var loginBusy = isBusy('login') || loginWaiting
+      // 删除确认态：只允许一个账号处于「再次点击确认删除」，3 秒后自动复原。
+      var clearDeleteConfirm = function () {
+        if (deleteConfirmTimer.current !== undefined) {
+          clearTimeout(deleteConfirmTimer.current)
+          deleteConfirmTimer.current = undefined
+        }
+        setDeleteConfirm(undefined)
+      }
+      var armDeleteConfirm = function (accountId) {
+        clearDeleteConfirm()
+        setDeleteConfirm(accountId)
+        deleteConfirmTimer.current = setTimeout(function () { clearDeleteConfirm() }, 3000)
+      }
       var accountItems = accountRows.map(function (account, index) {
         var snapshot = account.credits || { state: 'none' }
         var cooling = typeof account.cooldownUntil === 'number' && account.cooldownUntil > Date.now()
@@ -2583,9 +2685,19 @@ window.__ModuleLoader__.load({
         accountRows.length > 1
           ? h('button', {
               type: 'button',
-              style: S.buttonGhost,
+              style: Object.assign({}, S.buttonGhost, deleteConfirm === account.id
+                ? { color: 'var(--dsw-alias-state-error-primary, #b3261e)', borderColor: 'var(--dsw-alias-state-error-primary, #b3261e)' }
+                : {}),
               disabled: isBusy('save'),
+              // 多账号时多个按钮都叫「删除」，用 aria-label/title 带上账号名，读屏与悬停都不混淆。
+              'aria-label': bind(t, 'removeAccountAria', { name: account.label }),
+              title: bind(t, 'removeAccountAria', { name: account.label }),
               onClick: function () {
+                if (deleteConfirm !== account.id) {
+                  armDeleteConfirm(account.id)
+                  return
+                }
+                clearDeleteConfirm()
                 // 删除用显式 id，而不是回传一个「少了这一条」的列表：
                 // 列表可能是轮询前的旧快照，整表覆盖会把刚登录的账号一起冲掉。
                 var remaining = accountRows.filter(function (row) { return row.id !== account.id })
@@ -2597,7 +2709,7 @@ window.__ModuleLoader__.load({
                 }
                 mutate(patch)
               },
-            }, bind(t, 'removeAccount'))
+            }, deleteConfirm === account.id ? bind(t, 'removeConfirm') : bind(t, 'removeAccount'))
           : null)
       })
 
@@ -3601,6 +3713,11 @@ window.__ModuleLoader__.load({
       //
       // 默认折叠：这些都是「装好就不用再碰」的参数，但必须给一个入口 ——
       // 旧版本把它们写死在代码里，用户遇到长回答被切断时只能改源码。
+      var advErrors = advancedFieldErrors()
+      var advErrorText = function (key) {
+        var limit = ADVANCED_LIMITS[key]
+        return bind(t, 'advancedInvalid', { min: limit.min, max: limit.max })
+      }
       sections.push(
         h('div', { key: 'advanced', style: S.section },
           h('details', {},
@@ -3614,12 +3731,16 @@ window.__ModuleLoader__.load({
                 style: S.input,
                 type: 'number',
                 'aria-label': bind(t, 'advancedIdle'),
+                'aria-invalid': advErrors.idle !== '' ? true : undefined,
                 min: 15,
                 max: 900,
                 value: advIdle,
                 onChange: function (event) { setAdvIdle(event.target.value) },
               }),
-              h('span', { style: S.hintTiny }, bind(t, 'advancedIdleHint'))),
+              h('span', { style: S.hintTiny }, bind(t, 'advancedIdleHint')),
+              advErrors.idle !== ''
+                ? h('span', { key: 'idle-err', role: 'alert', style: S.hintWarn }, advErrorText('idle'))
+                : null),
             h('div', { key: 'intervals', style: S.row },
               h('div', { style: Object.assign({}, S.field, { flex: '1 1 140px' }) },
                 h('span', { style: S.label }, bind(t, 'advancedCatalog')),
@@ -3627,22 +3748,30 @@ window.__ModuleLoader__.load({
                   style: S.input,
                   type: 'number',
                   'aria-label': bind(t, 'advancedCatalog'),
+                  'aria-invalid': advErrors.catalog !== '' ? true : undefined,
                   min: 120,
                   max: 86400,
                   value: advCatalog,
                   onChange: function (event) { setAdvCatalog(event.target.value) },
-                })),
+                }),
+                advErrors.catalog !== ''
+                  ? h('span', { key: 'catalog-err', role: 'alert', style: S.hintWarn }, advErrorText('catalog'))
+                  : null),
               h('div', { style: Object.assign({}, S.field, { flex: '1 1 140px' }) },
                 h('span', { style: S.label }, bind(t, 'advancedCredits')),
                 h('input', {
                   style: S.input,
                   type: 'number',
                   'aria-label': bind(t, 'advancedCredits'),
+                  'aria-invalid': advErrors.credits !== '' ? true : undefined,
                   min: 30,
                   max: 21600,
                   value: advCredits,
                   onChange: function (event) { setAdvCredits(event.target.value) },
-                }))),
+                }),
+                advErrors.credits !== ''
+                  ? h('span', { key: 'credits-err', role: 'alert', style: S.hintWarn }, advErrorText('credits'))
+                  : null)),
             h('div', { key: 'thresholds', style: S.row },
               h('div', { style: Object.assign({}, S.field, { flex: '1 1 140px' }) },
                 h('span', { style: S.label }, bind(t, 'advancedAlert')),
@@ -3650,36 +3779,48 @@ window.__ModuleLoader__.load({
                   style: S.input,
                   type: 'number',
                   'aria-label': bind(t, 'advancedAlert'),
+                  'aria-invalid': advErrors.alert !== '' ? true : undefined,
                   min: 1,
                   max: 95,
                   value: advAlert,
                   onChange: function (event) { setAdvAlert(event.target.value) },
                 }),
-                h('span', { style: S.hintTiny }, bind(t, 'advancedAlertHint'))),
+                h('span', { style: S.hintTiny }, bind(t, 'advancedAlertHint')),
+                advErrors.alert !== ''
+                  ? h('span', { key: 'alert-err', role: 'alert', style: S.hintWarn }, advErrorText('alert'))
+                  : null),
               h('div', { style: Object.assign({}, S.field, { flex: '1 1 140px' }) },
                 h('span', { style: S.label }, bind(t, 'advancedSwitch')),
                 h('input', {
                   style: S.input,
                   type: 'number',
                   'aria-label': bind(t, 'advancedSwitch'),
+                  'aria-invalid': advErrors.switchRatio !== '' ? true : undefined,
                   min: 0,
                   max: 50,
                   value: advSwitch,
                   onChange: function (event) { setAdvSwitch(event.target.value) },
                 }),
-                h('span', { style: S.hintTiny }, bind(t, 'advancedSwitchHint')))),
+                h('span', { style: S.hintTiny }, bind(t, 'advancedSwitchHint')),
+                advErrors.switchRatio !== ''
+                  ? h('span', { key: 'switch-err', role: 'alert', style: S.hintWarn }, advErrorText('switchRatio'))
+                  : null)),
             h('div', { key: 'queue', style: S.field },
               h('span', { style: S.label }, bind(t, 'advancedQueue')),
               h('input', {
                 style: S.input,
                 type: 'number',
                 'aria-label': bind(t, 'advancedQueue'),
+                'aria-invalid': advErrors.queue !== '' ? true : undefined,
                 min: 15,
                 max: 180,
                 value: advQueue,
                 onChange: function (event) { setAdvQueue(event.target.value) },
               }),
-              h('span', { style: S.hintTiny }, bind(t, 'advancedQueueHint'))),
+              h('span', { style: S.hintTiny }, bind(t, 'advancedQueueHint')),
+              advErrors.queue !== ''
+                ? h('span', { key: 'queue-err', role: 'alert', style: S.hintWarn }, advErrorText('queue'))
+                : null),
             h('label', { key: 'stats', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
               h('input', {
                 type: 'checkbox',
@@ -3712,10 +3853,12 @@ window.__ModuleLoader__.load({
               h('button', {
                 type: 'button',
                 style: S.button,
-                disabled: isBusy('advanced'),
+                // 有非法字段时直接禁用保存：宁可让用户先改对，也不要静默回退旧值。
+                disabled: isBusy('advanced') || advancedSaveBlocked(),
                 onClick: saveAdvanced,
               }, isBusy('advanced') ? bind(t, 'saving') : bind(t, 'advancedSave')),
-              advSaved ? h('span', { style: S.hintTiny }, bind(t, 'advancedSaved')) : null)),
+              advSaved ? h('span', { style: S.hintTiny }, bind(t, 'advancedSaved')) : null,
+              advNotice !== '' ? h('span', { role: 'status', style: S.hintWarn }, advNotice) : null)),
         ),
       )
 
@@ -3737,6 +3880,9 @@ window.__ModuleLoader__.load({
         return name.toLowerCase().indexOf(query) !== -1 || id.toLowerCase().indexOf(query) !== -1
       }
       var shown = available.filter(matches)
+      // 搜索词可能只命中「账号不支持」的模型：这时不能说「没有匹配」，否则和下方
+      // 不可用列表自相矛盾。分开统计，给不同的空状态文案。
+      var unavailableMatches = query === '' ? [] : unavailable.filter(matches)
 
       var modelMetaText = function (model) {
         var parts = [formatWindow(model.contextWindow)]
@@ -3781,7 +3927,9 @@ window.__ModuleLoader__.load({
           models.length === 0
             ? h('p', { key: 'nomodels', style: S.hint }, bind(t, 'noModels'))
             : shown.length === 0
-              ? h('p', { key: 'nomatch', style: S.hint }, bind(t, 'searchEmpty'))
+              ? (unavailableMatches.length > 0
+                  ? h('p', { key: 'nomatch-unavailable', style: S.hintWarn }, bind(t, 'searchOnlyUnavailable', { count: unavailableMatches.length }))
+                  : h('p', { key: 'nomatch', style: S.hint }, bind(t, 'searchEmpty')))
               : h('ul', { key: 'list', style: S.modelList },
                 shown.map(function (model, index) {
                   return h('li', {
@@ -3874,7 +4022,9 @@ window.__ModuleLoader__.load({
           return true
         }
         var filteredEvents = allEvents.filter(matchesEventFilter)
-        var visibleEvents = filteredEvents.slice(0, eventsExpanded === true ? 30 : 6)
+        // 展开即渲染全部筛选结果：宿主已把 items 截到 events.limit（默认 50），
+        // 不再用 30 这种「看起来是全部、其实不是」的隐性上限。
+        var visibleEvents = eventsExpanded === true ? filteredEvents : filteredEvents.slice(0, 6)
         var eventFilterButton = function (filter) {
           var selected = eventFilter === filter.id
           return h('button', {
@@ -3947,7 +4097,7 @@ window.__ModuleLoader__.load({
           h('div', { key: 'events', style: S.section },
             h('div', { key: 'h', style: S.sectionHead },
               h('span', { style: S.sectionTitle }, bind(t, 'eventTitle')),
-              h('span', { style: S.sectionCount }, String(typeof eventDoc.count === 'number' ? eventDoc.count : allEvents.length)),
+              h('span', { style: S.sectionCount }, String(allEvents.length)),
               h('span', { style: S.grow }),
               allEvents.length === 0
                 ? null
@@ -3958,6 +4108,11 @@ window.__ModuleLoader__.load({
                     onClick: clearEvents,
                   }, bind(t, 'eventClear'))),
             h('p', { key: 'hint', style: S.hintTiny }, bind(t, 'eventHint')),
+            // count 是历史总数、items 是宿主真实保留的条数：两者不同时明确告诉用户，
+            // 避免「标题写 63、列表只有 50」看起来像丢事件。
+            typeof eventDoc.count === 'number' && eventDoc.count > allEvents.length
+              ? h('p', { key: 'retained', style: S.hintTiny }, bind(t, 'eventRetained', { count: allEvents.length }))
+              : null,
             h('div', { key: 'filters', style: Object.assign({}, S.row, { flexWrap: 'wrap' }) }, eventFilters.map(eventFilterButton)),
             allEvents.length === 0
               ? h('p', { key: 'empty', style: S.hint }, bind(t, 'eventEmpty'))

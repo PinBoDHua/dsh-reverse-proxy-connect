@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { interpretCheckinStatus, interpretClaim } from '../lib/checkin.js'
-import { checkinTerminal } from '../lib/checkin-schedule.js'
+import { checkinDue, checkinTerminal } from '../lib/checkin-schedule.js'
 import { EventLog } from '../lib/events.js'
 import { Runtime } from '../lib/runtime.js'
 import { defaults } from '../lib/settings.js'
@@ -124,6 +124,46 @@ test('签到降噪：未配置登录的账号记 unconfigured（info、不算失
     globalThis.fetch = originalFetch
     if (savedCnToken !== undefined) process.env.QODER_CN_PERSONAL_ACCESS_TOKEN = savedCnToken
     if (savedGlobalToken !== undefined) process.env.QODER_PERSONAL_ACCESS_TOKEN = savedGlobalToken
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('签到回归：瞬时凭证读取失败记为 failed（保留 10 分钟重试），不能变成 unconfigured', async () => {
+  // 用户可见行为：网络抖动/登录文件被占用时，当天签到不能被标成「已完成」而
+  // 直接跳过 —— 必须记 failed，10 分钟后自动重试，不能漏掉当天奖励。
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-checkin-transient-'))
+  const originalFetch = globalThis.fetch
+  const events = new EventLog({})
+  const settings = defaults()
+  settings.accounts.qoder = [{ id: 'a', label: 'PAT 账号', enabled: true, pat: 'pt-real' }]
+  settings.activeAccount.qoder = 'a'
+  const runtime = new Runtime({ settings: () => settings, dataDir: dir, logger: {}, events })
+  globalThis.fetch = async () => {
+    throw Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } })
+  }
+  try {
+    const outcome = await runtime.runCheckin('qoder')
+    const accountOutcome = outcome.outcomes[0]
+    assert.equal(accountOutcome.kind, 'failed', '瞬时读取失败必须是 failed，不能是 unconfigured')
+    assert.match(accountOutcome.message, /fetch failed/)
+
+    const checkinEvent = events.list({ type: 'checkin' })[0]
+    assert.equal(checkinEvent.level, 'warn', '真失败仍要 warn，不能被降噪吞掉')
+
+    // 复刻 lib/index.js 的终态判定：failed 不是终态 → 不写 completedOn。
+    const settled = outcome.outcomes.filter((item) => item.kind !== 'unconfigured')
+    assert.equal(checkinTerminal({ ...outcome, outcomes: settled }), false, 'failed 不能算今天已结束')
+
+    // 按 failed 写入（completedOn 为空）后，11 分钟时应允许重试。
+    const now = Date.now()
+    assert.equal(
+      checkinDue({ enabled: true, completedOn: {}, lastAttemptAt: { qoder: now } }, 'qoder', now + 11 * 60_000, ['a']),
+      true,
+      '瞬时失败后 11 分钟必须重试，不能整天跳过',
+    )
+  } finally {
+    runtime.flushCaches()
+    globalThis.fetch = originalFetch
     rmSync(dir, { recursive: true, force: true })
   }
 })

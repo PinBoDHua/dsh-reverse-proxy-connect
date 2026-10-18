@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { SettingsStore, defaults } from '../lib/settings.js'
-import { applyLoginAccount } from '../lib/accounts.js'
+import { applyCredentialRefresh, applyLoginAccount } from '../lib/accounts.js'
 
 /** 临时目录。 */
 function tempDir() {
@@ -253,6 +253,54 @@ test('设置读盘：坏文件备份失败时拒绝写盘（原文件是唯一�
     } finally {
       globalThis.Date = RealDate
     }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('CLI 续期写回：按 id 局部 upsert，不覆盖等待期外部新增的账号与别的账号令牌', () => {
+  // 用户可见行为：CLI 命令续期后令牌必须落盘（否则宿主之后续期失败要重新登录），
+  // 但也不能把 CLI 启动时的旧快照整表写回、冲掉并发新增的账号。
+  const dir = tempDir()
+  try {
+    const file = join(dir, 'settings.json')
+    const token = (accessToken, refreshToken) => ({
+      accessToken,
+      refreshToken,
+      expiresAtMs: Date.now() + 3600_000,
+      refreshExpiresAtMs: 0,
+      domain: 'codebuddy.cn',
+      uid: 'uid-a',
+      enterpriseId: '',
+    })
+    const base = defaults()
+    base.accounts.workbuddy = [{ id: 'acc-old', label: '旧账号', enabled: true, token: token('TOKEN-OLD', 'R1') }]
+    base.activeAccount.workbuddy = 'acc-old'
+    new SettingsStore(file).patch(base)
+
+    const cli = new SettingsStore(file) // CLI 命令启动时的快照（之后可能变旧）
+    const host = new SettingsStore(file)
+    // 等待期宿主：别的账号续期 + 新增一个账号。
+    host.patch({
+      accounts: {
+        workbuddy: [
+          { id: 'acc-old', label: '旧账号', enabled: true, token: token('TOKEN-HOST-REFRESHED', 'R2') },
+          { id: 'acc-host-new', label: '等待期新增', enabled: true, token: token('TOKEN-HOST-NEW', 'R3') },
+        ],
+      },
+    })
+
+    // CLI 刷新拿到新 token，走与 bin.js makeRuntime 相同的写回入口。
+    assert.equal(applyCredentialRefresh(cli, 'workbuddy', 'acc-old', token('TOKEN-CLI-REFRESHED', 'R4')), true)
+    const saved = JSON.parse(readFileSync(file, 'utf8'))
+    const rows = saved.accounts.workbuddy
+    assert.ok(rows.some((row) => row.id === 'acc-host-new'), '等待期新增的账号必须保留')
+    assert.equal(rows.find((row) => row.id === 'acc-old').token.accessToken, 'TOKEN-CLI-REFRESHED', 'CLI 续期令牌必须写回')
+    assert.equal(rows.find((row) => row.id === 'acc-old').token.refreshToken, 'R4')
+
+    // 已经删掉的账号不能被续期结果「复活」。
+    assert.equal(applyCredentialRefresh(cli, 'workbuddy', 'ghost', token('X', 'Y')), false)
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).accounts.workbuddy.some((row) => row.id === 'ghost'), false)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
