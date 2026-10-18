@@ -4,6 +4,13 @@
 **Trae**（国内版 / 国际版）账号里的模型接进 **DeepSeek Harness**。
 一个插件、六个 provider、一张设置卡片、一套账号池。
 
+> **2.6.0 第三轮审计：时间输出确定化 + 无效值兜底**：卡片与 CLI/诊断以前到处用
+> `toLocaleString()`——它对无效/超范围时间戳不报错而是返回英文 "Invalid Date"
+> （`try/catch` 形同虚设），`formatShortDate` 还会拼出「NaN/NaN/NaN」，而且
+> 时间格式随机器 locale 变。现在统一到 `lib/format.js` 的定宽 `formatDateTime` /
+> `formatClock` / `formatDateOnly`，无效一律回 `—`，浏览器半边逐字校验一致。
+> 测试 279 后端 + 70 前端。
+>
 > **2.5.0 第二轮审计修复**：后端 5 条（签到瞬时失败回归、CLI 续期令牌写回、
 > `doctor` 不再误报可选 provider、目录缓存未来版本只读、CLI 未知 provider 退出码）
 > + 前端 5 条（事件账本计数与「展开全部」、无额度端点原因透出、高级设置非法输入
@@ -83,6 +90,34 @@
 | `trae-global` | Trae Global | 本机 `storage.json`（同上，国际版目录） | 视账号 |
 
 ---
+
+## 2.6.0 第三轮审计：时间与时长输出确定化
+
+第三轮前后端只读审计。前两轮 10 条已全部闭环，本轮聚焦「格式化边界」：
+时长从 1.x 起就要求「非法输入不产出 NaN / Infinity」，但日期这一侧长期直接
+走 `toLocaleString()`，两个问题：无效/超范围时间戳渲染出英文 "Invalid Date" /「NaN/NaN/NaN」，以及输出随机器 locale 变。
+
+### 前端
+
+- **无效 / 超范围时间戳不再渲染成 "Invalid Date" / "NaN/NaN/NaN"**：
+  `formatTime` / `formatShortTime` / `formatShortDate` 改为非有限数、超出 Date 可
+  表示范围一律回 `—`（`toLocaleString` 对无效日期不抛异常，原来的 `try/catch`
+  拦不住）。中文卡面不再因为一个坏时间戳冒出一串英文。
+
+### 后端 + 跨端
+
+- **时间与时长输出确定化**：新增 `lib/format.js` 的 `formatDateTime` /
+  `formatClock` / `formatDateOnly`（本机时区、零填充、定宽）；`bin.js` 的
+  额度到期 / 统计起点 / 最近请求 / 事件账本与 `diagnostics.js` 的冷却时刻 /
+  事件时间都改走这套规则，跨机器粘贴的诊断不再因 locale 对不齐。
+- **两边逐字一致**：浏览器半边不能 import，`client.js` 的 `formatTime` 手抄
+  同一规则，由 `tests/credits-state.test.mjs` 对所有样本逐字比对
+  `formatDateTime`（lib）与 `formatTime`（client）。
+
+### 测试
+
+- `node --test tests/*.test.mjs`：**279 条**全部通过（新增 2 条）；
+- `node tests/client-credits.mjs`：**70 项**通过（新增 1 项：短时间的无效兜底）。
 
 ## 2.5.0 第二轮审计修复
 

@@ -1356,40 +1356,36 @@ window.__ModuleLoader__.load({
     }
 
     function formatTime(ms) {
-      if (ms === undefined || ms === null || ms === 0) return '—'
-      try {
-        return new Date(ms).toLocaleString()
-      } catch (_) {
-        return String(ms)
-      }
+      if (typeof ms !== 'number' || !Number.isFinite(ms)) return '—'
+      var date = new Date(ms)
+      if (!Number.isFinite(date.getTime())) return '—'
+      var pad = function (value) { return String(value).padStart(2, '0') }
+      return String(date.getFullYear()) + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate()) +
+        ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds())
     }
 
-    /** 表格里的紧凑时间：今天只显示时分秒，跨天再带日期。 */
+    /** 表格里的紧凑时间：今天只显示时分秒，跨天再带日期。无效返回 `—`。 */
     function formatShortTime(ms) {
-      if (ms === undefined || ms === null || ms === 0) return '—'
-      try {
-        var date = new Date(ms)
-        var now = new Date()
-        var sameDay = date.getFullYear() === now.getFullYear()
-          && date.getMonth() === now.getMonth()
-          && date.getDate() === now.getDate()
-        return sameDay ? date.toLocaleTimeString() : date.toLocaleString()
-      } catch (_) {
-        return String(ms)
-      }
+      if (typeof ms !== 'number' || !Number.isFinite(ms)) return '—'
+      var date = new Date(ms)
+      if (!Number.isFinite(date.getTime())) return '—'
+      var now = new Date()
+      var sameDay = date.getFullYear() === now.getFullYear()
+        && date.getMonth() === now.getMonth()
+        && date.getDate() === now.getDate()
+      if (!sameDay) return formatTime(ms)
+      var pad = function (value) { return String(value).padStart(2, '0') }
+      return pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds())
     }
 
-    /** 侧栏面板用的短日期：同一年只显示 M/D。 */
+    /** 侧栏面板用的短日期：同一年只显示 M/D。无效返回 `—`（不再产出 NaN/NaN/NaN）。 */
     function formatShortDate(ms) {
-      if (ms === undefined || ms === null || ms === 0) return '—'
-      try {
-        var date = new Date(ms)
-        var now = new Date()
-        var prefix = date.getFullYear() === now.getFullYear() ? '' : String(date.getFullYear()) + '/'
-        return prefix + String(date.getMonth() + 1) + '/' + String(date.getDate())
-      } catch (_) {
-        return '—'
-      }
+      if (typeof ms !== 'number' || !Number.isFinite(ms)) return '—'
+      var date = new Date(ms)
+      if (!Number.isFinite(date.getTime())) return '—'
+      var now = new Date()
+      var prefix = date.getFullYear() === now.getFullYear() ? '' : String(date.getFullYear()) + '/'
+      return prefix + String(date.getMonth() + 1) + '/' + String(date.getDate())
     }
 
     function formatWindow(tokens) {

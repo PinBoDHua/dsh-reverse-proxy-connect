@@ -1822,7 +1822,7 @@ try {
   expandEventBtn.props.onClick()
   cardTree = await render(card, { t: (key) => key })
   const eventRows = findAll(cardTree, (n) => n.type === 'li'
-    && (n.children || []).some((c) => c && c.type === 'span' && typeof c.props?.title === 'string' && /^\d{4}\//.test(c.props.title)))
+    && (n.children || []).some((c) => c && c.type === 'span' && typeof c.props?.title === 'string' && /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(c.props.title)))
   if (eventRows.length !== 8) throw new Error(`展开后应渲染全部 8 条，实际 ${eventRows.length}`)
   if (textOf(cardTree).includes('eventMore')) throw new Error('展开后仍显示「展开全部」')
   console.log('✓ 事件账本计数统一 items.length，展开渲染全部筛选结果')
@@ -1920,6 +1920,41 @@ try {
   console.log('✓ 搜索空状态区分「只命中不可用模型」与「完全没有匹配」')
 } finally {
   STATUS.providers[0].models = searchModelsSnapshot
+}
+
+// 29) 时间格式化：无效/超范围时间戳绝不产出 "Invalid Date" 或 "NaN"（本轮修的坑）。
+{
+  const extract = (header) => {
+    const start = source.indexOf(header)
+    if (start < 0) throw new Error(`client.js 里找不到 ${header}`)
+    const name = header.slice('function '.length, header.indexOf('('))
+    let depth = 0
+    let end = start
+    for (let i = source.indexOf('{', start); i < source.length; i++) {
+      if (source[i] === '{') depth++
+      else if (source[i] === '}') { depth--; if (depth === 0) { end = i + 1; break } }
+    }
+    return new Function(`${source.slice(start, end)}; return ${name}`)()
+  }
+  const fShortTime = extract('function formatShortTime(ms) {')
+  const fShortDate = extract('function formatShortDate(ms) {')
+  const bad = [undefined, null, Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1, '2026-10-18', {}, true]
+  for (const v of bad) {
+    const st = fShortTime(v)
+    const sd = fShortDate(v)
+    if (/Invalid|NaN/.test(st)) throw new Error(`formatShortTime(${String(v)}) = ${st}`)
+    if (/Invalid|NaN/.test(sd)) throw new Error(`formatShortDate(${String(v)}) = ${sd}`)
+    if (st !== '—' || sd !== '—') throw new Error(`无效值应回 —：st=${st} sd=${sd}`)
+  }
+  const ts = 1_792_296_284_000
+  if (!/^\d{1,2}\/\d{1,2}$/.test(fShortDate(ts)) && !/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(fShortDate(ts))) {
+    throw new Error(`formatShortDate 合法输出异常：${fShortDate(ts)}`)
+  }
+  const okTime = fShortTime(ts)
+  if (!/^\d{2}:\d{2}:\d{2}$/.test(okTime) && !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(okTime)) {
+    throw new Error(`formatShortTime 合法输出异常：${okTime}`)
+  }
+  console.log('✓ 时间格式化：无效/超范围一律 —，不再渲染 Invalid Date / NaN')
 }
 
 console.log('client-credits: OK')

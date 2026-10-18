@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { formatCompactDuration, formatDurationZh } from '../lib/format.js'
+import { formatClock, formatDateOnly, formatDateTime, formatCompactDuration, formatDurationZh } from '../lib/format.js'
 import { Runtime } from '../lib/runtime.js'
 import { defaults } from '../lib/settings.js'
 
@@ -106,6 +106,57 @@ test('时长格式与浏览器半边逐字一致：同一份数据两边不能�
   // 非法值也一致。
   for (const value of [undefined, Number.NaN, 0, -1]) {
     assert.equal(formatCompactDuration(value), clientFormat(value), `${String(value)} 两边不一致`)
+  }
+})
+
+test('日期时间：定宽零填充，无效/超范围一律 —，绝不产出 Invalid Date/NaN', () => {
+  const ts = 1_792_296_284_000
+  const d = new Date(ts)
+  const pad = (n) => String(n).padStart(2, '0')
+  const expected = `${String(d.getFullYear())}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  assert.equal(formatDateTime(ts), expected)
+  assert.match(formatDateTime(ts), /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/)
+  assert.match(formatClock(ts), /^\d{2}:\d{2}:\d{2}$/)
+  assert.match(formatDateOnly(ts), /^\d{4}-\d{2}-\d{2}$/)
+  // 无效输入绝不能漏出英文 "Invalid Date" 或 "NaN"（这是本轮修的坑）。
+  for (const bad of [undefined, null, Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1, '2026-10-18 12:04:44', {}, true]) {
+    for (const fn of [formatDateTime, formatClock, formatDateOnly]) {
+      const out = fn(bad)
+      assert.equal(typeof out, 'string')
+      assert.ok(!/Invalid|NaN/.test(out), `${fn.name}(${String(bad)}) = ${out}`)
+    }
+  }
+  assert.equal(formatDateTime(Number.NaN), '—')
+  assert.equal(formatClock('x'), '—')
+  assert.equal(formatDateOnly(8.64e15 + 1), '—')
+})
+
+test('日期时间与浏览器半边逐字一致：卡片与 CLI 不能把同一时间戳显示成两个样', () => {
+  // 浏览器 bundle 不能 import 本模块，两边的规则是手抄的。把 client.js 里的
+  // formatTime 原样抠出来跟 lib 的 formatDateTime 比一遍，防止「卡片一套、
+  // CLI 一套」那种难查的口径漂移（尤其无效值必须都回 —）。
+  const source = readFileSync(new URL('../client/client.js', import.meta.url), 'utf8')
+  const header = 'function formatTime(ms) {'
+  const start = source.indexOf(header)
+  assert.ok(start > 0, 'client.js 里找不到 formatTime')
+  let depth = 0
+  let end = start
+  for (let index = source.indexOf('{', start); index < source.length; index++) {
+    if (source[index] === '{') depth++
+    else if (source[index] === '}') {
+      depth--
+      if (depth === 0) {
+        end = index + 1
+        break
+      }
+    }
+  }
+  const clientFormatTime = new Function(`${source.slice(start, end)}; return formatTime`)()
+  for (const ms of [1, 0, -1, Number.NaN, undefined, 8.64e15 + 1, 1_792_296_284_000, Date.now(), 1_000]) {
+    assert.equal(formatDateTime(ms), clientFormatTime(ms), `${String(ms)} 两边不一致`)
+  }
+  for (const bad of ['x', null, {}, true]) {
+    assert.equal(formatDateTime(bad), clientFormatTime(bad), `${String(bad)} 两边不一致`)
   }
 })
 

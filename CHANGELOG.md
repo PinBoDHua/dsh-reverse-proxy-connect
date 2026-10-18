@@ -1,5 +1,36 @@
 # 更新记录
 
+## 2.6.0 — 2026-10-18
+
+第三轮前后端只读审计：时间与时长输出确定化 + 无效值兜底。前两轮 10 条已全部
+闭环，本轮聚焦「格式化边界」——时长从 1.x 起就规定「非法输入不产出
+NaN / Infinity」，但日期这一侧长期不一致：到处直接走 `toLocaleString()`。
+
+### 稳定性与正确性
+
+- **无效 / 超范围时间戳不再渲染成 "Invalid Date" / "NaN/NaN/NaN"**：卡片
+  `formatTime` / `formatShortTime` 依赖 `Date.prototype.toLocaleString()`，而它对
+  无效日期**不抛异常**（直接返回字符串 "Invalid Date"），原来的 `try/catch`
+  形同虚设；`formatShortDate` 则把 `NaN` 算进 `getMonth()` / `getDate()` 拼出
+  「NaN/NaN/NaN」。触发路径真实存在（目录行 `formatTime(active.fetchedAt)` 未经
+  `> 0` 守卫；纳秒级 / 超过 `8.64e15` 的毫秒时间戳）。现在三个函数统一：非有限
+  数 / 超出 Date 可表示范围一律回 `—`，中文卡面不再冒出英文 "Invalid Date"。
+- **时间与时长输出确定化**：新增 `lib/format.js` 的 `formatDateTime` /
+  `formatClock` / `formatDateOnly`（本机时区、零填充、定宽），`bin.js`、
+  `diagnostics.js` 与浏览器半边 `client.js` 的 `formatTime` 全部改走同一套规则，
+  不再随机器 locale 变（美式 12 小时制 / 分隔符）；「复制诊断」文本跨机器也
+  对得齐。浏览器半边不能 import，故手抄同一规则，并由测试逐字校验
+  `formatDateTime`（lib）与 `formatTime`（client）对所有样本一致——与既有的
+  「时长两边逐字一致」同一道防线。
+
+### 测试
+
+- `node --test tests/*.test.mjs`：**279 条**全部通过（新增 2 条：日期时间定宽与
+  无效兜底、`formatDateTime` 与浏览器半边逐字一致）；
+- `node tests/client-credits.mjs`：**70 项**通过（新增 1 项：`formatShortTime` /
+  `formatShortDate` 对无效 / 超范围一律回 `—`）。事件账本展开断言的 title
+  匹配也随新格式从「四位年 + 斜杠」收紧为 `YYYY-MM-DD HH:MM:SS`。
+
 ## 2.5.0 — 2026-10-18
 
 第二轮前后端审计（`_audit-*-r2/REPORT.md`，后端 5 条 / 前端 5 条）的修复。
