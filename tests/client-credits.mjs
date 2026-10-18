@@ -1416,4 +1416,52 @@ if (find(sessionCard, (node) => textOf(node) === '·') !== undefined) {
 }
 console.log('✓ 用量汇总改为 KPI 卡片，长中文标签不再被截断')
 
+// 6) 今日桶暂时为空、但累计桶有数据时，不能把整张「账号 × 模型」表藏掉。
+//    这正是用户反馈「1.9 的账号×模型好像没实现」的场景：升级后当天还没发请求，
+//    accountModelToday 是 {}，旧逻辑把它当成有今日口径 → 0 行 → 表消失。
+const todayPairSnapshot = STATUS.stats.accountModelToday
+STATUS.stats.accountModelToday = {}
+try {
+  cardTree = await mount(card, { t: (key) => key })
+  const fallbackPairRows = pairRowNodes(cardTree)
+  if (fallbackPairRows.length !== 3) {
+    throw new Error(`今日为空时应回退到累计的 3 行，实际 ${fallbackPairRows.length}`)
+  }
+  const fallbackText = textOf(cardTree)
+  if (!fallbackText.includes('usageAccountModelTodayEmpty')) {
+    throw new Error('回退到累计时没有说明「今天还没有记录」')
+  }
+  if (!fallbackText.includes('usageAccountModelCoverage')) {
+    throw new Error('回退到累计时仍要标明覆盖率，不能装作数据完整')
+  }
+  if (find(cardTree, (node) => node.type === 'button' && textOf(node) === 'usageTotal') !== undefined) {
+    throw new Error('没有今日数据时不该渲染无意义的「累计」切换按钮')
+  }
+  console.log('✓ 今日交叉数据为空时回退显示累计，不再整表消失')
+} finally {
+  STATUS.stats.accountModelToday = todayPairSnapshot
+}
+
+// 7) 即使账号 × 模型没有历史交叉数据，账号行也要能回答「这个账号一共用了多少」。
+const accountUsageSnapshot = STATUS.providers[0].accounts
+STATUS.providers[0].accounts = STATUS.providers[0].accounts.map((account, index) => ({
+  ...account,
+  usage: index === 0
+    ? { requests: 639, totalTokens: 199976603 }
+    : { requests: 590, totalTokens: 200276253 },
+}))
+try {
+  cardTree = await mount(card, { t: (key) => key })
+  const accountListText = textOf(cardTree)
+  if (!accountListText.includes('639') || !accountListText.includes('200.3M')) {
+    throw new Error('账号行没有显示该账号自己的请求数 / token')
+  }
+  if (!accountListText.includes('usageCalls') || !accountListText.includes('usageTokenShort')) {
+    throw new Error('账号用量缺少文案标签')
+  }
+  console.log('✓ 账号行显示各自累计请求与 token')
+} finally {
+  STATUS.providers[0].accounts = accountUsageSnapshot
+}
+
 console.log('client-credits: OK')

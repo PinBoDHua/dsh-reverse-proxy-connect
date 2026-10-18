@@ -252,6 +252,7 @@ window.__ModuleLoader__.load({
       usageAccountModels: '账号 × 模型用量',
       usageAccountModelsHint: '同一个模型可能被多个账号用过；这一栏按账号分开算 token。',
       usageAccountModelCoverage: '已记录 {covered} / {total} 次（{percent}%）：历史请求拆不出账号，只从 1.9.x 起累积',
+      usageAccountModelTodayEmpty: '今天这个账号还没有新的请求记录；下表是累计数据（账号 × 模型从 1.9.x 起累积，历史请求拆不出账号）。',
       usageAccountCol: '账号',
       usageAllAccounts: '全部账号',
       usageModelCalls: '请求',
@@ -506,6 +507,7 @@ window.__ModuleLoader__.load({
       usageAccountModels: 'Account × model usage',
       usageAccountModelsHint: 'The same model can be used by several accounts; this table splits tokens per account.',
       usageAccountModelCoverage: 'Recorded {covered} of {total} requests ({percent}%): older requests carry no account split',
+      usageAccountModelTodayEmpty: 'No new requests for this account today; showing cumulative data (account × model only accumulates from 1.9.x).',
       usageAccountCol: 'Account',
       usageAllAccounts: 'All accounts',
       usageModelCalls: 'Requests',
@@ -2357,7 +2359,7 @@ window.__ModuleLoader__.load({
         var resetKey = 'reset:' + account.id
         return h('li', {
           key: account.id,
-          style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
+          style: Object.assign({}, S.modelRow, { flexWrap: 'wrap' }, index > 0 ? S.modelRowDivider : {}),
         },
         h('span', {
           style: dot(account.active ? DOT_OK : DOT_OFF),
@@ -2368,6 +2370,15 @@ window.__ModuleLoader__.load({
           title: account.label,
         }, account.label),
         account.active ? h('span', { style: S.badgeSoft }, bind(t, 'currentAccount')) : null,
+        // 每个账号自己的累计用量：即使「账号 × 模型」里没有历史交叉拆分，
+        // 也能先看到这个账号一共发了多少请求、用了多少 token。
+        account.usage !== undefined && account.usage !== null && (account.usage.requests || 0) > 0
+          ? h('span', {
+              style: Object.assign({}, S.modelMeta, { whiteSpace: 'nowrap' }),
+              title: bind(t, 'usageTokenShort') + ' ' + formatNumber(account.usage.totalTokens || 0),
+            }, formatNumber(account.usage.requests || 0) + ' ' + bind(t, 'usageCalls') + ' · '
+              + compactTokens(account.usage.totalTokens || 0) + ' ' + bind(t, 'usageTokenShort'))
+          : null,
         cooling
           ? h('span', {
               style: S.badgeWarn,
@@ -3063,13 +3074,32 @@ window.__ModuleLoader__.load({
         // 老宿主（1.9.0 之前）只下发 `accountModels`，没有今日那一份。这时不要把
         // 「今日」按钮画成选中却显示累计数据 —— 那正是这版要消灭的「数字对不上」。
         // 没有今日数据就只显示「累计」，也不渲染切换按钮。
-        var hasAccountModelToday = statsDoc.accountModelToday !== null
-          && typeof statsDoc.accountModelToday === 'object'
-          && statsDoc.accountModelToday !== undefined
-        var effectiveAccountModelRange = hasAccountModelToday ? accountModelRange : 'all'
+        //
+        // 2.1.2：今日桶可能只是**暂时为空**（例如刚升级、或今天还没发过请求），
+        // 但累计桶里已经有数据。旧判断只看「accountModelToday 是不是对象」，
+        // 一个空对象也会被当成有今日口径 → 选中今日 → 0 行 → 整张表消失。
+        // 现在按「该 provider 是否真的有今日行」决定默认口径。
+        var accountModelAllSource = statsDoc.accountModels
+        var accountModelTodaySource = statsDoc.accountModelToday
+        var hasProviderPairs = function (source) {
+          if (source === null || typeof source !== 'object' || Array.isArray(source)) return false
+          return Object.keys(source).some(function (key) {
+            var counters = source[key]
+            return counters !== null && typeof counters === 'object'
+              && counters.provider === active.provider
+              && typeof counters.accountId === 'string'
+              && typeof counters.model === 'string'
+              && counters.requests > 0
+          })
+        }
+        var hasAllPairs = hasProviderPairs(accountModelAllSource)
+        var hasTodayPairs = hasProviderPairs(accountModelTodaySource)
+        var showRangeToggle = hasTodayPairs && hasAllPairs
+        var effectiveAccountModelRange = hasTodayPairs && accountModelRange === 'all' ? 'all' : hasTodayPairs ? 'today' : 'all'
         var accountModelSource = effectiveAccountModelRange === 'all'
-          ? statsDoc.accountModels
-          : statsDoc.accountModelToday
+          ? accountModelAllSource
+          : accountModelTodaySource
+        var accountModelFallback = effectiveAccountModelRange === 'all' && !hasTodayPairs && hasAllPairs
         var accountModelRows = []
         // 交叉维度只从 1.9.x 开始累积。历史请求拆不出来，所以这里的次数
         // **一定**小于卡片上方的总量 —— 不写清楚，用户只会觉得「数字不对」。
@@ -3147,8 +3177,11 @@ window.__ModuleLoader__.load({
             h('div', { key: 'accountmodels', style: { display: 'flex', flexDirection: 'column', gap: 4 } },
               h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
                 h('span', { style: S.sectionTitle }, bind(t, 'usageAccountModels')),
-                hasAccountModelToday ? rangeButton('today', bind(t, 'usageToday'), 'today') : null,
-                hasAccountModelToday ? rangeButton('all', bind(t, 'usageTotal'), 'all') : null,
+                showRangeToggle ? rangeButton('today', bind(t, 'usageToday'), 'today') : null,
+                showRangeToggle ? rangeButton('all', bind(t, 'usageTotal'), 'all') : null,
+                showRangeToggle
+                  ? null
+                  : h('span', { style: S.badgeSoft }, bind(t, effectiveAccountModelRange === 'all' ? 'usageTotal' : 'usageToday')),
                 // 覆盖率：这批数字只覆盖升级之后的请求，缺口要写明。
                 // 不写的话，用户拿它和上方的「今日 N 次」对比只会觉得坏了。
                 accountModelCoverage === undefined
@@ -3165,6 +3198,9 @@ window.__ModuleLoader__.load({
                     }, accountModelCoverage),
                 h('span', { style: S.grow }),
                 h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)', opacity: 0.8 }, title: bind(t, 'usageAccountModelsHint') }, bind(t, 'usageAccountModelsHint'))),
+              accountModelFallback
+                ? h('p', { key: 'fallback', style: S.hintTiny }, bind(t, 'usageAccountModelTodayEmpty'))
+                : null,
               h('div', { style: usageTableFrame },
                 h('div', { style: { display: 'grid', gridTemplateColumns: accountModelColumns, minWidth: 420 } },
                   usageHead('a0', bind(t, 'usageAccountCol')),
