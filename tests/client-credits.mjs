@@ -458,11 +458,14 @@ console.log('✓ 胶囊收起时也是满宽')
 
 // 六家 provider 之后，单行 `nowrap` + `overflow:hidden` 会把最后一个数字
 // 静默剪成半个（截图里 TRAE 的 197 被裁掉一截）。胶囊必须允许换行，
-// 而且数字区要是两列栅格 —— 这样放不下时折到第二行，而不是被裁掉。
+// 而且数字区要是自适应栅格 —— 够宽两列、不够宽自动降一列，绝不裁字。
 const pillGrid = find(collapsedToggle, (node) => node.props?.style?.display === 'grid'
   && typeof node.props?.style?.gridTemplateColumns === 'string')
 if (pillGrid === undefined) {
   throw new Error('胶囊数字区不是栅格：provider 放不下时只能被裁掉，无法折行')
+}
+if (!String(pillGrid.props.style.gridTemplateColumns).includes('auto-fit')) {
+  throw new Error(`胶囊栅格应使用 auto-fit 自适应列数，实际：${String(pillGrid.props.style.gridTemplateColumns)}`)
 }
 if (!String(pillGrid.props.style.gridTemplateColumns).includes('minmax')) {
   throw new Error(`胶囊栅格应使用 minmax 让列宽自适应，实际：${String(pillGrid.props.style.gridTemplateColumns)}`)
@@ -473,33 +476,43 @@ if (collapsedToggle.props.style?.whiteSpace === 'nowrap') {
 if (collapsedToggle.props.style?.overflow === 'hidden') {
   throw new Error('胶囊仍是 overflow:hidden：放不下的内容会被静默剪掉')
 }
-// 每个 provider 都显式占一格，折行后分隔线不会跑到行首。
-const segmentCells = findAll(pillGrid, (node) => typeof node.props?.style?.gridColumn === 'string')
+// 每个 provider 一格。
+const segmentCells = findAll(pillGrid, (node) => node.props?.style?.justifyContent === 'flex-start'
+  && typeof node.props?.title === 'string')
 // 测试数据里 3 个 provider 有可用额度（WB / WBAI / QDG）。
 if (segmentCells.length !== 3) {
   throw new Error(`当前测试数据有 3 个有额度的 provider，应占 3 格，实际 ${segmentCells.length}`)
 }
-const expectedColumns = ['1', '2', '1']
+// 两列必须同一种对齐方式。
+//
+// 之前左列 `flex-start`、右列 `flex-end`：左列从固定位置起排，右列贴着右边缘，
+// 两列起点不一致，右列看起来像「浮在半空」（截图里 WBAI / TRAE 参差不齐）。
+// 现在统一左对齐 —— 两行扫下来每条竖线都是齐的。
 segmentCells.forEach((cell, index) => {
-  if (cell.props.style.gridColumn !== expectedColumns[index]) {
-    throw new Error(`第 ${index} 格的列号应为 ${expectedColumns[index]}（两列折行），实际 ${String(cell.props.style.gridColumn)}`)
+  if (cell.props.style.justifyContent !== 'flex-start') {
+    throw new Error(`第 ${index} 格应为左对齐（两列一致），实际 ${String(cell.props.style.justifyContent)}`)
   }
 })
-// 每行第一格不能有左侧分隔线（否则折行后行首会凭空多一条竖线）。
-if (String(segmentCells[0].props.style.borderLeft) !== 'none') {
-  throw new Error('每行第一格不该有左侧分隔线')
-}
-if (String(segmentCells[2].props.style.borderLeft) !== 'none') {
-  throw new Error('折行后的行首（第 3 格）也不该有左侧分隔线')
-}
-if (!String(segmentCells[1].props.style.borderLeft).includes('border-l2')) {
-  throw new Error('同一行第二格应有左侧分隔线')
-}
-// 折行后第二行要落在第 2 行，而不是继续往右挤。
-if (segmentCells[2].props.style.gridRow !== '2') {
-  throw new Error(`第 3 格应折到第 2 行，实际 gridRow=${String(segmentCells[2].props.style.gridRow)}`)
-}
-console.log('✓ 胶囊可折行：数字区是两列栅格，不再裁掉最后一个 provider')
+// 自动排布时不能有显式定位：`auto-fit` 只对自动放置生效，
+// 写了 gridColumn 就会退化回固定列数，窄侧栏里又开始挤压。
+segmentCells.forEach((cell, index) => {
+  if (cell.props.style.gridColumn !== undefined) {
+    throw new Error(`第 ${index} 格不该显式指定 gridColumn（会让 auto-fit 失效）`)
+  }
+})
+// 数字永远不缩：额度是这个胶囊唯一要传达的信息。
+// 让数字省略会得到「19…」，看起来像另一个数字，比标签短一截误导得多。
+segmentCells.forEach((cell, index) => {
+  const numbers = findAll(cell, (node) => node.props?.style?.fontVariantNumeric === 'tabular-nums')
+  if (numbers.length !== 1) throw new Error(`第 ${index} 格应恰好有一个数字节点，实际 ${numbers.length}`)
+  if (numbers[0].props.style.flex !== '0 0 auto') {
+    throw new Error(`第 ${index} 格的数字不该被压缩（flex=${String(numbers[0].props.style.flex)}）`)
+  }
+  if (numbers[0].props.style.textOverflow === 'ellipsis') {
+    throw new Error(`第 ${index} 格的数字不该省略：会显示成「19…」这种假数字`)
+  }
+})
+console.log('✓ 胶囊可折行：数字区自适应列数、两列左对齐、数字不被裁切')
 
 // ---------- 2b. 悬停要有反馈（用户靠这个判断「能点」）----------
 // 箭头必须是内联 SVG 的折线，而不是 `▾` 字符 —— 9px 的字形在侧栏里几乎看不见。

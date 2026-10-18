@@ -3279,25 +3279,20 @@ window.__ModuleLoader__.load({
           }
         }
 
-        // 一行放不下就换行。
+        // 一行放不下就换行，宽度不够就降成一列。
         //
         // 六家 provider 之后，`WB 775 | WBAI 57 | QDG 0 | TRAE 197` 在窄侧栏里
         // 会直接把最后一个数字挤成半个（截图里就是「197」被裁掉一截）。原来的
         // 做法是 `nowrap` + `overflow:hidden`：内容不换行、超出的部分静默剪掉，
         // 用户看到的是一个残缺的数字，比看不到更糟。
         //
-        // 现在改成「可换行的栅格」：每个 provider 占一格、两列铺开，放不下就
-        // 自动折到第二行；分隔线只在「同一行的非首格」上画（首格用 `:first-child`
-        // 之外的判断做不到，所以用 `rowIndex`/`columnIndex` 显式算）。
-        //
-        // 为什么用栅格而不是 `flex-wrap`：flex 换行后每行宽度不一致，分隔线会
-        // 出现在行首，看起来像「凭空多了一条竖线」。栅格能保证每行都是完整的
-        // 两列，分隔线永远只出现在两格之间。
-        var COLUMNS = 2
+        // 现在的规则：
+        // - 够宽 → 两列；
+        // - 不够宽 → 自动降成一列，每个 provider 独占一行、完整显示；
+        // - 无论几列，所有格都**左对齐**（左列 `flex-start`、右列 `flex-end`
+        //   会让右列像浮在半空，两列起点对不齐）。
         var visibleRows = wide ? rows : rows.slice(0, 1)
         var segmentNodes = visibleRows.map(function (row, position) {
-          var columnIndex = position % COLUMNS
-          var rowIndex = Math.floor(position / COLUMNS)
           var snapshot = row.credits
           var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
           var warn = creditsWarning(snapshot, row.entry.provider, sidebarAlertRatio, sidebarAlertsEnabled)
@@ -3314,14 +3309,18 @@ window.__ModuleLoader__.load({
                 alignItems: 'baseline',
                 gap: 4,
                 minWidth: 0,
-                // 数字特别长时让它省略，而不是把整格顶出容器。
-                overflow: 'hidden',
-                paddingLeft: columnIndex > 0 ? 8 : 0,
-                borderLeft: columnIndex > 0 ? '0.5px solid var(--dsw-alias-border-l2)' : 'none',
-                // 每行第一格顶到最左、第二格靠右对齐，两列看起来才整齐。
-                justifyContent: columnIndex === 0 ? 'flex-start' : 'flex-end',
-                gridColumn: String(columnIndex + 1),
-                gridRow: String(rowIndex + 1),
+                // 两列**都左对齐**。
+                //
+                // 之前左列 `flex-start`、右列 `flex-end`：左列从固定位置起排，
+                // 右列却贴着右边缘排。两列的起点不一致，右列看起来就像「浮在
+                // 半空」—— 尤其是名字长度不同时（WBAI / TRAE）参差不齐。
+                // 统一左对齐后，每列的「圆点 + 名字 + 数字」都从同一条竖线起排，
+                // 两行扫下来是齐的。
+                justifyContent: 'flex-start',
+                // 不写 gridColumn / gridRow：`auto-fit` 只对**自动放置**生效，
+                // 显式定位会让它退化回固定两列，窄侧栏里就又开始挤压。
+                // 分隔线也一并去掉：自动排布时无法预先知道哪一格会落到行首，
+                // 猜错就会出现「行首凭空多一条竖线」。用列间距区分两列已经够了。
               },
             },
             position === 0 || wide
@@ -3339,7 +3338,23 @@ window.__ModuleLoader__.load({
                     : {}),
                 })
               : null,
-            h('span', { style: { fontSize: 10.5, letterSpacing: '.02em', opacity: stale ? 0.45 : 0.62 } }, shortProviderName(row.entry.provider)),
+            // 名字可以被压缩（省略号），数字**永远不缩**。
+            //
+            // 反过来试过：让数字省略，结果 `197.1` 变成 `19…` —— 那看起来
+            // 就像另一个数字，比「名字短一截」误导得多。额度是这个胶囊唯一
+            // 要传达的信息，宁可牺牲标签。
+            h('span', {
+              style: {
+                fontSize: 10.5,
+                letterSpacing: '.02em',
+                opacity: stale ? 0.45 : 0.62,
+                minWidth: 0,
+                flex: '0 1 auto',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              },
+            }, shortProviderName(row.entry.provider)),
             h(
               'span',
               {
@@ -3351,6 +3366,8 @@ window.__ModuleLoader__.load({
                     ? 'var(--dsw-alias-state-warning-primary, #b26b00)'
                     : 'var(--dsw-alias-label-primary, inherit)',
                   opacity: stale ? 0.65 : 1,
+                  flex: '0 0 auto',
+                  whiteSpace: 'nowrap',
                 },
               },
               snapshot.unlimited === true ? '∞' : compactNumber(snapshot.remain),
@@ -3443,18 +3460,27 @@ window.__ModuleLoader__.load({
               whiteSpace: 'normal',
             },
           },
-          // 数字区：两列等宽栅格，放不下自动折行。
+          // 数字区：**自适应列数**的栅格。
           //
-          // 两列都用 `minmax(0, 1fr)` 而不是 `1fr auto`：`auto` 会按内容的
-          // 最大宽度撑开轨道，一个特别长的数字（或某个 provider 名字很长）
-          // 就能把整格顶出容器 —— 那又回到了「被裁掉」的老问题。
-          // `minmax(0, 1fr)` 允许轨道收缩到 0，内容自己省略，布局永远不溢出。
+          // `auto-fit` + `minmax(96px, 1fr)`：宽度够就两列，不够自动降到一列，
+          // 每个 provider 独占一行、都能完整显示。
+          //
+          // 96px 是实测出来的，不是估的：236px 的侧栏减去内边距与箭头后，
+          // 栅格可用宽度约 200px。阈值 ≤96px 时 2×96+8=200 恰好放得下（两列），
+          // ≥100px 就直接降成一列。取 96 能在常规侧栏里保住两列。
+          //
+          // 为什么不用固定两列：侧栏可以被拖到 180px 出头。固定两列时每列只剩
+          // 80px，「TRAE 197.1」根本放不下 —— 要么数字被切成「197.」，
+          // 要么名字被省略成「T…」，两种都像数据错了。
+          //
+          // 也不能用 `1fr auto`：`auto` 会按内容最大宽度撑开轨道，等于换个
+          // 方式溢出。
           h(
             'span',
             {
               style: {
                 display: 'grid',
-                gridTemplateColumns: wide ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)',
+                gridTemplateColumns: wide ? 'repeat(auto-fit, minmax(88px, 1fr))' : 'minmax(0, 1fr)',
                 alignItems: 'baseline',
                 columnGap: 8,
                 rowGap: 1,
