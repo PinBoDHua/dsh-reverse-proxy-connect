@@ -43,7 +43,7 @@ window.__ModuleLoader__.load({
     var zh = {
       nav: '反代连接器',
       title: '反代连接器',
-      intro: '把 WorkBuddy（国内版 / 国际版）、Qoder（全球版 / 国内版）与 Trae（国内版 / 国际版）账号里的模型接进 DSH。',
+      intro: '把 WorkBuddy、Qoder 与 Trae 的账号模型接进 DSH：多账号、额度趋势与事件账本。',
       service: '服务',
       refresh: '刷新',
       refreshing: '刷新中…',
@@ -297,7 +297,7 @@ window.__ModuleLoader__.load({
     var en = {
       nav: 'Reverse proxy',
       title: 'Reverse proxy connector',
-      intro: 'Bring WorkBuddy (CN / international), Qoder (global / CN) and Trae (CN / international) account models into DSH.',
+      intro: 'Bring WorkBuddy, Qoder and Trae account models into DSH — multi-account, credit trends and an event journal.',
       service: 'Service',
       refresh: 'Refresh',
       refreshing: 'Refreshing…',
@@ -628,6 +628,15 @@ window.__ModuleLoader__.load({
       if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
       if (value >= 10000) return String(Math.round(value / 100) / 10) + 'k'
       return String(Math.round(value * 10) / 10)
+    }
+
+    /** 大数缩写：1.2K / 400.3M / 1.1B（KPI 卡片用，完整数字放 title）。 */
+    function compactTokens(value) {
+      if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '—'
+      if (value >= 1e9) return String(Math.round((value / 1e9) * 10) / 10) + 'B'
+      if (value >= 1e6) return String(Math.round((value / 1e6) * 10) / 10) + 'M'
+      if (value >= 1e3) return String(Math.round((value / 1e3) * 10) / 10) + 'K'
+      return String(Math.round(value))
     }
 
     /** 低于这个比例就提前提醒，别等到真的见底。 */
@@ -965,10 +974,10 @@ window.__ModuleLoader__.load({
       card: {
         border: '0.5px solid var(--dsw-alias-border-l2)',
         borderRadius: 12,
-        padding: '18px 20px 16px',
+        padding: '16px 18px 15px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 16,
+        gap: 14,
         background: 'var(--dsw-alias-bg-l1, transparent)',
         boxSizing: 'border-box',
         maxWidth: '100%',
@@ -991,8 +1000,8 @@ window.__ModuleLoader__.load({
       section: {
         display: 'flex',
         flexDirection: 'column',
-        gap: 10,
-        paddingTop: 14,
+        gap: 9,
+        paddingTop: 12,
         borderTop: '0.5px solid var(--dsw-alias-border-l2)',
       },
       sectionHead: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
@@ -2781,24 +2790,14 @@ window.__ModuleLoader__.load({
       var usageTableFrame = {
         border: '0.5px solid ' + usageBorder,
         borderRadius: 8,
-        overflow: 'hidden',
+        overflowX: 'auto',
+        overflowY: 'hidden',
       }
       var usageRowLine = { borderTop: '0.5px solid ' + usageBorder }
-      var summaryColumns = '52px minmax(48px, 1fr) minmax(56px, 1fr) minmax(62px, 1fr) minmax(58px, 1fr)'
       var recentColumns = 'minmax(84px, 1.1fr) minmax(84px, 1.4fr) minmax(58px, .8fr) minmax(52px, .8fr) minmax(60px, .8fr)'
 
       var usageHead = function (key, label, alignRight) {
         return h('span', { key: key, style: Object.assign({}, usageHeadCell, alignRight === true ? { textAlign: 'right' } : {}) }, label)
-      }
-      var usageRow = function (key, label, values, top) {
-        return h(
-          'div',
-          { key: key, style: Object.assign({ display: 'grid', gridTemplateColumns: summaryColumns }, top === true ? usageRowLine : {}) },
-          h('span', { style: usageLabelCell }, label),
-          ...values.map(function (value, index) {
-            return h('span', { key: 'v' + index, style: usageNumberCell }, value)
-          }),
-        )
       }
 
       var usageBody = []
@@ -2808,34 +2807,68 @@ window.__ModuleLoader__.load({
         var rateOf = function (counters) {
           return typeof counters.successRate === 'number' ? String(Math.round(counters.successRate * 100)) + '%' : '—'
         }
+        var usageCard = function (key, label, counters, present) {
+          var data = counters !== null && typeof counters === 'object' ? counters : {}
+          return h('div', {
+            key: key,
+            style: {
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+              minWidth: 0,
+              padding: '9px 11px 8px',
+              borderRadius: 10,
+              border: '0.5px solid ' + usageBorder,
+              background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.06))',
+              boxSizing: 'border-box',
+            },
+          },
+          h('span', {
+            style: { fontSize: TEXT.tiny, fontWeight: 600, letterSpacing: '.06em', color: 'var(--dsw-alias-label-tertiary)' },
+          }, label),
+          h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 5, minWidth: 0 } },
+            h('span', {
+              style: {
+                fontSize: 22,
+                lineHeight: '27px',
+                fontWeight: 650,
+                letterSpacing: '-.015em',
+                fontVariantNumeric: 'tabular-nums',
+                color: 'var(--dsw-alias-label-primary)',
+              },
+            }, present === false ? '—' : formatNumber(data.requests || 0)),
+            present === false
+              ? null
+              : h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)' } }, bind(t, 'usageCalls'))),
+          h('div', {
+            style: {
+              display: 'flex',
+              flexWrap: 'wrap',
+              alignItems: 'baseline',
+              gap: '1px 7px',
+              minWidth: 0,
+              fontSize: TEXT.tiny,
+              lineHeight: LINE.dense,
+              color: 'var(--dsw-alias-label-tertiary)',
+            },
+          },
+          h('span', {}, bind(t, 'usageRate') + ' ' + (present === false ? '—' : rateOf(data))),
+          h('span', { style: { opacity: 0.45 } }, '·'),
+          h('span', {}, bind(t, 'usageAvg') + ' ' + (present === false ? '—' : formatDuration(data.avgDurationMs))),
+          h('span', { style: { opacity: 0.45 } }, '·'),
+          h('span', {
+            title: bind(t, 'usageTokenShort') + ' ' + formatNumber(data.totalTokens || 0),
+          }, bind(t, 'usageTokenShort') + ' ' + (present === false ? '—' : compactTokens(data.totalTokens || 0)))))
+        }
+        var sessionPresent = typeof providerSession === 'object' && providerSession !== null && providerSession.requests > 0
         usageBody.push(
-          h('div', { key: 'summary', style: usageTableFrame },
-            h('div', { style: { display: 'grid', gridTemplateColumns: summaryColumns } },
-              usageHead('h0', ''),
-              usageHead('h1', bind(t, 'usageCalls'), true),
-              usageHead('h2', bind(t, 'usageRate'), true),
-              usageHead('h3', bind(t, 'usageAvg'), true),
-              usageHead('h4', bind(t, 'usageTokenShort'), true)),
-            usageRow('today', bind(t, 'usageToday'), [
-              formatNumber(usageToday.requests || 0),
-              rateOf(usageToday),
-              formatDuration(usageToday.avgDurationMs),
-              formatNumber(usageToday.totalTokens || 0),
-            ], true),
-            usageRow('all', bind(t, 'usageTotal'), [
-              formatNumber(providerUsage.requests || 0),
-              rateOf(providerUsage),
-              formatDuration(providerUsage.avgDurationMs),
-              formatNumber(providerUsage.totalTokens || 0),
-            ], true),
-            typeof providerSession === 'object' && providerSession !== null && providerSession.requests > 0
-              ? usageRow('session', bind(t, 'usageSession'), [
-                  formatNumber(providerSession.requests || 0),
-                  rateOf(providerSession),
-                  formatDuration(providerSession.avgDurationMs),
-                  formatNumber(providerSession.totalTokens || 0),
-                ], true)
-              : null),
+          h('div', {
+            key: 'summary',
+            style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(168px, 1fr))', gap: 8 },
+          },
+          usageCard('today', bind(t, 'usageToday'), usageToday, true),
+          usageCard('all', bind(t, 'usageTotal'), providerUsage, true),
+          usageCard('session', bind(t, 'usageSession'), providerSession, sessionPresent)),
         )
         if (active.provider.indexOf('qoder') === 0 && (usageToday.requests || 0) > 0 && (usageToday.totalTokens || 0) === 0) {
           usageBody.push(h('p', { key: 'noUsage', style: S.hintTiny }, bind(t, 'usageNoUsage')))
@@ -2864,8 +2897,9 @@ window.__ModuleLoader__.load({
           usageBody.push(h('p', { key: 'since', style: S.hintTiny }, bind(t, 'usageSince', { time: formatTime(statsDoc.since) })))
         }
 
-        // 最近 14 天用量：14 根柱子，高度按当天 token 归一化。
-        // 优先用这个 provider 自己的每日历史；老宿主只有全局 daily。
+        // 最近 14 天用量：固定 14 个槽位，缺的日期补 0。
+        // 旧实现直接用「有数据的日期」画柱状图：只有一天数据时那一根会占满
+        // 整行，看起来像一条加载进度条，而不是 14 天趋势。
         var providerDaily = statsDoc.providerDaily !== undefined && statsDoc.providerDaily !== null
           ? statsDoc.providerDaily[active.provider]
           : undefined
@@ -2873,36 +2907,73 @@ window.__ModuleLoader__.load({
         var daily = hasProviderDaily
           ? safeArray(providerDaily).slice(-14)
           : safeArray(statsDoc.daily).slice(-14)
-        if (daily.length > 0) {
+        var validDaily = daily.filter(function (day) {
+          return day !== null && typeof day === 'object' && typeof day.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day.date)
+        })
+        if (validDaily.length > 0) {
+          var dailyByDate = {}
+          validDaily.forEach(function (day) { dailyByDate[day.date] = day })
+          var anchored = new Date(
+            Number(validDaily[validDaily.length - 1].date.slice(0, 4)),
+            Number(validDaily[validDaily.length - 1].date.slice(5, 7)) - 1,
+            Number(validDaily[validDaily.length - 1].date.slice(8, 10)),
+          )
+          var buckets = []
+          for (var offset = 13; offset >= 0; offset--) {
+            var cursor = new Date(anchored.getFullYear(), anchored.getMonth(), anchored.getDate() - offset)
+            var pad = function (value) { return String(value).padStart(2, '0') }
+            var key = String(cursor.getFullYear()) + '-' + pad(cursor.getMonth() + 1) + '-' + pad(cursor.getDate())
+            buckets.push({
+              date: key,
+              requests: dailyByDate[key]?.requests,
+              totalTokens: dailyByDate[key]?.totalTokens,
+            })
+          }
           var maxDailyTokens = 1
-          daily.forEach(function (day) {
+          buckets.forEach(function (day) {
             if (typeof day.totalTokens === 'number' && day.totalTokens > maxDailyTokens) maxDailyTokens = day.totalTokens
           })
           usageBody.push(
-            h('div', { key: 'heat', style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+            h('div', { key: 'heat', style: { display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 2 } },
               h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
                 h('span', { style: S.sectionTitle }, bind(t, 'usageHeatmap')),
                 h('span', { style: S.grow }),
-                h('span', { style: S.hintTiny }, daily.length + 'd')),
-              h('div', { style: { display: 'flex', alignItems: 'flex-end', gap: 3, height: 28 } },
-                daily.map(function (day) {
+                h('span', { style: S.hintTiny }, '14d')),
+              h('div', { style: { display: 'flex', alignItems: 'flex-end', gap: 3, height: 34, paddingTop: 2 } },
+                buckets.map(function (day) {
                   var tokens = typeof day.totalTokens === 'number' ? day.totalTokens : 0
-                  var height = Math.max(3, Math.round((tokens / maxDailyTokens) * 26))
+                  var height = tokens > 0 ? Math.max(4, Math.round((tokens / maxDailyTokens) * 28)) : 3
                   return h('div', {
                     key: 'd' + day.date,
                     title: bind(t, 'usageHeatCell', { date: day.date, requests: formatNumber(day.requests || 0), tokens: formatNumber(tokens) }),
                     style: {
                       flex: '1 1 0',
-                      minWidth: 2,
+                      minWidth: 3,
+                      maxWidth: 44,
+                      height: 32,
+                      display: 'flex',
+                      alignItems: 'flex-end',
+                      borderRadius: 3,
+                      background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.05))',
+                      overflow: 'hidden',
+                    },
+                  },
+                  h('div', {
+                    style: {
+                      width: '100%',
                       height: height,
-                      borderRadius: 2,
+                      borderRadius: 3,
                       background: tokens > 0
                         ? (PROVIDER_ACCENT[active.provider] || 'var(--dsw-alias-state-business-primary, #2f6fed)')
                         : 'var(--dsw-alias-border-l2)',
-                      opacity: tokens > 0 ? 0.5 + Math.min(0.5, tokens / maxDailyTokens / 2) : 0.5,
+                      opacity: tokens > 0 ? 0.55 + Math.min(0.45, tokens / maxDailyTokens / 2) : 0.35,
+                      transition: 'height .2s ease',
                     },
-                  })
-                }))),
+                  }))
+                })),
+              h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--dsw-alias-label-tertiary)', opacity: 0.65 } },
+                h('span', {}, buckets[0].date.slice(5)),
+                h('span', {}, buckets[buckets.length - 1].date.slice(5)))),
           )
         }
 
@@ -2924,7 +2995,7 @@ window.__ModuleLoader__.load({
             h('div', { key: 'topmodels', style: { display: 'flex', flexDirection: 'column', gap: 4 } },
               h('span', { style: S.sectionTitle }, bind(t, 'usageTopModels')),
               h('div', { style: usageTableFrame },
-                h('div', { style: { display: 'grid', gridTemplateColumns: modelColumns } },
+                h('div', { style: { display: 'grid', gridTemplateColumns: modelColumns, minWidth: 360 } },
                   usageHead('m0', bind(t, 'usageModel')),
                   usageHead('m1', bind(t, 'usageModelCalls'), true),
                   usageHead('m2', bind(t, 'usageModelTokens'), true),
@@ -3061,7 +3132,7 @@ window.__ModuleLoader__.load({
                 h('span', { style: S.grow }),
                 h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)', opacity: 0.8 }, title: bind(t, 'usageAccountModelsHint') }, bind(t, 'usageAccountModelsHint'))),
               h('div', { style: usageTableFrame },
-                h('div', { style: { display: 'grid', gridTemplateColumns: accountModelColumns } },
+                h('div', { style: { display: 'grid', gridTemplateColumns: accountModelColumns, minWidth: 420 } },
                   usageHead('a0', bind(t, 'usageAccountCol')),
                   usageHead('a1', bind(t, 'usageModel')),
                   usageHead('a2', bind(t, 'usageModelCalls'), true),
@@ -3081,39 +3152,41 @@ window.__ModuleLoader__.load({
           )
         }
 
-        usageBody.push(h('div', { key: 'recenthead', style: Object.assign({}, S.sectionTitle, { marginTop: 2 }) }, bind(t, 'usageRecent')))
-        if (recentRequests.length === 0) {
-          usageBody.push(h('p', { key: 'empty', style: S.hintTiny }, bind(t, 'usageEmpty')))
-        } else {
-          usageBody.push(
-            h('div', { key: 'recent', style: usageTableFrame },
-              h('div', { style: { display: 'grid', gridTemplateColumns: recentColumns } },
-                usageHead('r0', bind(t, 'usageTime')),
-                usageHead('r1', bind(t, 'usageModel')),
-                usageHead('r2', bind(t, 'usageOutcome'), true),
-                usageHead('r3', bind(t, 'usageDuration'), true),
-                usageHead('r4', bind(t, 'usageTokenShort'), true)),
-              recentRequests.map(function (entry, index) {
-                var failed = entry.kind === 'error'
-                return h(
-                  'div',
-                  {
-                    key: 'req' + index,
-                    style: Object.assign({ display: 'grid', gridTemplateColumns: recentColumns, alignItems: 'center' }, index > 0 ? usageRowLine : {}),
-                  },
-                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-tertiary)', fontVariantNumeric: 'tabular-nums' }), title: formatTime(entry.at) }, formatShortTime(entry.at)),
-                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-primary)' }), title: entry.model || '' }, entry.model || '—'),
-                  h('span', { style: Object.assign({}, usageCell, { textAlign: 'right' }) },
-                    h('span', {
-                      style: failed || entry.kind === 'incomplete' ? S.badgeWarn : S.badgeSoft,
-                      title: [entry.code, entry.message].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
-                    }, bind(t, kindTextKey(entry.kind)))),
-                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatDuration(entry.durationMs)),
-                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatNumber(entry.totalTokens || 0)),
-                )
-              })),
-          )
-        }
+        // 最近请求默认折叠：它是排障信息，不该占用卡片主视线。
+        usageBody.push(
+          h('details', { key: 'recentbox', style: { marginTop: 2 } },
+            h('summary', {
+              style: Object.assign({}, S.sectionTitle, { cursor: 'pointer', userSelect: 'none' }),
+            }, bind(t, 'usageRecent') + ' · ' + String(recentRequests.length)),
+            recentRequests.length === 0
+              ? h('p', { key: 'empty', style: Object.assign({}, S.hintTiny, { marginTop: 6 }) }, bind(t, 'usageEmpty'))
+              : h('div', { key: 'recent', style: Object.assign({}, usageTableFrame, { marginTop: 6 }) },
+                  h('div', { style: { display: 'grid', gridTemplateColumns: recentColumns, minWidth: 380 } },
+                    usageHead('r0', bind(t, 'usageTime')),
+                    usageHead('r1', bind(t, 'usageModel')),
+                    usageHead('r2', bind(t, 'usageOutcome'), true),
+                    usageHead('r3', bind(t, 'usageDuration'), true),
+                    usageHead('r4', bind(t, 'usageTokenShort'), true)),
+                  recentRequests.map(function (entry, index) {
+                    var failed = entry.kind === 'error'
+                    return h(
+                      'div',
+                      {
+                        key: 'req' + index,
+                        style: Object.assign({ display: 'grid', gridTemplateColumns: recentColumns, alignItems: 'center' }, index > 0 ? usageRowLine : {}),
+                      },
+                      h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-tertiary)', fontVariantNumeric: 'tabular-nums' }), title: formatTime(entry.at) }, formatShortTime(entry.at)),
+                      h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-primary)' }), title: entry.model || '' }, entry.model || '—'),
+                      h('span', { style: Object.assign({}, usageCell, { textAlign: 'right' }) },
+                        h('span', {
+                          style: failed || entry.kind === 'incomplete' ? S.badgeWarn : S.badgeSoft,
+                          title: [entry.code, entry.message].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
+                        }, bind(t, kindTextKey(entry.kind)))),
+                      h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatDuration(entry.durationMs)),
+                      h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatNumber(entry.totalTokens || 0)),
+                    )
+                  }))),
+        )
       }
       sections.push(
         h('div', { key: 'usage', style: S.section },

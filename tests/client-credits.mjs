@@ -803,6 +803,9 @@ const workbuddyDayBar = find(cardTree, (node) => typeof node.props?.title === 's
 if (workbuddyDayBar === undefined) {
   throw new Error('WorkBuddy 热力图没有使用 providerDaily（应显示 3 次 / 80 tok）')
 }
+// 固定 14 个槽位：只有一天数据时不能只画一根占满整行的柱子。
+const heatCells = findAll(cardTree, (node) => node.props?.title === 'usageHeatCell')
+if (heatCells.length !== 14) throw new Error(`近 14 天应固定 14 个槽位，实际 ${heatCells.length}`)
 const sessionRow = find(cardTree, (node) => node.type === 'div'
   && Array.isArray(node.children)
   && node.children.length > 0
@@ -1392,5 +1395,20 @@ const aiTab = find(cardTree, (node) => node.type === 'button' && textOf(node) ==
 if (aiTab === undefined || aiTab.props['aria-selected'] !== true) throw new Error('ArrowRight 应切到下一个 provider')
 if (!prevented) throw new Error('方向键应 preventDefault，避免滚动页面')
 console.log('✓ provider 标签支持方向键切换')
+
+// 5) 用量汇总不再用 52px 固定标签列：中文「当前会话」会被裁成「当…」。
+//    改成 KPI 卡片后，标签列不再存在；如果谁把旧表格加回来，这条会失败。
+cardTree = await mount(card, { t: (key) => key })
+const legacySummary = find(cardTree, (node) => typeof node.props?.style?.gridTemplateColumns === 'string'
+  && node.props.style.gridTemplateColumns.startsWith('52px minmax'))
+if (legacySummary !== undefined) throw new Error('用量汇总仍在使用 52px 固定标签列，中文会被截断')
+const sessionCard = find(cardTree, (node) => node.type === 'div'
+  && Array.isArray(node.children) && node.children.length > 0
+  && textOf(node.children[0]) === 'usageSession')
+if (sessionCard === undefined) throw new Error('缺少「当前会话」KPI 卡片')
+const sessionCardText = textOf(sessionCard)
+if (!sessionCardText.includes('30')) throw new Error(`当前会话卡片缺少 tokens 数字：${sessionCardText}`)
+if (!sessionCardText.includes('usageTokenShort')) throw new Error('当前会话卡片缺少 tokens 标签')
+console.log('✓ 用量汇总改为 KPI 卡片，长中文标签不再被截断')
 
 console.log('client-credits: OK')
