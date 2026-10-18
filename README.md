@@ -920,7 +920,7 @@ stats.json             # 用量统计 v3：今日/累计/每日 30 天/按 provi
 ## 开发
 
 ```powershell
-node --test tests/*.test.mjs      # 206 条纯逻辑 / 集成用例
+node --test tests/*.test.mjs      # 207 条纯逻辑 / 集成用例
 node tests/client-credits.mjs     # 设置卡片与侧栏小卡的渲染 / 交互用例（35 项）
 npm run verify                    # 两套一起跑
 ```

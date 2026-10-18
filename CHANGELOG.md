@@ -58,8 +58,10 @@
 
 ### 测试
 
-- `node --test tests/*.test.mjs`：**206 条**（新增 `tests/credits-state.test.mjs`
-  4 条、诊断 2 条、`thinTrend` 纯函数若干断言）；
+- `node --test tests/*.test.mjs`：**207 条**（新增 `tests/credits-state.test.mjs`
+  5 条、诊断 2 条、`thinTrend` 纯函数若干断言）。其中一条把服务端的
+  `formatCompactDuration()` 与浏览器半边逐字对比：两边是手抄的同一套规则，
+  漂移了就会出现「卡片 3h 20m、侧栏 200m」那种都对不上号的显示。
 - `node tests/client-credits.mjs`：**35 项**（新增「读失败显示『读取失败』」
   与「全部读失败时胶囊说明『读取失败』」）。
 
