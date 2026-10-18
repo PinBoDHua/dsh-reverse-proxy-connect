@@ -184,6 +184,39 @@ test('账号测试：读到运行时 finish.kind 才算成功，不能因为字�
   }
 })
 
+test('账号 × 模型测试：429 限额要带 resetHint，并记进 modelTests', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-model-test-'))
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response(
+    '您的使用量已超出频率限制，将在 2026-10-19 15:33:04 UTC+8 重置，您也可以切换其他模型继续使用。',
+    { status: 429, headers: { 'content-type': 'text/plain' } },
+  )
+  try {
+    const settings = settingsWithAccounts()
+    settings.accounts.workbuddy = [settings.accounts.workbuddy[0]]
+    const runtime = new Runtime({ settings: () => settings, dataDir: dir, logger: {} })
+    try {
+      runtime.catalogs.set('workbuddy::a', {
+        models: [{ id: 'deepseek-v4.1-flash', name: 'Flash', contextWindow: 1000000, maxTokens: 64000, reasoningEfforts: [] }],
+        fetchedAt: Date.now(),
+        source: 'live',
+      })
+      const result = await runtime.testAccount('workbuddy', 'a', 'deepseek-v4.1-flash')
+      assert.equal(result.ok, false)
+      assert.equal(result.model, 'deepseek-v4.1-flash')
+      assert.equal(result.code, 'RATE_LIMIT')
+      assert.equal(result.resetHint, '2026-10-19 15:33:04 UTC+8')
+      assert.equal(runtime.lastModelTestFor('workbuddy', 'a', 'deepseek-v4.1-flash').code, 'RATE_LIMIT')
+      assert.equal(runtime.modelTestsFor('workbuddy', 'a')['deepseek-v4.1-flash'].model, 'deepseek-v4.1-flash')
+    } finally {
+      runtime.flushCaches()
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('测试/探测的死线只覆盖「等响应头」，且长于 Qoder 首包排队预算', async () => {
   // 实测事故（1.8.0）：`node lib/bin.js test` 里 qoder-global 跑了 45013ms
   // 后报 `ABORTED` + `aborted` —— 什么都说明不了。两个计时器都设成 45 秒，

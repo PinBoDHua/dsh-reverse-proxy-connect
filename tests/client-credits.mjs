@@ -1231,7 +1231,7 @@ for (const label of ['usageAccountCol', 'usageAccountModelsHint', 'usageModelCal
 /** 账号 × 模型的数据行（表头与数据行共用同一套 gridTemplateColumns，按文本筛掉表头）。 */
 const pairRowNodes = (tree) => findAll(tree, (node) => node.type === 'div'
   && typeof node.props?.style?.gridTemplateColumns === 'string'
-  && node.props.style.gridTemplateColumns === 'minmax(84px, 1.1fr) minmax(104px, 1.5fr) minmax(46px, .7fr) minmax(70px, .9fr) minmax(56px, .8fr)'
+  && node.props.style.gridTemplateColumns === 'minmax(78px, 1fr) minmax(92px, 1.3fr) minmax(40px, .55fr) minmax(60px, .8fr) minmax(50px, .65fr) minmax(104px, 1.15fr)'
   && !textOf(node).includes('usageAccountCol'))
 
 // 默认口径必须是「今日」：卡片上方写的是「今日 4 次」，交叉表也必须按今日，
@@ -1462,6 +1462,52 @@ try {
   console.log('✓ 账号行显示各自累计请求与 token')
 } finally {
   STATUS.providers[0].accounts = accountUsageSnapshot
+}
+
+// 8) 账号 × 模型可以现场「检测」：429 要打「限额」徽章，按钮发 test-model。
+const modelTestSnapshot = STATUS.providers[0].accounts
+STATUS.providers[0].accounts = STATUS.providers[0].accounts.map((account) => ({
+  ...account,
+  modelTests: account.id === 'default'
+    ? {
+        auto: {
+          at: Date.now(),
+          ok: false,
+          code: 'RATE_LIMIT',
+          model: 'auto',
+          error: '您的使用量已超出频率限制，将在 2026-10-19 15:33:04 UTC+8 重置',
+          resetHint: '2026-10-19 15:33:04 UTC+8',
+        },
+      }
+    : {},
+}))
+try {
+  cardTree = await mount(card, { t: (key) => key })
+  const modelTestRows = pairRowNodes(cardTree)
+  const limitedRow = modelTestRows.find((row) => textOf(row).includes('本机登录') && textOf(row).includes('auto'))
+  if (limitedRow === undefined) throw new Error('找不到 default / auto 的账号 × 模型行')
+  if (!textOf(limitedRow).includes('limitBadge')) {
+    throw new Error('429 的模型测试结果没有渲染「限额」徽章')
+  }
+  const limitChip = find(limitedRow, (node) => textOf(node) === 'limitBadge')
+  if (limitChip === undefined || !String(limitChip.props?.title ?? '').includes('limitUntil')) {
+    throw new Error('限额徽章的悬停提示缺少重置时间')
+  }
+  const testModelButton = find(limitedRow, (node) => node.type === 'button' && textOf(node) === 'modelTest')
+  if (testModelButton === undefined) throw new Error('账号 × 模型行缺少「检测」按钮')
+  const beforeModelTest = calls.length
+  testModelButton.props.onClick()
+  const modelTestCall = calls[calls.length - 1]
+  if (calls.length === beforeModelTest || !String(modelTestCall.body).includes('"action":"test-model"')) {
+    throw new Error('点「检测」没有发 test-model 请求')
+  }
+  if (!String(modelTestCall.body).includes('"model":"auto"') || !String(modelTestCall.body).includes('"accountId":"default"')) {
+    throw new Error(`test-model 请求缺少账号或模型：${String(modelTestCall.body)}`)
+  }
+  await render(card, { t: (key) => key })
+  console.log('✓ 账号 × 模型可现场检测，429 显示「限额」徽章')
+} finally {
+  STATUS.providers[0].accounts = modelTestSnapshot
 }
 
 console.log('client-credits: OK')

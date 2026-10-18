@@ -1,5 +1,46 @@
 # 更新记录
 
+## 2.2.0 — 2026-10-18
+
+用户想知道 WorkBuddy 两个账号的 `deepseek-v4.1-flash` 是不是被限额了。
+WorkBuddy 的限额是**按账号 + 模型**的：账号还有积分，不代表某个模型没被
+频率限制。新增「账号 × 模型检测」。
+
+### 新增：账号 × 模型限额检测
+
+- 账号 × 模型表多一列「状态」，每行一个「检测」按钮：真发一次 1-token 请求，
+  只测这个账号 + 这个模型，不写用量统计、不触发换号；
+- 结果显示为徽章：
+  - `限额`（RATE_LIMIT / QUOTA）—— 悬停提示里带**重置时间**，例如
+    `限额至 2026-10-19 15:33:04 UTC+8`；
+  - `失效`（AUTH）、`失败`（其它错误）、`可用`（成功 + 延迟）；
+- 即使不手动点，最近一次真实请求如果已经被上游限额（stats 最近请求里有
+  `RATE_LIMIT` / `QUOTA`），对应行也会自动亮「限额」徽章；
+- 结果保存在内存里（按 provider/账号/模型，最多 200 条），刷新页面仍可见；
+- 新 action：`{"action":"test-model","provider","accountId","model"}`。
+
+### CLI
+
+```powershell
+node lib/bin.js test workbuddy default deepseek-v4.1-flash
+node lib/bin.js test workbuddy acc-1 deepseek-v4.1-flash
+```
+
+第三个参数省略时仍然测账号默认模型；给了模型就精确测这个「账号 × 模型」，
+输出会包含 `限额至 …` 与上游原文。
+
+### 实测（2026-10-18 18:1x）
+
+- 本机登录：`RATE_LIMIT`，限额至 **2026-10-19 15:33:04 UTC+8**；
+- 风雪：`RATE_LIMIT`，限额至 **2026-10-19 03:18:01 UTC+8**。
+
+两家都是频率限额，不是账号积分耗尽；重置后（或换用其它模型）可以继续。
+
+### 测试
+
+- `node --test tests/*.test.mjs`：**258 条**全部通过（新增 resetHint / modelTests）；
+- `node tests/client-credits.mjs`：**49 项**通过（新增限额徽章与 test-model 请求）。
+
 ## 2.1.2 — 2026-10-18
 
 用户反馈「1.9 的账号 × 模型好像没实现」：WorkBuddy 有两个账号，但卡片里看不到

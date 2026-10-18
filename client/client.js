@@ -253,6 +253,15 @@ window.__ModuleLoader__.load({
       usageAccountModelsHint: '同一个模型可能被多个账号用过；这一栏按账号分开算 token。',
       usageAccountModelCoverage: '已记录 {covered} / {total} 次（{percent}%）：历史请求拆不出账号，只从 1.9.x 起累积',
       usageAccountModelTodayEmpty: '今天这个账号还没有新的请求记录；下表是累计数据（账号 × 模型从 1.9.x 起累积，历史请求拆不出账号）。',
+      usageAccountModelStatus: '状态',
+      modelTest: '检测',
+      modelTesting: '检测中…',
+      modelTestOk: '可用',
+      modelTestFailed: '失败',
+      limitBadge: '限额',
+      authBadge: '失效',
+      limitUntil: '限额至 {time}',
+      recentLimitHint: '最近一次请求被上游限额（{code}）',
       usageAccountCol: '账号',
       usageAllAccounts: '全部账号',
       usageModelCalls: '请求',
@@ -508,6 +517,15 @@ window.__ModuleLoader__.load({
       usageAccountModelsHint: 'The same model can be used by several accounts; this table splits tokens per account.',
       usageAccountModelCoverage: 'Recorded {covered} of {total} requests ({percent}%): older requests carry no account split',
       usageAccountModelTodayEmpty: 'No new requests for this account today; showing cumulative data (account × model only accumulates from 1.9.x).',
+      usageAccountModelStatus: 'Status',
+      modelTest: 'Test',
+      modelTesting: 'Testing…',
+      modelTestOk: 'OK',
+      modelTestFailed: 'Failed',
+      limitBadge: 'Limited',
+      authBadge: 'Auth',
+      limitUntil: 'Limited until {time}',
+      recentLimitHint: 'The latest request was limited upstream ({code})',
       usageAccountCol: 'Account',
       usageAllAccounts: 'All accounts',
       usageModelCalls: 'Requests',
@@ -1778,6 +1796,29 @@ window.__ModuleLoader__.load({
         if (busyNow(key)) return
         beginBusy(key)
         postJson(ACTION_PATH, { action: 'test-account', provider: provider, accountId: accountId }, status.key)
+          .then(function (document) {
+            applyStatus(document.status !== undefined ? document.status : document)
+            endBusy(key)
+            setError(undefined)
+          })
+          .catch(function (failure) {
+            endBusy(key)
+            setError(String(failure && failure.message ? failure.message : failure))
+          })
+      }
+
+      /** 真发一次 1-token 请求，验证某个账号 × 模型当前能不能用 / 是否被限额。 */
+      var testAccountModel = function (provider, accountId, modelId) {
+        if (status === undefined) return
+        var key = 'model-test:' + accountId + ':' + modelId
+        if (busyNow(key)) return
+        beginBusy(key)
+        postJson(ACTION_PATH, {
+          action: 'test-model',
+          provider: provider,
+          accountId: accountId,
+          model: modelId,
+        }, status.key)
           .then(function (document) {
             applyStatus(document.status !== undefined ? document.status : document)
             endBusy(key)
@@ -3143,7 +3184,76 @@ window.__ModuleLoader__.load({
           })
           : undefined
         if (accountModelRows.length > 0) {
-          var accountModelColumns = 'minmax(84px, 1.1fr) minmax(104px, 1.5fr) minmax(46px, .7fr) minmax(70px, .9fr) minmax(56px, .8fr)'
+          var accountModelColumns = 'minmax(78px, 1fr) minmax(92px, 1.3fr) minmax(40px, .55fr) minmax(60px, .8fr) minmax(50px, .65fr) minmax(104px, 1.15fr)'
+          var accountById = {}
+          safeArray(active.accounts).forEach(function (account) {
+            if (account !== null && typeof account === 'object' && typeof account.id === 'string') accountById[account.id] = account
+          })
+          var limitCodes = { RATE_LIMIT: true, QUOTA: true }
+          var recentLimitFor = function (accountId, modelId) {
+            var list = safeArray(statsDoc.recent)
+            for (var index = 0; index < list.length; index++) {
+              var item = list[index]
+              if (item === null || typeof item !== 'object') continue
+              if (item.provider !== active.provider || item.accountId !== accountId || item.model !== modelId) continue
+              if (item.kind !== 'error' || limitCodes[item.code] !== true) continue
+              return item
+            }
+            return undefined
+          }
+          var modelTestCell = function (entry) {
+            var account = accountById[entry.accountId]
+            var test = account !== undefined && account.modelTests !== null && typeof account.modelTests === 'object'
+              ? account.modelTests[entry.model]
+              : undefined
+            var recent = test === undefined ? recentLimitFor(entry.accountId, entry.model) : undefined
+            var badge = null
+            if (test !== undefined && typeof test === 'object') {
+              if (test.ok === true) {
+                badge = h('span', {
+                  style: S.badgeSoft,
+                  title: bind(t, 'testOk', { ms: String(test.latencyMs ?? 0) + 'ms' }),
+                }, bind(t, 'modelTestOk'))
+              } else if (limitCodes[test.code] === true) {
+                badge = h('span', {
+                  style: S.badgeWarn,
+                  title: [
+                    bind(t, 'limitUntil', { time: test.resetHint === undefined ? '—' : test.resetHint }),
+                    test.error,
+                  ].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
+                }, bind(t, 'limitBadge'))
+              } else if (test.code === 'AUTH') {
+                badge = h('span', { style: S.badgeWarn, title: test.error ?? '' }, bind(t, 'authBadge'))
+              } else {
+                badge = h('span', {
+                  style: S.badgeWarn,
+                  title: [test.code, test.error].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
+                }, bind(t, 'modelTestFailed'))
+              }
+            } else if (recent !== undefined) {
+              // 没手动测过，但最近一次真实请求已经被上游限额：同样打徽章。
+              badge = h('span', {
+                style: S.badgeWarn,
+                title: [
+                  bind(t, 'recentLimitHint', { code: recent.code }),
+                  formatTime(recent.at),
+                  recent.message,
+                ].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
+              }, bind(t, 'limitBadge'))
+            }
+            var busyKey = 'model-test:' + entry.accountId + ':' + entry.model
+            return h('div', {
+              style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 5, flexWrap: 'wrap', minWidth: 0 },
+            },
+            badge,
+            h('button', {
+              type: 'button',
+              style: S.buttonGhost,
+              disabled: isBusy(busyKey),
+              title: bind(t, 'modelTest'),
+              onClick: function () { testAccountModel(active.provider, entry.accountId, entry.model) },
+            }, isBusy(busyKey) ? bind(t, 'modelTesting') : bind(t, 'modelTest')))
+          }
           // 切换按钮：两个口径的起点不同（今日 vs 累计），必须让用户能选，
           // 而不是只能看一个然后怀疑数字。老宿主没有今日数据时渲染按钮会把
           // 「今日」画成选中却显示累计，所以干脆不渲染。
@@ -3202,12 +3312,13 @@ window.__ModuleLoader__.load({
                 ? h('p', { key: 'fallback', style: S.hintTiny }, bind(t, 'usageAccountModelTodayEmpty'))
                 : null,
               h('div', { style: usageTableFrame },
-                h('div', { style: { display: 'grid', gridTemplateColumns: accountModelColumns, minWidth: 420 } },
+                h('div', { style: { display: 'grid', gridTemplateColumns: accountModelColumns, minWidth: 540 } },
                   usageHead('a0', bind(t, 'usageAccountCol')),
                   usageHead('a1', bind(t, 'usageModel')),
                   usageHead('a2', bind(t, 'usageModelCalls'), true),
                   usageHead('a3', bind(t, 'usageModelTokens'), true),
-                  usageHead('a4', bind(t, 'usageAvg'), true)),
+                  usageHead('a4', bind(t, 'usageAvg'), true),
+                  usageHead('a5', bind(t, 'usageAccountModelStatus'), true)),
                 accountModelRows.map(function (entry, index) {
                   return h('div', {
                     key: 'am' + index,
@@ -3217,7 +3328,8 @@ window.__ModuleLoader__.load({
                   h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-primary)' }), title: entry.model }, entry.model || '—'),
                   h('span', { style: usageNumberCell }, formatNumber(entry.counters.requests || 0)),
                   h('span', { style: usageNumberCell }, formatNumber(entry.counters.totalTokens || 0)),
-                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatDuration(entry.counters.avgDurationMs)))
+                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatDuration(entry.counters.avgDurationMs)),
+                  modelTestCell(entry))
                 }))),
           )
         }

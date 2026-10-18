@@ -126,6 +126,18 @@ test('HTTP：超限请求返回 413；代理头与多字节密钥返回 403/413 
       headers: { host: `127.0.0.1:${port}`, 'content-type': 'application/json' },
     }, JSON.stringify({ action: 'stats-reset' }))
     assert.equal(noKey.status, 403)
+
+    // 账号 × 模型检测 action：没有目录时返回 NO_MODEL，并把结果放进状态。
+    const modelTest = await send(port, {
+      method: 'POST',
+      path: ACTION_PATH,
+      headers: { host: `127.0.0.1:${port}`, 'x-rpc-key': key, 'content-type': 'application/json' },
+    }, JSON.stringify({ action: 'test-model', provider: 'workbuddy', accountId: 'default', model: 'auto' }))
+    assert.equal(modelTest.status, 200)
+    const modelTestBody = JSON.parse(modelTest.body)
+    assert.equal(modelTestBody.test.code, 'NO_MODEL')
+    const workbuddy = modelTestBody.status.providers.find((provider) => provider.provider === 'workbuddy')
+    assert.equal(workbuddy.accounts[0].modelTests.auto.code, 'NO_MODEL')
   } finally {
     for (const dispose of disposers.reverse()) {
       try {

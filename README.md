@@ -4,6 +4,12 @@
 **Trae**（国内版 / 国际版）账号里的模型接进 **DeepSeek Harness**。
 一个插件、六个 provider、一张设置卡片、一套账号池。
 
+> **2.2.0 新增「账号 × 模型限额检测」**：WorkBuddy 的限额是按账号 + 模型的，
+> 账号有积分不代表某个模型没被限流。账号 × 模型表每行多了「检测」按钮，
+> 真发一次 1-token 请求；`RATE_LIMIT` / `QUOTA` 打「限额」徽章，悬停显示
+> 重置时间；最近一次真实请求被限额时也会自动亮徽章。CLI 同能力：
+> `node lib/bin.js test workbuddy default deepseek-v4.1-flash`。
+>
 > **2.1.2 修「账号 × 模型」看起来没实现**：今日交叉桶为空时，旧逻辑会把整张
 > 表藏掉（累计桶其实有数据）。现在自动回退到累计并注明「今天还没有新记录」；
 > 账号列表每行也补上该账号自己的请求数 / tokens。历史请求无法反推交叉值，
@@ -55,6 +61,26 @@
 | `trae-global` | Trae Global | 本机 `storage.json`（同上，国际版目录） | 视账号 |
 
 ---
+
+## 2.2.0 账号 × 模型限额检测
+
+WorkBuddy 的限额是**按账号 + 模型**的：账号还有积分，不代表某个模型没被
+频率限制。账号 × 模型表每行新增「状态」列和「检测」按钮：
+
+- 点「检测」真发一次 1-token 请求，只测这个账号 + 这个模型；
+- `RATE_LIMIT` / `QUOTA` → `限额` 徽章，悬停显示重置时间（例如
+  `限额至 2026-10-19 15:33:04 UTC+8`）；
+- `AUTH` → `失效`，其它错误 → `失败`，成功 → `可用` + 延迟；
+- 最近一次真实请求如果已被上游限额（stats 最近请求里有 `RATE_LIMIT` /
+  `QUOTA`），对应行也会自动亮徽章，不需要先点检测；
+- 检测结果只在内存里（最多 200 条），刷新页面仍可见；不写用量统计、不换号。
+
+CLI 同一能力：
+
+```powershell
+node lib/bin.js test workbuddy default deepseek-v4.1-flash
+node lib/bin.js test workbuddy acc-1 deepseek-v4.1-flash
+```
 
 ## 2.1.0 设置界面重排
 
@@ -974,7 +1000,7 @@ node lib/bin.js credits [provider]     # 列积分与套餐包明细
 node lib/bin.js usage [provider]       # 今日/累计/当前会话/每日历史与最近请求
 node lib/bin.js events [--limit N] [--type T] [--json]  # 最近事件（换号/续期/降级/签到/探测）
 node lib/bin.js probe [provider]       # 重跑能力探测
-node lib/bin.js test [provider] [accountId]  # 真发一次 1-token 请求验证账号
+node lib/bin.js test [provider] [accountId] [model]  # 真发一次 1-token 请求验证账号 / 模型限额
 node lib/bin.js checkin [provider]     # 立即签到
 node lib/bin.js login workbuddy        # 浏览器登录并写入账号池
 node lib/bin.js stats-reset            # 清空用量统计
@@ -1031,8 +1057,8 @@ stats.json             # 用量统计 v4：今日/累计/每日 30 天/按 provi
 ## 开发
 
 ```powershell
-node --test tests/*.test.mjs      # 257 条纯逻辑 / 集成用例
-node tests/client-credits.mjs     # 设置卡片与侧栏小卡的渲染 / 交互用例（48 项）
+node --test tests/*.test.mjs      # 258 条纯逻辑 / 集成用例
+node tests/client-credits.mjs     # 设置卡片与侧栏小卡的渲染 / 交互用例（49 项）
 npm run verify                    # 两套一起跑
 ```
 
