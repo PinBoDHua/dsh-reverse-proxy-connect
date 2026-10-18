@@ -1957,4 +1957,24 @@ try {
   console.log('✓ 时间格式化：无效/超范围一律 —，不再渲染 Invalid Date / NaN')
 }
 
+// 30) creditsPercentOf：remain 缺省/非有限时必须返回 undefined（不得把 NaN 喂给百分比模板 → "NaN%"）。
+{
+  const header = 'function creditsPercentOf(credits) {'
+  const start = source.indexOf(header)
+  if (start < 0) throw new Error('client.js 里找不到 creditsPercentOf')
+  let depth = 0
+  let end = start
+  for (let i = source.indexOf('{', start); i < source.length; i++) {
+    if (source[i] === '{') depth++
+    else if (source[i] === '}') { depth--; if (depth === 0) { end = i + 1; break } }
+  }
+  const creditsPercentOf = new Function(`${source.slice(start, end)}; return creditsPercentOf`)()
+  if (creditsPercentOf({ state: 'ok', total: 100 }) !== undefined) throw new Error('缺 remain 应返回 undefined，实际 ' + String(creditsPercentOf({ state: 'ok', total: 100 })))
+  if (creditsPercentOf({ state: 'ok', total: 100, remain: Number.NaN }) !== undefined) throw new Error('NaN remain 应返回 undefined')
+  if (creditsPercentOf({ state: 'ok', total: 100, remain: Number.POSITIVE_INFINITY }) !== undefined) throw new Error('Infinity remain 应返回 undefined')
+  if (creditsPercentOf({ state: 'ok', total: 0 }) !== undefined) throw new Error('total=0 应返回 undefined')
+  if (creditsPercentOf({ state: 'ok', total: 100, remain: 25 }) !== 25) throw new Error('正常百分比被改坏')
+  console.log('✓ creditsPercentOf 对缺省/非有限 remain 返回 undefined，不再产出 NaN%')
+}
+
 console.log('client-credits: OK')

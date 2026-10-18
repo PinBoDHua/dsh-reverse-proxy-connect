@@ -893,11 +893,12 @@ window.__ModuleLoader__.load({
       }))
     }
 
-    /** 额度百分比（读不到 / 不限量 / 没有总量时返回 undefined）。 */
+    /** 额度百分比（读不到 / 不限量 / 没有总量 / 余额非有限时返回 undefined）。 */
     function creditsPercentOf(credits) {
       if (credits === undefined || credits.state !== 'ok') return undefined
       if (credits.unlimited === true) return undefined
       if (!(credits.total > 0)) return undefined
+      if (!Number.isFinite(credits.remain)) return undefined
       return Math.max(0, Math.min(100, Math.round((credits.remain / credits.total) * 100)))
     }
 
@@ -2894,6 +2895,7 @@ window.__ModuleLoader__.load({
       var creditsBody = []
       if (credits.state === 'ok') {
         var creditsRatio = credits.unlimited === true || !(credits.total > 0)
+          || !Number.isFinite(credits.remain)
           ? undefined
           : Math.max(0, Math.min(1, credits.remain / credits.total))
         creditsBody.push(
@@ -4738,7 +4740,7 @@ window.__ModuleLoader__.load({
             var percent = creditsPercentOf(snapshot)
             var parts = creditsValueParts(snapshot, t)
             var ratio
-            if (snapshot.unlimited !== true && typeof snapshot.total === 'number' && snapshot.total > 0 && typeof snapshot.remain === 'number') {
+            if (snapshot.unlimited !== true && Number.isFinite(snapshot.total) && snapshot.total > 0 && Number.isFinite(snapshot.remain)) {
               ratio = Math.max(0, Math.min(1, snapshot.remain / snapshot.total))
             }
             var todayUsage = row.entry.usage && row.entry.usage.today

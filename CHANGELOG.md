@@ -1,5 +1,25 @@
 # 更新记录
 
+## 2.6.1 — 2026-10-18
+
+第四轮审计的一个真实前端缺陷（只改 `client/client.js`）。
+
+### 界面
+
+- **额度百分比不再渲染成 `NaN%`**：汇总卡与侧栏小卡的百分比、以及两处额度
+  进度条，以前对 `remain` 只判「是不是数字」，未拦非有限值：宿主给出一份
+  `state:'ok'`、`total > 0` 但 `remain` **缺省 / 非数字**的快照（`/status` 序列化
+  会把 `undefined` 键直接省略）时，`credits.remain / credits.total` 得 NaN，百分比
+  徽章直接显示字面 **`NaN%`**，而同卡大数字走 `formatNumber` 却显示 `—`，一张卡
+  自相矛盾。现在三处都先过 `Number.isFinite(remain)`，非有限一律回到
+  「不显示百分比 / 进度条」的中性口径，与 `formatNumber` 同一套兜底。
+
+### 测试
+
+- `node --test tests/*.test.mjs`：**279 条**全部通过（本轮无后端改动）；
+- `node tests/client-credits.mjs`：**71 项**通过（新增 1 项：`creditsPercentOf`
+  对缺省 / 非有限 `remain` 必须返回 `undefined`，正常 25% 不被改坏）。
+
 ## 2.6.0 — 2026-10-18
 
 第三轮前后端只读审计：时间与时长输出确定化 + 无效值兜底。前两轮 10 条已全部

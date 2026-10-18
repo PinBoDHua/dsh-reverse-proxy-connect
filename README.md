@@ -4,6 +4,11 @@
 **Trae**（国内版 / 国际版）账号里的模型接进 **DeepSeek Harness**。
 一个插件、六个 provider、一张设置卡片、一套账号池。
 
+> **2.6.1 修复额度百分比 `NaN%`**：汇总卡/侧栏小卡的百分比与两处进度条，
+> 以前对 `remain` 只判「是不是数字」、未拦非有限值；宿主给出 `state:'ok'`、
+> `total > 0` 但 `remain` 缺省/非数字的快照时会显示字面 `NaN%`，而同卡大数字却是
+> `—`。现在统一 `Number.isFinite` 兜底，非有限一律不显示百分比/进度条。测试 279 后端 + 71 前端。
+>
 > **2.6.0 第三轮审计：时间输出确定化 + 无效值兜底**：卡片与 CLI/诊断以前到处用
 > `toLocaleString()`——它对无效/超范围时间戳不报错而是返回英文 "Invalid Date"
 > （`try/catch` 形同虚设），`formatShortDate` 还会拼出「NaN/NaN/NaN」，而且
@@ -90,6 +95,17 @@
 | `trae-global` | Trae Global | 本机 `storage.json`（同上，国际版目录） | 视账号 |
 
 ---
+
+## 2.6.1 修复额度百分比 NaN%
+
+第四轮审计的一个真实前端缺陷。宿主 `/status` 序列化会把值为 `undefined` 的键直接
+省略，于是可能出现 `state:'ok'`、`total > 0` 但 `remain` 缺省/非数字的快照。以前
+汇总卡与侧栏小卡的百分比、两处进度条都只判 `typeof remain === 'number'`（NaN 也是
+number），`remain / total` 得 NaN 后百分比徽章渲染成字面 `NaN%`，而同卡大数字走
+`formatNumber` 却显示 `—`，一张卡两个口径。
+
+现在三处都先过 `Number.isFinite(remain)`：非有限一律回到「不显示百分比/进度条」的
+中性口径，与 `formatNumber` / `compactNumber` 同一套兜底。
 
 ## 2.6.0 第三轮审计：时间与时长输出确定化
 
