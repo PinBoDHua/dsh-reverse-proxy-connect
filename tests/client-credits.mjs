@@ -162,6 +162,14 @@ const STATUS = {
       'workbuddy::glm-5.3': { requests: 2, totalTokens: 80, avgDurationMs: 900 },
       'qoder-global::qfmodel': { requests: 1, totalTokens: 10, avgDurationMs: 300 },
     },
+    // v4：账号 × 模型交叉维度。WorkBuddy 有两个账号，默认账号用了 auto，
+    // 备用账号也用了 auto —— 这正是「哪个账号烧的 token」要看的那一格。
+    accountModels: {
+      'workbuddy::default::auto': { provider: 'workbuddy', accountId: 'default', model: 'auto', requests: 6, totalTokens: 300, avgDurationMs: 1200 },
+      'workbuddy::acc-2::auto': { provider: 'workbuddy', accountId: 'acc-2', model: 'auto', requests: 2, totalTokens: 100, avgDurationMs: 1100 },
+      'workbuddy::default::glm-5.3': { provider: 'workbuddy', accountId: 'default', model: 'glm-5.3', requests: 2, totalTokens: 80, avgDurationMs: 900 },
+      'qoder-global::default::qfmodel': { provider: 'qoder-global', accountId: 'default', model: 'qfmodel', requests: 1, totalTokens: 10, avgDurationMs: 300 },
+    },
     daily: [
       { date: '2026-10-15', requests: 1, totalTokens: 10 },
       { date: '2026-10-16', requests: 2, totalTokens: 40 },
@@ -1170,6 +1178,50 @@ try {
   console.log('✓ 全部读失败时胶囊说明「读取失败」')
 } finally {
   STATUS.providers = allErrorSnapshot
+}
+
+// ---------- 15. 账号 × 模型用量 ----------
+//
+// 用户要的是「哪个账号用了哪个模型、多少 token」。models 只给模型合计、
+// accounts 只给账号合计，两个账号都用 auto 时都答不了 —— 必须有交叉维度。
+cardTree = await mount(card, { t: (key) => key })
+const pairText = textOf(cardTree)
+if (!pairText.includes('usageAccountModels')) {
+  throw new Error('WorkBuddy 有两个账号，卡片应渲染「账号 × 模型用量」')
+}
+for (const label of ['usageAccountCol', 'usageAccountModelsHint', 'usageModelCalls', 'usageModelTokens']) {
+  if (!pairText.includes(label)) throw new Error(`账号 × 模型表缺少 ${label}`)
+}
+// 每一行必须能同时看到账号名与模型名，且 token 数正确。
+// 表头与数据行共用同一套 gridTemplateColumns，所以再按「有没有 label 文本」筛掉表头。
+const pairRows = findAll(cardTree, (node) => node.type === 'div'
+  && typeof node.props?.style?.gridTemplateColumns === 'string'
+  && node.props.style.gridTemplateColumns === 'minmax(84px, 1.1fr) minmax(104px, 1.5fr) minmax(46px, .7fr) minmax(70px, .9fr) minmax(56px, .8fr)'
+  && !textOf(node).includes('usageAccountCol'))
+if (pairRows.length !== 3) throw new Error(`账号 × 模型应有 3 行（default/auto、acc-2/auto、default/glm-5.3），实际 ${pairRows.length}`)
+const joined = pairRows.map((row) => textOf(row)).join(' || ')
+if (!joined.includes('本机登录') || !joined.includes('备用账号')) {
+  throw new Error(`账号列应显示设置里的 label 而不是 id：${joined}`)
+}
+if (!joined.includes('auto') || !joined.includes('glm-5.3')) {
+  throw new Error(`模型列没有渲染：${joined}`)
+}
+// 按 token 倒序：300 那条在最前。
+const firstPair = textOf(pairRows[0])
+if (!firstPair.includes('300') || !firstPair.includes('本机登录')) {
+  throw new Error(`账号 × 模型应按 token 倒序，第一行应是「本机登录 / auto / 300」：${firstPair}`)
+}
+console.log('✓ 账号 × 模型用量按 token 倒序，账号显示名称')
+
+// 只有一个账号时不该渲染这张表（和模型用量完全重复）。
+const wbaiTab = findButton(cardTree, 'WorkBuddy AI')
+if (wbaiTab !== undefined) {
+  wbaiTab.props.onClick()
+  cardTree = await render(card, { t: (key) => key })
+  if (textOf(cardTree).includes('usageAccountModels')) {
+    throw new Error('只有一个账号的 provider 不该渲染「账号 × 模型」表：与模型用量完全重复')
+  }
+  console.log('✓ 单账号 provider 不渲染账号 × 模型表')
 }
 
 console.log('client-credits: OK')

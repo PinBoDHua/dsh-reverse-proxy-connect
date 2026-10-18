@@ -243,6 +243,10 @@ window.__ModuleLoader__.load({
       usageSession: '当前会话',
       usageHeatmap: '近 14 天',
       usageTopModels: '模型用量',
+      usageAccountModels: '账号 × 模型用量',
+      usageAccountModelsHint: '同一个模型可能被多个账号用过；这一栏按账号分开算 token。',
+      usageAccountCol: '账号',
+      usageAllAccounts: '全部账号',
       usageModelCalls: '请求',
       usageModelTokens: 'tokens',
       usageShowInSidebar: '侧栏显示今日用量',
@@ -461,6 +465,10 @@ window.__ModuleLoader__.load({
       usageSession: 'This session',
       usageHeatmap: 'Last 14 days',
       usageTopModels: 'Model usage',
+      usageAccountModels: 'Account × model usage',
+      usageAccountModelsHint: 'The same model can be used by several accounts; this table splits tokens per account.',
+      usageAccountCol: 'Account',
+      usageAllAccounts: 'All accounts',
       usageModelCalls: 'Requests',
       usageModelTokens: 'tokens',
       usageShowInSidebar: 'Show today’s usage in the sidebar',
@@ -2644,6 +2652,67 @@ window.__ModuleLoader__.load({
                     key: 'm' + index,
                     style: Object.assign({ display: 'grid', gridTemplateColumns: modelColumns, alignItems: 'center' }, index > 0 ? usageRowLine : {}),
                   },
+                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-primary)' }), title: entry.model }, entry.model || '—'),
+                  h('span', { style: usageNumberCell }, formatNumber(entry.counters.requests || 0)),
+                  h('span', { style: usageNumberCell }, formatNumber(entry.counters.totalTokens || 0)),
+                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatDuration(entry.counters.avgDurationMs)))
+                }))),
+          )
+        }
+
+        // 账号 × 模型：stats.accountModels 是 v4 新增的交叉维度，键有三段。
+        //
+        // 为什么需要它：`models` 只回答「这个模型一共花了多少」，`accounts` 只回答
+        // 「这个账号一共花了多少」；两个账号都用同一个模型时，用户真正想知道的是
+        // 「到底是哪个账号在烧 token」，这两份独立计数都答不了。
+        //
+        // 只在「该 provider 下账号数 > 1」时显示：单账号时这一栏和模型用量完全
+        // 重复，白白多一张表。
+        var accountModelRows = []
+        if (Array.isArray(active.accounts) && active.accounts.length > 1
+          && statsDoc.accountModels !== null && typeof statsDoc.accountModels === 'object') {
+          var labelOfAccount = {}
+          safeArray(active.accounts).forEach(function (account) {
+            if (account !== null && typeof account.id === 'string') labelOfAccount[account.id] = account.label
+          })
+          Object.keys(statsDoc.accountModels).forEach(function (key) {
+            var counters = statsDoc.accountModels[key]
+            if (counters === null || typeof counters !== 'object') return
+            // 快照里已经拆好三段（provider / accountId / model），不再自己拆键。
+            if (counters.provider !== active.provider) return
+            if (typeof counters.accountId !== 'string' || typeof counters.model !== 'string') return
+            if (!(counters.requests > 0)) return
+            accountModelRows.push({
+              accountId: counters.accountId,
+              label: labelOfAccount[counters.accountId] || counters.accountId,
+              model: counters.model,
+              counters: counters,
+            })
+          })
+          accountModelRows.sort(function (a, b) { return b.counters.totalTokens - a.counters.totalTokens })
+          accountModelRows = accountModelRows.slice(0, 8)
+        }
+        if (accountModelRows.length > 0) {
+          var accountModelColumns = 'minmax(84px, 1.1fr) minmax(104px, 1.5fr) minmax(46px, .7fr) minmax(70px, .9fr) minmax(56px, .8fr)'
+          usageBody.push(
+            h('div', { key: 'accountmodels', style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+              h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' } },
+                h('span', { style: S.sectionTitle }, bind(t, 'usageAccountModels')),
+                h('span', { style: S.grow }),
+                h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)', opacity: 0.8 }, title: bind(t, 'usageAccountModelsHint') }, bind(t, 'usageAccountModelsHint'))),
+              h('div', { style: usageTableFrame },
+                h('div', { style: { display: 'grid', gridTemplateColumns: accountModelColumns } },
+                  usageHead('a0', bind(t, 'usageAccountCol')),
+                  usageHead('a1', bind(t, 'usageModel')),
+                  usageHead('a2', bind(t, 'usageModelCalls'), true),
+                  usageHead('a3', bind(t, 'usageModelTokens'), true),
+                  usageHead('a4', bind(t, 'usageAvg'), true)),
+                accountModelRows.map(function (entry, index) {
+                  return h('div', {
+                    key: 'am' + index,
+                    style: Object.assign({ display: 'grid', gridTemplateColumns: accountModelColumns, alignItems: 'center' }, index > 0 ? usageRowLine : {}),
+                  },
+                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))' }), title: entry.label }, entry.label || '—'),
                   h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-primary)' }), title: entry.model }, entry.model || '—'),
                   h('span', { style: usageNumberCell }, formatNumber(entry.counters.requests || 0)),
                   h('span', { style: usageNumberCell }, formatNumber(entry.counters.totalTokens || 0)),

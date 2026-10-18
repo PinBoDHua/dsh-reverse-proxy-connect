@@ -29,6 +29,15 @@ test('统计：成功请求累加 token、次数与延迟', () => {
     assert.equal(snapshot.providerToday.workbuddy.requests, 2)
     assert.equal(snapshot.accounts['workbuddy::a'].requests, 2)
     assert.equal(snapshot.models['workbuddy::m'].requests, 2)
+    // v4：账号 × 模型交叉维度。「哪个账号用了哪个模型、多少 token」——
+    // 单独的 accounts / models 两份计数都答不了这个问题。
+    const pair = snapshot.accountModels['workbuddy::a::m']
+    assert.ok(pair !== undefined, '缺少账号 × 模型交叉维度')
+    assert.equal(pair.requests, 2)
+    assert.equal(pair.totalTokens, 38)
+    assert.equal(pair.provider, 'workbuddy', '快照里要拆出 provider')
+    assert.equal(pair.accountId, 'a', '快照里要拆出 accountId')
+    assert.equal(pair.model, 'm', '快照里要拆出 model')
     assert.equal(snapshot.recent.length, 2)
     assert.equal(snapshot.recent[0].kind, 'tool-calls')
     stats.stop()
@@ -349,6 +358,100 @@ test('统计：自有写入不会被误判成外部重置', () => {
     const reloaded = new Stats({ filePath, enabled: () => true })
     assert.equal(reloaded.snapshot().totals.requests, 2)
     reloaded.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：同一个模型被两个账号用了，token 要分开算', () => {
+  // 这正是用户问的那件事：「是哪个账号、用了哪个模型、用了多少 tokens」。
+  // 只看 models['provider::model'] 会得到「两个账号加起来 300 tok」，
+  // 看不出是谁烧的。
+  const dir = tempDir()
+  try {
+    const stats = new Stats({ filePath: statsPathOf(dir), enabled: () => true })
+    stats.record({ provider: 'workbuddy', accountId: 'acc-1', model: 'hy3', kind: 'stop', durationMs: 10, usage: { inputTokens: 100, outputTokens: 50 } })
+    stats.record({ provider: 'workbuddy', accountId: 'acc-1', model: 'hy3', kind: 'stop', durationMs: 10, usage: { inputTokens: 100, outputTokens: 50 } })
+    stats.record({ provider: 'workbuddy', accountId: 'acc-2', model: 'hy3', kind: 'stop', durationMs: 20, usage: { inputTokens: 60, outputTokens: 40 } })
+    const snapshot = stats.snapshot()
+
+    // 模型维度：两个账号合计（acc-1 两次 150×2 + acc-2 一次 100 = 400）。
+    assert.equal(snapshot.models['workbuddy::hy3'].totalTokens, 400)
+    // 账号维度：各自合计。
+    assert.equal(snapshot.accounts['workbuddy::acc-1'].totalTokens, 300)
+    assert.equal(snapshot.accounts['workbuddy::acc-2'].totalTokens, 100)
+    // 交叉维度：真正回答问题的那一份。
+    assert.equal(snapshot.accountModels['workbuddy::acc-1::hy3'].totalTokens, 300)
+    assert.equal(snapshot.accountModels['workbuddy::acc-1::hy3'].requests, 2)
+    assert.equal(snapshot.accountModels['workbuddy::acc-2::hy3'].totalTokens, 100)
+    assert.equal(snapshot.accountModels['workbuddy::acc-2::hy3'].requests, 1)
+    // 两个账号之和必须等于模型维度，否则某一维漏记了。
+    assert.equal(
+      snapshot.accountModels['workbuddy::acc-1::hy3'].totalTokens + snapshot.accountModels['workbuddy::acc-2::hy3'].totalTokens,
+      snapshot.models['workbuddy::hy3'].totalTokens,
+    )
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：v3 文件升级到 v4 不丢任何已有维度', () => {
+  // v3 → v4 只多一个 accountModels 块。如果把 v3 当成「不认识的版本」，
+  // 现有用户的累计/今日/每日历史会整份归零 —— 那是一次数据事故。
+  const dir = tempDir()
+  try {
+    const filePath = statsPathOf(dir)
+    const counters = {
+      requests: 5, ok: 5, failed: 0, aborted: 0, incomplete: 0,
+      inputTokens: 10, outputTokens: 20, cacheReadTokens: 0, cacheWriteTokens: 0,
+      reasoningTokens: 0, durationMs: 100, maxDurationMs: 40, lastAt: 1_700_000_000_000,
+      lastOkAt: 1_700_000_000_000, lastErrorAt: 0, consecutiveFailures: 0,
+    }
+    writeFileSync(filePath, JSON.stringify({
+      version: 3,
+      since: 1_700_000_000_000,
+      totals: counters,
+      today: { ...counters, date: dayKey() },
+      providers: { workbuddy: counters },
+      providerToday: { workbuddy: counters },
+      accounts: { 'workbuddy::a': counters },
+      models: { 'workbuddy::hy3': counters },
+      providerDaily: {},
+      sessions: {},
+      providerSessions: {},
+      recent: [],
+    }), 'utf8')
+
+    const stats = new Stats({ filePath, enabled: () => true })
+    const snapshot = stats.snapshot()
+    assert.equal(snapshot.totals.requests, 5, '累计必须保留')
+    assert.equal(snapshot.providers.workbuddy.requests, 5, 'provider 维度必须保留')
+    assert.equal(snapshot.accounts['workbuddy::a'].requests, 5, '账号维度必须保留')
+    assert.equal(snapshot.models['workbuddy::hy3'].requests, 5, '模型维度必须保留')
+    // 交叉维度没有历史可回填（两份独立计数推不出来），从下一次请求开始记。
+    assert.deepEqual(snapshot.accountModels, {})
+    stats.record({ provider: 'workbuddy', accountId: 'a', model: 'hy3', kind: 'stop', durationMs: 10 })
+    assert.equal(stats.snapshot().accountModels['workbuddy::a::hy3'].requests, 1)
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：账号 × 模型的键能容忍模型 id 里带 ::，并丢掉坏键', () => {
+  const dir = tempDir()
+  try {
+    const stats = new Stats({ filePath: statsPathOf(dir), enabled: () => true })
+    // 上游模型 id 不保证不含 `::`：只按前两个分隔符切，剩下整段都算模型。
+    stats.record({ provider: 'qoder', accountId: 'default', model: 'vendor::model-x', kind: 'stop', durationMs: 5 })
+    const snapshot = stats.snapshot()
+    const pair = snapshot.accountModels['qoder::default::vendor::model-x']
+    assert.ok(pair !== undefined, '含 :: 的模型 id 也要能记')
+    assert.equal(pair.provider, 'qoder')
+    assert.equal(pair.accountId, 'default')
+    assert.equal(pair.model, 'vendor::model-x', '模型 id 要原样保留，不能只取最后一段')
+    stats.stop()
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
