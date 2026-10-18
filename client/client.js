@@ -3279,7 +3279,25 @@ window.__ModuleLoader__.load({
           }
         }
 
-        var segments = rows.map(function (row, position) {
+        // 一行放不下就换行。
+        //
+        // 六家 provider 之后，`WB 775 | WBAI 57 | QDG 0 | TRAE 197` 在窄侧栏里
+        // 会直接把最后一个数字挤成半个（截图里就是「197」被裁掉一截）。原来的
+        // 做法是 `nowrap` + `overflow:hidden`：内容不换行、超出的部分静默剪掉，
+        // 用户看到的是一个残缺的数字，比看不到更糟。
+        //
+        // 现在改成「可换行的栅格」：每个 provider 占一格、两列铺开，放不下就
+        // 自动折到第二行；分隔线只在「同一行的非首格」上画（首格用 `:first-child`
+        // 之外的判断做不到，所以用 `rowIndex`/`columnIndex` 显式算）。
+        //
+        // 为什么用栅格而不是 `flex-wrap`：flex 换行后每行宽度不一致，分隔线会
+        // 出现在行首，看起来像「凭空多了一条竖线」。栅格能保证每行都是完整的
+        // 两列，分隔线永远只出现在两格之间。
+        var COLUMNS = 2
+        var visibleRows = wide ? rows : rows.slice(0, 1)
+        var segmentNodes = visibleRows.map(function (row, position) {
+          var columnIndex = position % COLUMNS
+          var rowIndex = Math.floor(position / COLUMNS)
           var snapshot = row.credits
           var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
           var warn = creditsWarning(snapshot, row.entry.provider, sidebarAlertRatio, sidebarAlertsEnabled)
@@ -3296,8 +3314,14 @@ window.__ModuleLoader__.load({
                 alignItems: 'baseline',
                 gap: 4,
                 minWidth: 0,
-                paddingLeft: position > 0 ? 8 : 0,
-                borderLeft: position > 0 ? '0.5px solid var(--dsw-alias-border-l2)' : 'none',
+                // 数字特别长时让它省略，而不是把整格顶出容器。
+                overflow: 'hidden',
+                paddingLeft: columnIndex > 0 ? 8 : 0,
+                borderLeft: columnIndex > 0 ? '0.5px solid var(--dsw-alias-border-l2)' : 'none',
+                // 每行第一格顶到最左、第二格靠右对齐，两列看起来才整齐。
+                justifyContent: columnIndex === 0 ? 'flex-start' : 'flex-end',
+                gridColumn: String(columnIndex + 1),
+                gridRow: String(rowIndex + 1),
               },
             },
             position === 0 || wide
@@ -3333,8 +3357,6 @@ window.__ModuleLoader__.load({
             ),
           )
         })
-
-        var visibleSegments = wide ? segments : segments.slice(0, 1)
 
         // 展开指示箭头：常显，悬停时更明显 —— 这是「能点」最直接的暗示。
         //
@@ -3383,7 +3405,7 @@ window.__ModuleLoader__.load({
               .join('，'),
             style: {
               font: 'inherit',
-              display: 'inline-flex',
+              display: 'flex',
               alignItems: 'center',
               // 满宽：把侧栏底部这块横向用满，和展开后的面板对齐。
               // 收起时也走外层容器（见下方 return），否则按钮会缩成内容宽度。
@@ -3396,7 +3418,9 @@ window.__ModuleLoader__.load({
               padding: wide ? '4px 10px' : '4px 7px',
               lineHeight: '18px',
               cursor: 'pointer',
-              borderRadius: 999,
+              // 六家之后可能折成两行，圆角改成「大一点但不是胶囊」：
+              // 999px 在单行时是胶囊，两行时会变成半个椭圆，看起来像渲染坏了。
+              borderRadius: wide ? 14 : 999,
               border: '0.5px solid ' + (
                 failed
                   ? 'var(--dsw-alias-state-error-primary, #b3261e)'
@@ -3413,11 +3437,33 @@ window.__ModuleLoader__.load({
               color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-tertiary))',
               transition: 'background .12s ease, border-color .12s ease, box-shadow .12s ease',
               opacity: busy ? 0.72 : 1,
-              overflow: 'hidden',
-              whiteSpace: 'nowrap',
+              // 这里**不能**再 `overflow:hidden` + `nowrap`：那会把放不下的
+              // provider 静默剪掉，用户看到的是一个残缺的数字（比看不到更糟）。
+              overflow: 'visible',
+              whiteSpace: 'normal',
             },
           },
-          visibleSegments,
+          // 数字区：两列等宽栅格，放不下自动折行。
+          //
+          // 两列都用 `minmax(0, 1fr)` 而不是 `1fr auto`：`auto` 会按内容的
+          // 最大宽度撑开轨道，一个特别长的数字（或某个 provider 名字很长）
+          // 就能把整格顶出容器 —— 那又回到了「被裁掉」的老问题。
+          // `minmax(0, 1fr)` 允许轨道收缩到 0，内容自己省略，布局永远不溢出。
+          h(
+            'span',
+            {
+              style: {
+                display: 'grid',
+                gridTemplateColumns: wide ? 'minmax(0, 1fr) minmax(0, 1fr)' : 'minmax(0, 1fr)',
+                alignItems: 'baseline',
+                columnGap: 8,
+                rowGap: 1,
+                flex: '1 1 auto',
+                minWidth: 0,
+              },
+            },
+            segmentNodes,
+          ),
           caret,
         )
 

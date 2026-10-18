@@ -456,6 +456,51 @@ if (collapsedToggle.props.style?.justifyContent !== 'space-between') {
 }
 console.log('✓ 胶囊收起时也是满宽')
 
+// 六家 provider 之后，单行 `nowrap` + `overflow:hidden` 会把最后一个数字
+// 静默剪成半个（截图里 TRAE 的 197 被裁掉一截）。胶囊必须允许换行，
+// 而且数字区要是两列栅格 —— 这样放不下时折到第二行，而不是被裁掉。
+const pillGrid = find(collapsedToggle, (node) => node.props?.style?.display === 'grid'
+  && typeof node.props?.style?.gridTemplateColumns === 'string')
+if (pillGrid === undefined) {
+  throw new Error('胶囊数字区不是栅格：provider 放不下时只能被裁掉，无法折行')
+}
+if (!String(pillGrid.props.style.gridTemplateColumns).includes('minmax')) {
+  throw new Error(`胶囊栅格应使用 minmax 让列宽自适应，实际：${String(pillGrid.props.style.gridTemplateColumns)}`)
+}
+if (collapsedToggle.props.style?.whiteSpace === 'nowrap') {
+  throw new Error('胶囊仍然是 nowrap：provider 多了会被裁掉而不是换行')
+}
+if (collapsedToggle.props.style?.overflow === 'hidden') {
+  throw new Error('胶囊仍是 overflow:hidden：放不下的内容会被静默剪掉')
+}
+// 每个 provider 都显式占一格，折行后分隔线不会跑到行首。
+const segmentCells = findAll(pillGrid, (node) => typeof node.props?.style?.gridColumn === 'string')
+// 测试数据里 3 个 provider 有可用额度（WB / WBAI / QDG）。
+if (segmentCells.length !== 3) {
+  throw new Error(`当前测试数据有 3 个有额度的 provider，应占 3 格，实际 ${segmentCells.length}`)
+}
+const expectedColumns = ['1', '2', '1']
+segmentCells.forEach((cell, index) => {
+  if (cell.props.style.gridColumn !== expectedColumns[index]) {
+    throw new Error(`第 ${index} 格的列号应为 ${expectedColumns[index]}（两列折行），实际 ${String(cell.props.style.gridColumn)}`)
+  }
+})
+// 每行第一格不能有左侧分隔线（否则折行后行首会凭空多一条竖线）。
+if (String(segmentCells[0].props.style.borderLeft) !== 'none') {
+  throw new Error('每行第一格不该有左侧分隔线')
+}
+if (String(segmentCells[2].props.style.borderLeft) !== 'none') {
+  throw new Error('折行后的行首（第 3 格）也不该有左侧分隔线')
+}
+if (!String(segmentCells[1].props.style.borderLeft).includes('border-l2')) {
+  throw new Error('同一行第二格应有左侧分隔线')
+}
+// 折行后第二行要落在第 2 行，而不是继续往右挤。
+if (segmentCells[2].props.style.gridRow !== '2') {
+  throw new Error(`第 3 格应折到第 2 行，实际 gridRow=${String(segmentCells[2].props.style.gridRow)}`)
+}
+console.log('✓ 胶囊可折行：数字区是两列栅格，不再裁掉最后一个 provider')
+
 // ---------- 2b. 悬停要有反馈（用户靠这个判断「能点」）----------
 // 箭头必须是内联 SVG 的折线，而不是 `▾` 字符 —— 9px 的字形在侧栏里几乎看不见。
 const caret = find(collapsedToggle, (node) => node.type === 'svg')
