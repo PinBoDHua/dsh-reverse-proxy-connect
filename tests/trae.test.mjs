@@ -405,6 +405,61 @@ test('Trae：support_thinking 为真时才列档位，且不列 none', () => {
   assert.deepEqual(models[0].reasoningEfforts, ['low', 'high'])
 })
 
+test('Trae：工具分片没有 index 时用上一个 index，不拆成两次调用', async () => {
+  const text = [
+    'event:output',
+    'data:{"response":"","tool_calls":[{"id":"c1","function_call":{"name":"","arguments":"{\\"a\\":"}}]}',
+    '',
+    'event:output',
+    'data:{"response":"","tool_calls":[{"function_call":{"name":"do_it","arguments":"1}"}}]}',
+    '',
+    'event:done',
+    'data:{"finish_reason":"tool_calls"}',
+    '',
+  ].join('\n')
+  const tools = []
+  for await (const event of parseStream(bodyOf(text), undefined)) if (event.type === 'tool') tools.push(event)
+  assert.equal(tools.length, 1, '没有 index 的两片必须落到同一个工具块')
+  assert.equal(tools[0].id, 'c1')
+  assert.equal(tools[0].name, 'do_it')
+  assert.equal(tools[0].argumentsDelta, '{"a":1}')
+})
+
+test('Trae：event:done 之后即使连接不关闭也能立即结束', async () => {
+  const bytes = new TextEncoder().encode([
+    'event:output',
+    'data:{"response":"好"}',
+    '',
+    'event:done',
+    'data:{"finish_reason":"stop"}',
+    '',
+  ].join('\n'))
+  let sent = false
+  const openBody = {
+    getReader() {
+      return {
+        async read() {
+          if (sent) return new Promise(() => {}) // 上游保持连接：只靠 done 结束
+          sent = true
+          return { done: false, value: bytes }
+        },
+        async cancel() {},
+      }
+    },
+  }
+  const events = await Promise.race([
+    (async () => {
+      const list = []
+      for await (const event of parseStream(openBody, undefined)) list.push(event)
+      return list
+    })(),
+    new Promise((resolve) => setTimeout(() => resolve('timeout'), 500)),
+  ])
+  assert.notEqual(events, 'timeout', 'event:done 必须立即收流，而不是等 EOF/空闲超时')
+  assert.equal(events.at(-1).type, 'finish')
+  assert.equal(events.at(-1).kind, 'stop')
+})
+
 // ---------- 流解析 ----------
 
 /**

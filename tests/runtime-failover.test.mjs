@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { Runtime } from '../lib/runtime.js'
+import { Runtime, failureCodeOf, isProviderScopedFailure, parseOpenAiSse, qoderQueueFailure } from '../lib/runtime.js'
 import { Stats } from '../lib/stats.js'
 import { defaults } from '../lib/settings.js'
 import { DeadlineError, openDeadline, sleep } from '../lib/timeout.js'
@@ -88,6 +88,75 @@ test('429 限流：还没吐内容时自动换到下一个账号，而不是直�
     globalThis.fetch = originalFetch
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('空响应不再被当成成功：没有正文/思考/工具时抛 EMPTY_RESPONSE', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-empty-'))
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => {
+    const encoder = new TextEncoder()
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\n'))
+        controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+        controller.close()
+      },
+    })
+    return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  }
+  try {
+    const settings = settingsWithAccounts()
+    settings.accounts.workbuddy = [settings.accounts.workbuddy[0]]
+    const runtime = new Runtime({ settings: () => settings, dataDir: dir, logger: {} })
+    try {
+      const opened = await runtime.openStream('workbuddy', {
+        model: 'hy3',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+        signal: AbortSignal.timeout(5000),
+      })
+      await assert.rejects(async () => {
+        for await (const _event of opened.events) { /* 消费到终态 */ }
+      }, (error) => error?.code === 'EMPTY_RESPONSE')
+    } finally {
+      runtime.flushCaches()
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('content_filter 终态带可路由的 failure，而不是空 error', async () => {
+  const encoder = new TextEncoder()
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{},"finish_reason":"content_filter"}]}\n\n'))
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+      controller.close()
+    },
+  })
+  const events = []
+  for await (const event of parseOpenAiSse(body)) events.push(event)
+  const finish = events.find((event) => event.type === 'finish')
+  assert.equal(finish.kind, 'error')
+  assert.equal(finish.failure.code, 'CONTENT_FILTER')
+})
+
+test('网络错误归到 TRANSPORT（DSH 会重试），而不是不重试的 upstream-error', () => {
+  const network = Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNRESET' } })
+  assert.equal(failureCodeOf(network), 'TRANSPORT')
+  assert.equal(failureCodeOf(Object.assign(new Error('x'), { cause: { code: 'UND_ERR_SOCKET' } })), 'TRANSPORT')
+  // 普通业务错误不能被误判成网络重试。
+  const ordinary = Object.assign(new Error('bad request'), { status: 400 })
+  assert.equal(failureCodeOf(ordinary), 'upstream-error')
+})
+
+test('Qoder 排队是 provider 级失败：不换号、不记账号冷却', () => {
+  const failure = qoderQueueFailure(undefined, 61_000, 60_000)
+  assert.equal(isProviderScopedFailure(failure), true)
+  assert.equal(failureCodeOf(failure), 'RATE_LIMIT')
+  assert.equal(failure.noFailover, true)
+  assert.equal(failure.scope, 'provider')
 })
 
 test('账号测试：读到运行时 finish.kind 才算成功，不能因为字段形状不同误报 INCOMPLETE', async () => {

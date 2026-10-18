@@ -196,9 +196,32 @@ test('自动切换：优先挑还有余额且可用的账号', () => {
   assert.equal(pickSwitchTarget(QG, settings, 'a', (id) => balances[id]), undefined)
 })
 
-test('newAccountId 跳过已占用的 id', () => {
-  assert.equal(newAccountId([]), 'acc-1')
-  assert.equal(newAccountId([{ id: 'acc-1' }, { id: 'acc-2' }]), 'acc-3')
+test('newAccountId 不再回收被删除的 id', () => {
+  const existing = [{ id: 'acc-1' }, { id: 'acc-2' }]
+  const id = newAccountId(existing)
+  assert.match(id, /^acc-[a-z0-9]+$/)
+  assert.ok(!existing.some((account) => account.id === id), '新 id 不能复用已删账号的 id')
+  const second = newAccountId([...existing, { id }])
+  assert.notEqual(second, id)
+})
+
+test('清空/删除隐式默认账号时，旧字段里的凭证也一起清掉', () => {
+  const patSettings = settingsWith({ qoder: { [QG]: { pat: 'pt-LEGACY' } } })
+  const forgotten = mergeAccountSecrets({
+    accounts: { [QG]: [{ id: 'default', label: '默认令牌', enabled: true, forget: true }] },
+  }, patSettings)
+  assert.equal(forgotten.qoder[QG].pat, '', '旧 qoder.pat 必须一并清空')
+  assert.equal(forgotten.accounts[QG][0].pat, undefined)
+
+  const removed = mergeAccountSecrets({ removedAccounts: { [QG]: ['default'] } }, patSettings)
+  assert.equal(removed.qoder[QG].pat, '', '删除隐式默认账号同样要清旧字段')
+
+  const desktop = settingsWith({ workbuddy: { workbuddy: { authFile: 'C:\\secret\\auth.info' } } })
+  const desktopForgotten = mergeAccountSecrets({
+    accounts: { [WB]: [{ id: 'default', label: '本机登录', enabled: true, forget: true }] },
+  }, desktop)
+  assert.equal(desktopForgotten.workbuddy.workbuddy.authFile, '')
+  assert.equal(desktopForgotten.accounts[WB][0].authFile, undefined)
 })
 
 test('normalizeAccount 丢弃非对象与超长标签', () => {

@@ -46,6 +46,24 @@ const STATUS = {
   },
 }
 
+test('诊断：合法共享引用不会被误写成 [circular]', () => {
+  const shared = { state: 'ok', consecutiveFailures: 0 }
+  const status = {
+    ...STATUS,
+    providers: [{ ...STATUS.providers[0], health: shared }],
+    stats: { ...STATUS.stats, health: { workbuddy: shared } },
+  }
+  const safe = redactStatus(status)
+  assert.equal(safe.providers[0].health.state, 'ok')
+  assert.equal(safe.stats.health.workbuddy.state, 'ok', '共享对象第二次出现仍应完整')
+  assert.ok(!JSON.stringify(safe).includes('[circular]'))
+
+  // 真正的环仍然要截断，避免生成 JSON 时无限递归。
+  const loop = { name: 'loop' }
+  loop.self = loop
+  assert.equal(redactStatus(loop).self, '[circular]')
+})
+
 test('诊断：控制密钥、令牌字段与绝对用户路径都不出现', () => {
   const safe = redactStatus(STATUS)
   assert.equal(safe.key, '[redacted]')
@@ -86,6 +104,35 @@ test('诊断：不限量账号显示「不限量」，不是 0 / 0', () => {
   const { text } = buildDiagnostics(unlimited)
   assert.ok(text.includes('不限量'))
   assert.ok(!text.includes('0 / 0'))
+})
+
+test('诊断：事件账本带最近事件，路径与令牌字段都脱敏', () => {
+  const withEvents = {
+    ...STATUS,
+    events: {
+      count: 2,
+      latestAt: 1_800_000_000_000,
+      items: [
+        {
+          id: 'e1',
+          at: 1_800_000_000_000,
+          type: 'credits',
+          level: 'warn',
+          provider: 'qoder',
+          message: '额度读取失败：C:\\Users\\张三\\AppData\\Local\\x',
+          data: { token: 'pat-super-secret', account: '默认' },
+        },
+      ],
+    },
+  }
+  const { document, text } = buildDiagnostics(withEvents)
+  assert.equal(document.events.items.length, 1)
+  assert.equal(document.events.items[0].data.token, '[redacted]')
+  assert.ok(!document.events.items[0].message.includes('张三'))
+  assert.ok(text.includes('最近事件'))
+  assert.ok(text.includes('[warn]'))
+  assert.ok(!text.includes('pat-super-secret'))
+  assert.ok(!text.includes('张三'))
 })
 
 test('诊断：坏输入不抛错', () => {

@@ -515,6 +515,120 @@ test('统计：今日口径落盘后重启仍是今日，跨天则不复活', ()
   }
 })
 
+test('统计：today 缺失时 providerToday 也不能复活（与 accountModelToday 同一条判据）', () => {
+  const dir = tempDir()
+  try {
+    const filePath = statsPathOf(dir)
+    const now = new Date(2026, 9, 18, 10, 0, 0).getTime()
+    const raw = {
+      version: 4,
+      since: now,
+      totals: { requests: 7 },
+      providers: { workbuddy: { requests: 7 } },
+      // 故意没有 today：providerToday 看起来是「今天」的，但没有日期可证明。
+      providerToday: { workbuddy: { requests: 7, ok: 7 } },
+    }
+    writeFileSync(filePath, JSON.stringify(raw), 'utf8')
+    const stats = new Stats({ filePath, enabled: () => true, now: () => now })
+    const snapshot = stats.snapshot()
+    assert.equal(snapshot.today.requests, 0)
+    assert.equal(snapshot.providerToday.workbuddy.requests, 0, '今天缺失时不能把 providerToday 当成今天')
+    assert.equal(snapshot.providers.workbuddy.requests, 7, '累计仍然保留')
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：只读命令不会重写文件；未知版本拒绝写回', () => {
+  const dir = tempDir()
+  try {
+    const filePath = statsPathOf(dir)
+    const writer = new Stats({ filePath, enabled: () => true })
+    writer.record({ provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop', durationMs: 1 })
+    writer.stop()
+    const saved = readFileSync(filePath, 'utf8')
+
+    // 只读实例：构造 + snapshot + stop 不应该产生任何写入。
+    const reader = new Stats({ filePath, enabled: () => true })
+    assert.equal(reader.dirty, false)
+    reader.snapshot()
+    assert.equal(reader.stop(), true)
+    assert.equal(readFileSync(filePath, 'utf8'), saved, '只读命令不能重写统计文件')
+
+    // 更新版本（例如降级安装）：只读加载，flush 必须拒绝，文件保持原样。
+    const newer = JSON.stringify({ version: 5, since: Date.now(), totals: { requests: 9 }, secret: 'keep' })
+    writeFileSync(filePath, newer, 'utf8')
+    const blocked = new Stats({ filePath, enabled: () => true })
+    assert.equal(blocked.writeBlocked, true)
+    assert.equal(blocked.unsupportedVersion, 5)
+    assert.equal(blocked.flush(), false)
+    assert.equal(readFileSync(filePath, 'utf8'), newer, '未知版本不能被旧代码覆盖')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：显式传入更早的 at 不会把今日桶回滚清空', () => {
+  const dir = tempDir()
+  try {
+    const day1 = new Date(2026, 9, 18, 10, 0, 0).getTime()
+    const earlier = new Date(2026, 9, 17, 23, 0, 0).getTime()
+    const stats = new Stats({ filePath: statsPathOf(dir), enabled: () => true, now: () => day1 })
+    stats.record({ provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop', durationMs: 1, at: day1 })
+    stats.record({ provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop', durationMs: 1, at: earlier })
+    assert.equal(stats.snapshot().today.requests, 2, '两条都应记在当前的今日桶里')
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：两个进程同时写入时按 max 合并，不再互相覆盖', () => {
+  const dir = tempDir()
+  try {
+    const filePath = statsPathOf(dir)
+    const host = new Stats({ filePath, enabled: () => true })
+    host.record({ provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop', durationMs: 1 })
+    host.flush()
+
+    // 模拟 CLI：读到 host 的 1 次，再追加 5 次。
+    const cli = new Stats({ filePath, enabled: () => true })
+    for (let index = 0; index < 5; index++) {
+      cli.record({ provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop', durationMs: 1 })
+    }
+    cli.stop()
+    assert.equal(JSON.parse(readFileSync(filePath, 'utf8')).totals.requests, 6)
+
+    // 宿主再记 1 次（内存里是 2 次）后落盘：不能把 CLI 的 6 次覆盖成 2 次。
+    host.record({ provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop', durationMs: 1 })
+    host.stop()
+    const saved = JSON.parse(readFileSync(filePath, 'utf8'))
+    assert.equal(saved.totals.requests, 6, '必须保留另一个进程已经写下的更大进度')
+    assert.ok(saved.recent.length >= 1)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：删除账号时清掉该账号的累计与交叉维度', () => {
+  const dir = tempDir()
+  try {
+    const stats = new Stats({ filePath: statsPathOf(dir), enabled: () => true })
+    stats.record({ provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop', durationMs: 1 })
+    stats.record({ provider: 'workbuddy', accountId: 'b', model: 'm', kind: 'stop', durationMs: 1 })
+    assert.equal(stats.forgetAccount('workbuddy', 'a'), true)
+    const snapshot = stats.snapshot()
+    assert.equal(snapshot.accounts['workbuddy::a'], undefined)
+    assert.equal(snapshot.accountModels['workbuddy::a::m'], undefined)
+    assert.equal(snapshot.accountModelToday['workbuddy::a::m'], undefined)
+    assert.ok(snapshot.accounts['workbuddy::b'] !== undefined, '只删指定账号')
+    assert.equal(stats.forgetAccount('workbuddy', 'nope'), false)
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 test('统计：today 日期缺失或损坏时，不以「今天」的名义复活旧今日桶', () => {
   // `data.today.date` 在 today 缺失时会被归一化成「今天」，用它当判据会把
   // 昨天的 accountModelToday 当成今天的。判据必须看**文件里**写的日期。

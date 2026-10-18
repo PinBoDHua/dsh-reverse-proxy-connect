@@ -42,6 +42,11 @@ test('签到状态：上游报错与非 JSON 都要退化成 failed', () => {
   assert.equal(interpretCheckinStatus({ code: 0, data: null }).kind, 'inactive')
 })
 
+test('签到状态：data 有字段但缺 active 视为失败（schema 改名不能吞掉整天）', () => {
+  assert.equal(interpretCheckinStatus({ code: 0, data: { today_checked_in: false } }).kind, 'failed')
+  assert.equal(interpretCheckinStatus({ code: 0, data: {} }).kind, 'inactive')
+})
+
 test('领取：成功时带出积分与连续天数', () => {
   const value = interpretClaim({ code: 0, data: { credit: 100, streak_days: 9 } })
   assert.equal(value.kind, 'claimed')

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -151,6 +151,51 @@ test('额度历史：落盘后可恢复，超量条目会被裁剪', () => {
     assert.equal(entry.hours.length, 168)
     // 80 个点裁到最后 60 个：remain 从 80 到 21。
     assert.equal(entry.recent[0].remain, 80)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('额度历史：重载保留最近活跃的 32 个账号，而不是最老的 32 个', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-history-'))
+  try {
+    const filePath = creditsHistoryPathOf(dir)
+    const entries = {}
+    for (let index = 0; index < 40; index++) {
+      const stamp = at(8) + index * 60_000
+      entries[`qoder::acc-${index}`] = {
+        recent: [{ at: stamp, remain: 100 - index, total: 100 }],
+        hours: [{ at: stamp, first: stamp, last: stamp, spent: 0, topup: 0, samples: 1 }],
+      }
+    }
+    writeFileSync(filePath, JSON.stringify({ version: 1, entries }), 'utf8')
+    const history = new CreditHistory({ filePath, persistDelayMs: 60_000 })
+    const snapshot = history.snapshot()
+    assert.equal(Object.keys(snapshot.entries).length, 32)
+    assert.ok(snapshot.entries['qoder::acc-39'] !== undefined, '最新的账号必须保留')
+    assert.equal(snapshot.entries['qoder::acc-0'], undefined, '最老的账号应被淘汰')
+    history.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('额度历史：重复样本不写盘，删除账号会清掉历史', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-history-'))
+  try {
+    const filePath = creditsHistoryPathOf(dir)
+    const history = new CreditHistory({ filePath, persistDelayMs: 60_000, now: () => at(8) })
+    assert.equal(history.record('qoder', 'a', { state: 'ok', remain: 10, total: 100 }, at(8)), true)
+    history.flush()
+    assert.equal(history.record('qoder', 'a', { state: 'ok', remain: 10, total: 100 }, at(8) + 5_000), false)
+    assert.equal(history.dirty, false, '数值没变的重复刷新不应产生写入')
+
+    history.record('qoder', 'b', { state: 'ok', remain: 20, total: 100 }, at(9))
+    assert.equal(history.forget('qoder', 'b'), true)
+    assert.equal(history.snapshot().entries['qoder::b'], undefined)
+    assert.ok(history.snapshot().entries['qoder::a'] !== undefined)
+    assert.equal(history.forget('qoder', 'b'), false)
+    history.stop()
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

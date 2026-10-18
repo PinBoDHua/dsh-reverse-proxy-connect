@@ -18,6 +18,9 @@ window.__ModuleLoader__.load({
     var ACTION_PATH = '/plugins/dsh-reverse-proxy-connect/action'
     var DIAGNOSTICS_PATH = '/plugins/dsh-reverse-proxy-connect/diagnostics'
 
+    /** 本 bundle 读得懂的状态文档版本（与 lib/protocol.js 的 STATUS_VERSION 对齐）。 */
+    var EXPECTED_STATUS_VERSION = 8
+
     var SHARED_SECTION_SLOT = 'settings.section'
     var SHARED_SECTION_ID = 'plugin-settings'
     var SHARED_SECTION_ORDER = 900
@@ -45,6 +48,7 @@ window.__ModuleLoader__.load({
       refresh: '刷新',
       refreshing: '刷新中…',
       enabled: '接入',
+      disabled: '已关闭',
       models: '模型',
       noModels: '还没有模型。请先登录对应 App，或填好个人访问令牌（PAT）。',
       catalogLive: '已从上游拉取',
@@ -181,6 +185,7 @@ window.__ModuleLoader__.load({
       usageEmpty: '还没有请求记录。发一次消息后这里会出现用量。',
       usageDisabled: '用量统计已关闭（可在高级设置里打开）。',
       usageReset: '重置统计',
+      usageResetting: '重置中…',
       usageResetDone: '已重置',
       usageSince: '统计起点 {time}',
       usageModel: '模型',
@@ -218,6 +223,7 @@ window.__ModuleLoader__.load({
       lastFailure: '最近一次失败：{code} · {model} · {time}',
       settingsCorrupt: '设置文件读取失败，已使用默认值；原文件已备份，请检查 settings.json。',
       settingsCorruptBackup: '备份：{path}',
+      statusVersionMismatch: '客户端与宿主的状态版本不一致（宿主 v{host}，客户端期望 v{client}）。请刷新页面；仍然不一致时请重启 DeepSeek Harness，避免看到不完整的设置。',
       consecutiveFailures: '{count} 连败',
       imagesShort: '图',
       listSeparator: '、',
@@ -259,6 +265,34 @@ window.__ModuleLoader__.load({
       advancedQueueHint: '免费模型排队时最多等这么久；调大可以等更久，但会占用一次请求。',
       freeModelHint: 'Free 套餐的付费额度为 0；免费模型不扣积分，但高峰期会排队。可在「高级」里延长排队等待。',
       usageNoUsage: '上游没有返回 token 统计；这里显示 0 不代表没有消耗。',
+      // 2.0.0：事件账本
+      eventTitle: '最近事件',
+      eventHint: '记录换号、令牌续期、目录/额度降级、签到与探测；只保留最近 200 条元数据。',
+      eventEmpty: '还没有事件。后台发生换号、续期或降级时会记在这里。',
+      eventNoMatch: '没有符合筛选的事件。',
+      eventAll: '全部',
+      eventSwitchFilter: '换号',
+      eventProblemFilter: '异常',
+      eventCredentialFilter: '凭证',
+      eventClear: '清空',
+      eventClearConfirm: '清空最近事件？只影响本机事件账本，不影响账号与设置。',
+      eventCount: '{count} 条',
+      eventMore: '展开全部 {count} 条',
+      eventLess: '收起',
+      eventStartup: '启动',
+      eventSwitch: '换号',
+      eventRefresh: '令牌续期',
+      eventCredential: '凭证',
+      eventCatalog: '目录',
+      eventCredits: '额度',
+      eventCheckin: '签到',
+      eventProbe: '探测',
+      eventLogin: '登录',
+      eventSettings: '设置',
+      eventStats: '统计',
+      eventEvents: '账本',
+      eventTest: '账号测试',
+      eventUnknown: '事件',
     }
     var en = {
       nav: 'Reverse proxy',
@@ -268,6 +302,7 @@ window.__ModuleLoader__.load({
       refresh: 'Refresh',
       refreshing: 'Refreshing…',
       enabled: 'Enabled',
+      disabled: 'Disabled',
       models: 'Models',
       noModels: 'No models yet. Sign in to the desktop app, or save a personal access token.',
       catalogLive: 'Fetched from upstream',
@@ -404,6 +439,7 @@ window.__ModuleLoader__.load({
       usageEmpty: 'No requests recorded yet. Send a message and the usage will show up here.',
       usageDisabled: 'Usage recording is off (enable it in Advanced).',
       usageReset: 'Reset stats',
+      usageResetting: 'Resetting…',
       usageResetDone: 'Reset',
       usageSince: 'Counting since {time}',
       usageModel: 'Model',
@@ -441,6 +477,7 @@ window.__ModuleLoader__.load({
       lastFailure: 'Last failure: {code} · {model} · {time}',
       settingsCorrupt: 'Settings could not be read; defaults are in use. The original file was backed up — check settings.json.',
       settingsCorruptBackup: 'Backup: {path}',
+      statusVersionMismatch: 'The client and host status versions differ (host v{host}, client expects v{client}). Refresh the page; if it persists, restart DeepSeek Harness so the settings are not rendered incomplete.',
       consecutiveFailures: '{count} in a row',
       imagesShort: 'img',
       listSeparator: ', ',
@@ -482,6 +519,34 @@ window.__ModuleLoader__.load({
       advancedQueueHint: 'How long to wait for a queued free model; raising it can wait longer but holds the request.',
       freeModelHint: 'The Free plan has no paid quota; free models cost no credits but may queue at peak times. You can raise the wait limit under Advanced.',
       usageNoUsage: 'The upstream did not report token usage; 0 here does not mean nothing was consumed.',
+      // 2.0.0: event journal
+      eventTitle: 'Recent events',
+      eventHint: 'Account switches, token refreshes, catalog/credit fallbacks, check-ins and probes; only the latest 200 metadata entries are kept.',
+      eventEmpty: 'No events yet. Background switches, refreshes and fallbacks will appear here.',
+      eventNoMatch: 'No events match this filter.',
+      eventAll: 'All',
+      eventSwitchFilter: 'Switches',
+      eventProblemFilter: 'Problems',
+      eventCredentialFilter: 'Credentials',
+      eventClear: 'Clear',
+      eventClearConfirm: 'Clear recent events? Only the local event journal is affected; accounts and settings are untouched.',
+      eventCount: '{count} events',
+      eventMore: 'Show all {count} events',
+      eventLess: 'Collapse',
+      eventStartup: 'Startup',
+      eventSwitch: 'Account switch',
+      eventRefresh: 'Token refresh',
+      eventCredential: 'Credential',
+      eventCatalog: 'Catalog',
+      eventCredits: 'Credits',
+      eventCheckin: 'Check-in',
+      eventProbe: 'Probe',
+      eventLogin: 'Login',
+      eventSettings: 'Settings',
+      eventStats: 'Stats',
+      eventEvents: 'Journal',
+      eventTest: 'Account test',
+      eventUnknown: 'Event',
     }
 
     function bind(t, key, vars) {
@@ -825,6 +890,51 @@ window.__ModuleLoader__.load({
       return 'usageKindStop'
     }
 
+    /**
+     * 事件类型 → 文案键（与 lib/events.js 的 eventLabelKey 保持一致）。
+     * @param type - 事件类型。
+     * @returns 文案键。
+     */
+    function eventTextKey(type) {
+      switch (type) {
+        case 'startup':
+          return 'eventStartup'
+        case 'account-switch':
+          return 'eventSwitch'
+        case 'credential-refresh':
+          return 'eventRefresh'
+        case 'credential':
+          return 'eventCredential'
+        case 'catalog':
+          return 'eventCatalog'
+        case 'credits':
+          return 'eventCredits'
+        case 'checkin':
+          return 'eventCheckin'
+        case 'probe':
+          return 'eventProbe'
+        case 'login':
+          return 'eventLogin'
+        case 'settings':
+          return 'eventSettings'
+        case 'stats':
+          return 'eventStats'
+        case 'events':
+          return 'eventEvents'
+        case 'test':
+          return 'eventTest'
+        default:
+          return 'eventUnknown'
+      }
+    }
+
+    /** 事件级别 → 颜色（info 用弱化色，warn/error 与全站状态色一致）。 */
+    function eventColor(level) {
+      if (level === 'error') return 'var(--dsw-alias-state-error-primary, #b3261e)'
+      if (level === 'warn') return 'var(--dsw-alias-state-warning-primary, #b26b00)'
+      return 'var(--dsw-alias-label-tertiary)'
+    }
+
     /** Qoder PAT 页面（按区域）。 */
     var PAT_PAGE = {
       qoder: 'https://qoder.cn/account/integrations',
@@ -1161,6 +1271,26 @@ window.__ModuleLoader__.load({
       return String(tokens)
     }
 
+    /**
+     * 生成账号 id。
+     *
+     * 以前用 `acc-` + Date.now()：同一毫秒连点两次会撞 id（后一条被 upsert 合并），
+     * 慢一点再点则会创建两个相同密钥的账号。优先用 crypto.randomUUID，环境不支持
+     * 时退到时间戳 + 随机后缀。
+     *
+     * @returns 新账号 id。
+     */
+    function newAccountId() {
+      try {
+        if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+          return 'acc-' + crypto.randomUUID().replace(/-/g, '').slice(0, 12)
+        }
+      } catch (_) {
+        /* 非安全上下文没有 randomUUID */
+      }
+      return 'acc-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
+    }
+
     // ── 卡片 ────────────────────────────────────────────────────────
     function ConnectorCard(props) {
       var t = props.t
@@ -1175,9 +1305,22 @@ window.__ModuleLoader__.load({
       var errorState = useState(undefined)
       var error = errorState[0]
       var setError = errorState[1]
-      var busyState = useState(undefined)
+      // 2.0.0：每类操作一个 busy 键。单字符串会让「额度刷新完成」把还在
+      // 保存中的设置按钮重新点亮，也会让一个模型开关把无关按钮显示成「保存中」。
+      var busyState = useState({})
       var busy = busyState[0]
       var setBusy = busyState[1]
+      var busyRef = useRef({})
+      var beginBusy = function (key) {
+        busyRef.current[key] = true
+        setBusy(Object.assign({}, busyRef.current))
+      }
+      var endBusy = function (key) {
+        delete busyRef.current[key]
+        setBusy(Object.assign({}, busyRef.current))
+      }
+      var isBusy = function (key) { return busy[key] === true }
+      var busyNow = function (key) { return busyRef.current[key] === true }
       var tabState = useState(props.initialProvider || 'workbuddy')
       var activeTab = tabState[0]
       var setActiveTab = tabState[1]
@@ -1196,6 +1339,10 @@ window.__ModuleLoader__.load({
       var copiedState = useState(false)
       var copied = copiedState[0]
       var setCopied = copiedState[1]
+      // 诊断面板打开时，不要让每次轮询/输入都重新序列化整份状态。
+      var diagnosticsJson = React.useMemo(function () {
+        return showDiag === true && status !== undefined ? JSON.stringify(displayStatus(status), null, 2) : ''
+      }, [status, showDiag])
       var searchState = useState('')
       var searchDraft = searchState[0]
       var setSearchDraft = searchState[1]
@@ -1203,6 +1350,13 @@ window.__ModuleLoader__.load({
       var accountModelRangeState = useState('today')
       var accountModelRange = accountModelRangeState[0]
       var setAccountModelRange = accountModelRangeState[1]
+      // 2.0.0：最近事件的时间线筛选与展开。
+      var eventFilterState = useState('all')
+      var eventFilter = eventFilterState[0]
+      var setEventFilter = eventFilterState[1]
+      var eventsExpandedState = useState(false)
+      var eventsExpanded = eventsExpandedState[0]
+      var setEventsExpanded = eventsExpandedState[1]
       var accLabelState = useState('')
       var accLabel = accLabelState[0]
       var setAccLabel = accLabelState[1]
@@ -1247,16 +1401,34 @@ window.__ModuleLoader__.load({
       // 浏览器登录轮询的取消令牌：切标签/关闭设置/卸载时递增，旧轮询自然失效。
       var loginPollToken = useRef(0)
       var loginPollTimer = useRef(undefined)
+      // 2.0.0：后台标签页不再每 20 秒拉一次状态；同时只允许一个状态请求在飞。
+      var statusLoading = useRef(false)
+      var lastStatusAt = useRef(0)
+      // 每次本地动作/写入成功都递增：更早发出的 GET /status 回来时直接丢弃，
+      // 否则一个慢轮询会把刚保存的账号切换/模型开关覆盖回旧快照。
+      var statusEpoch = useRef(0)
+      var applyStatus = function (document) {
+        statusEpoch.current += 1
+        setStatus(document)
+      }
 
       var load = useCallback(
         function () {
+          // 卡片打开时定时器与「窗口重新可见」可能同时触发；重复请求既浪费
+          // 一次完整 /status（含凭据探测），也会让旧响应覆盖新响应。
+          if (statusLoading.current === true) return Promise.resolve()
+          statusLoading.current = true
+          var epoch = statusEpoch.current
           return fetchStatus()
             .then(function (document) {
-              setStatus(document)
+              statusLoading.current = false
+              lastStatusAt.current = Date.now()
+              if (epoch !== statusEpoch.current) return document
+              applyStatus(document)
               setError(undefined)
               return document
-            })
-            .catch(function (failure) {
+            }, function (failure) {
+              statusLoading.current = false
               setError(String(failure && failure.message ? failure.message : failure))
             })
         },
@@ -1267,11 +1439,27 @@ window.__ModuleLoader__.load({
         var disposed = false
         load()
         var timer = setInterval(function () {
-          if (!disposed) load()
+          // 页面在后台时不要轮询：用户看不见，宿主也没必要每 20 秒做一次
+          // 凭据探测 + 上游健康检查。
+          if (disposed) return
+          if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+          load()
         }, POLL_MS)
+        var onVisibility = function () {
+          if (disposed) return
+          if (typeof document === 'undefined' || document.visibilityState === 'hidden') return
+          // 回到前台且数据已经旧了：立即补一次，而不是等下一个 20 秒。
+          if (Date.now() - lastStatusAt.current >= 5000) load()
+        }
+        if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+          document.addEventListener('visibilitychange', onVisibility)
+        }
         return function () {
           disposed = true
           clearInterval(timer)
+          if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+            document.removeEventListener('visibilitychange', onVisibility)
+          }
           // 卸载时让还在等待的登录轮询失效，避免继续请求并 setState。
           loginPollToken.current += 1
           if (loginPollTimer.current !== undefined) {
@@ -1286,46 +1474,58 @@ window.__ModuleLoader__.load({
         return entry.provider === activeTab
       })[0]
 
+      // 切换标签只重置「这个 provider 的路径草稿」；高级设置是全局的，
+      // 不能因为切标签就把用户还没保存的输入清掉。
       useEffect(function () {
-        if (active === undefined) return
-        if (status && status.settings) {
-          var desktop = status.settings.workbuddy && status.settings.workbuddy[active.provider]
-          if (desktop) {
-            setAppPathDraft(desktop.electronPath || '')
-            setAuthFileDraft(desktop.authFile || '')
-          }
-          // Trae 的路径覆盖存在 settings.trae 下（不是 settings.workbuddy）。
-          var trae = status.settings.trae && status.settings.trae[active.provider]
-          if (trae) {
-            setAppPathDraft('')
-            setAuthFileDraft(trae.storageFile || '')
-          }
-          var advanced = status.settings.advanced || {}
-          if (typeof advanced.idleTimeoutMs === 'number') setAdvIdle(String(Math.round(advanced.idleTimeoutMs / 1000)))
-          if (typeof advanced.catalogRefreshMs === 'number') setAdvCatalog(String(Math.round(advanced.catalogRefreshMs / 1000)))
-          if (typeof advanced.creditsRefreshMs === 'number') setAdvCredits(String(Math.round(advanced.creditsRefreshMs / 1000)))
-          // 老宿主（没有 advanced）也显示已知默认值，而不是空输入框。
-          if (typeof advanced.idleTimeoutMs !== 'number') setAdvIdle('180')
-          if (typeof advanced.catalogRefreshMs !== 'number') setAdvCatalog('600')
-          if (typeof advanced.creditsRefreshMs !== 'number') setAdvCredits('120')
-          setAdvStats(advanced.stats !== false)
-          setAdvCache(advanced.catalogCache !== false)
-          var alerts = status.settings.alerts || {}
-          setAdvAlert(typeof alerts.lowRatio === 'number' ? String(Math.round(alerts.lowRatio * 100)) : '15')
-          setAdvAlertsEnabled(alerts.enabled !== false)
-          setAdvProbeEnabled(status.settings.probe !== false)
-          var auto = status.settings.autoSwitch
-          var switchRatio = auto !== null && typeof auto === 'object' && typeof auto.thresholdRatio === 'number'
-            ? auto.thresholdRatio
-            : 0
-          setAdvSwitch(String(Math.round(switchRatio * 100)))
-          if (typeof advanced.qoderQueueWaitMs === 'number') setAdvQueue(String(Math.round(advanced.qoderQueueWaitMs / 1000)))
-          if (typeof advanced.qoderQueueWaitMs !== 'number') setAdvQueue('60')
-        }
+        var desktop = active === undefined
+          ? undefined
+          : status && status.settings && status.settings.workbuddy
+            ? status.settings.workbuddy[active.provider]
+            : undefined
+        // Trae 的路径覆盖存在 settings.trae 下（不是 settings.workbuddy）。
+        var trae = active === undefined
+          ? undefined
+          : status && status.settings && status.settings.trae
+            ? status.settings.trae[active.provider]
+            : undefined
+        // 必须无条件写回：旧代码只在 settings 存在时才 set，缺字段时会保留
+        // 上一个 provider 的草稿，保存时把别人的路径写到当前 provider 上。
+        setAppPathDraft(desktop !== undefined && desktop !== null ? desktop.electronPath || '' : '')
+        setAuthFileDraft(
+          desktop !== undefined && desktop !== null && (desktop.authFile || '') !== ''
+            ? desktop.authFile
+            : trae !== undefined && trae !== null ? trae.storageFile || '' : '',
+        )
         setPatDraft('')
         setAccLabel('')
         setAccSecret('')
-      }, [activeTab, status === undefined])
+      }, [activeTab, active === undefined])
+
+      // 高级设置只在第一次拿到状态时灌入草稿（依赖是布尔值，不随每次轮询重跑）。
+      useEffect(function () {
+        if (status === undefined || !status.settings) return
+        var advanced = status.settings.advanced || {}
+        if (typeof advanced.idleTimeoutMs === 'number') setAdvIdle(String(Math.round(advanced.idleTimeoutMs / 1000)))
+        if (typeof advanced.catalogRefreshMs === 'number') setAdvCatalog(String(Math.round(advanced.catalogRefreshMs / 1000)))
+        if (typeof advanced.creditsRefreshMs === 'number') setAdvCredits(String(Math.round(advanced.creditsRefreshMs / 1000)))
+        // 老宿主（没有 advanced）也显示已知默认值，而不是空输入框。
+        if (typeof advanced.idleTimeoutMs !== 'number') setAdvIdle('180')
+        if (typeof advanced.catalogRefreshMs !== 'number') setAdvCatalog('600')
+        if (typeof advanced.creditsRefreshMs !== 'number') setAdvCredits('120')
+        setAdvStats(advanced.stats !== false)
+        setAdvCache(advanced.catalogCache !== false)
+        var alerts = status.settings.alerts || {}
+        setAdvAlert(typeof alerts.lowRatio === 'number' ? String(Math.round(alerts.lowRatio * 100)) : '15')
+        setAdvAlertsEnabled(alerts.enabled !== false)
+        setAdvProbeEnabled(status.settings.probe !== false)
+        var auto = status.settings.autoSwitch
+        var switchRatio = auto !== null && typeof auto === 'object' && typeof auto.thresholdRatio === 'number'
+          ? auto.thresholdRatio
+          : 0
+        setAdvSwitch(String(Math.round(switchRatio * 100)))
+        if (typeof advanced.qoderQueueWaitMs === 'number') setAdvQueue(String(Math.round(advanced.qoderQueueWaitMs / 1000)))
+        if (typeof advanced.qoderQueueWaitMs !== 'number') setAdvQueue('60')
+      }, [status === undefined])
 
       /**
        * 本地已生效、但服务端还没回来的模型开关。
@@ -1377,7 +1577,7 @@ window.__ModuleLoader__.load({
 
       var mutate = function (patch, options) {
         if (status === undefined) return Promise.resolve()
-        setBusy('save')
+        beginBusy('save')
         // 每次写入都占一个序号；只有最新一次的响应才允许覆盖本地状态，
         // 否则「先发的慢响应」会把「后发的快响应」结果冲掉。
         writeSeq.current += 1
@@ -1385,16 +1585,20 @@ window.__ModuleLoader__.load({
         return postJson(SETTINGS_PATH, patch, status.key)
           .then(function (document) {
             if (seq !== writeSeq.current) return document
-            setStatus(document)
+            // 最新一次写入的响应就是权威状态：本地「未落盘的开关意图」到此
+            // 已全部并入它，必须清空。否则用户之后在 CLI/另一个窗口改的
+            // 模型开关会被这份陈旧意图永久盖住。
+            pendingModelToggles.current = {}
+            applyStatus(document)
             setError(undefined)
-            setBusy(undefined)
+            endBusy('save')
             if (options !== undefined && options.clearPatDraft === true) setPatDraft('')
             if (options !== undefined && typeof options.onSuccess === 'function') options.onSuccess()
             return document
           })
           .catch(function (failure) {
             if (seq === writeSeq.current) {
-              setBusy(undefined)
+              endBusy('save')
               setError(String(failure && failure.message ? failure.message : failure))
             }
             // 失败时丢弃本地猜测，让界面回到服务端真实值。
@@ -1404,16 +1608,16 @@ window.__ModuleLoader__.load({
       }
 
       var refresh = function () {
-        if (status === undefined) return
-        setBusy('refresh')
+        if (status === undefined || busyNow('refresh')) return
+        beginBusy('refresh')
         postJson(ACTION_PATH, { action: 'refresh' }, status.key)
           .then(function (document) {
-            setStatus(document)
-            setBusy(undefined)
+            applyStatus(document)
+            endBusy('refresh')
             setError(undefined)
           })
           .catch(function (failure) {
-            setBusy(undefined)
+            endBusy('refresh')
             setError(String(failure && failure.message ? failure.message : failure))
           })
       }
@@ -1473,23 +1677,23 @@ window.__ModuleLoader__.load({
        * 就多了一个账号。所以这里只负责「发一次请求 + 轮询状态」。
        */
       var startLogin = function (provider) {
-        if (status === undefined) return
+        if (status === undefined || busyNow('login')) return
         loginPollToken.current += 1
         var token = loginPollToken.current
         if (loginPollTimer.current !== undefined) {
           clearTimeout(loginPollTimer.current)
           loginPollTimer.current = undefined
         }
-        setBusy('login')
+        beginBusy('login')
         postJson(ACTION_PATH, { action: 'login-start', provider: provider }, status.key)
           .then(function (document) {
-            setBusy(undefined)
-            if (document.status !== undefined) setStatus(document.status)
+            endBusy('login')
+            if (document.status !== undefined) applyStatus(document.status)
             setError(undefined)
             pollLogin(provider, 0, token)
           })
           .catch(function (failure) {
-            setBusy(undefined)
+            endBusy('login')
             setError(String(failure && failure.message ? failure.message : failure))
           })
       }
@@ -1502,7 +1706,7 @@ window.__ModuleLoader__.load({
           fetchStatus()
             .then(function (document) {
               if (token !== loginPollToken.current) return
-              setStatus(document)
+              applyStatus(document)
               var entry = safeArray(document.providers).find(function (item) { return item.provider === provider })
               var job = entry === undefined ? undefined : entry.login
               if (job === undefined) return
@@ -1522,36 +1726,36 @@ window.__ModuleLoader__.load({
           loginPollTimer.current = undefined
         }
         postJson(ACTION_PATH, { action: 'login-cancel', provider: provider }, status.key)
-          .then(function (document) { setStatus(document) })
+          .then(function (document) { applyStatus(document) })
           .catch(function () {})
       }
 
-      /** 手动签到：只跑当前 provider，避免一次点全平台。 */      var runCheckin = function (provider) {
-        if (status === undefined) return
-        setBusy('checkin')
+      var runCheckin = function (provider) {
+        if (status === undefined || busyNow('checkin')) return
+        beginBusy('checkin')
         postJson(ACTION_PATH, { action: 'checkin', provider: provider }, status.key)
           .then(function (document) {
-            setStatus(document)
-            setBusy(undefined)
+            applyStatus(document)
+            endBusy('checkin')
             setError(undefined)
           })
           .catch(function (failure) {
-            setBusy(undefined)
+            endBusy('checkin')
             setError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
       var runProbeNow = function () {
-        if (status === undefined) return
-        setBusy('probe')
+        if (status === undefined || busyNow('probe')) return
+        beginBusy('probe')
         postJson(ACTION_PATH, { action: 'probe' }, status.key)
           .then(function (document) {
-            setStatus(document)
-            setBusy(undefined)
+            applyStatus(document)
+            endBusy('probe')
             setError(undefined)
           })
           .catch(function (failure) {
-            setBusy(undefined)
+            endBusy('probe')
             setError(String(failure && failure.message ? failure.message : failure))
           })
       }
@@ -1559,15 +1763,17 @@ window.__ModuleLoader__.load({
       /** 真发一次 1-token 请求，验证某个账号现在能不能用。 */
       var testAccount = function (provider, accountId) {
         if (status === undefined) return
-        setBusy('test:' + accountId)
+        var key = 'test:' + accountId
+        if (busyNow(key)) return
+        beginBusy(key)
         postJson(ACTION_PATH, { action: 'test-account', provider: provider, accountId: accountId }, status.key)
           .then(function (document) {
-            setStatus(document.status !== undefined ? document.status : document)
-            setBusy(undefined)
+            applyStatus(document.status !== undefined ? document.status : document)
+            endBusy(key)
             setError(undefined)
           })
           .catch(function (failure) {
-            setBusy(undefined)
+            endBusy(key)
             setError(String(failure && failure.message ? failure.message : failure))
           })
       }
@@ -1575,15 +1781,17 @@ window.__ModuleLoader__.load({
       /** 清除一个账号的失败冷却。 */
       var resetCooldown = function (provider, accountId) {
         if (status === undefined) return
-        setBusy('reset:' + accountId)
+        var key = 'reset:' + accountId
+        if (busyNow(key)) return
+        beginBusy(key)
         postJson(ACTION_PATH, { action: 'reset-account', provider: provider, accountId: accountId }, status.key)
           .then(function (document) {
-            setStatus(document)
-            setBusy(undefined)
+            applyStatus(document)
+            endBusy(key)
             setError(undefined)
           })
           .catch(function (failure) {
-            setBusy(undefined)
+            endBusy(key)
             setError(String(failure && failure.message ? failure.message : failure))
           })
       }
@@ -1597,23 +1805,23 @@ window.__ModuleLoader__.load({
 
       /** 刷新额度（强制绕过缓存）。 */
       var refreshCredits = function () {
-        if (status === undefined) return
-        setBusy('credits')
+        if (status === undefined || busyNow('credits')) return
+        beginBusy('credits')
         postJson(ACTION_PATH, { action: 'credits' }, status.key)
           .then(function (document) {
-            setStatus(document)
-            setBusy(undefined)
+            applyStatus(document)
+            endBusy('credits')
             setError(undefined)
           })
           .catch(function (failure) {
-            setBusy(undefined)
+            endBusy('credits')
             setError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
       /** 保存高级设置：秒 → 毫秒，非法输入交给宿主夹取。 */
       var saveAdvanced = function () {
-        if (status === undefined) return
+        if (status === undefined || busyNow('advanced')) return
         var toMs = function (value, fallback) {
           var parsed = Number(String(value).trim())
           if (!isFinite(parsed) || parsed <= 0) return fallback
@@ -1625,7 +1833,7 @@ window.__ModuleLoader__.load({
           if (!isFinite(parsed) || parsed < 0) return fallback
           return Math.max(0, Math.min(95, Math.round(parsed))) / 100
         }
-        setBusy('advanced')
+        beginBusy('advanced')
         postJson(SETTINGS_PATH, {
           advanced: {
             idleTimeoutMs: toMs(advIdle, current.idleTimeoutMs || 180000),
@@ -1648,8 +1856,8 @@ window.__ModuleLoader__.load({
           },
         }, status.key)
           .then(function (document) {
-            setStatus(document)
-            setBusy(undefined)
+            applyStatus(document)
+            endBusy('advanced')
             setError(undefined)
             setAdvSaved(true)
             // 用服务端夹取后的值回填草稿：用户输入 9999 秒会被夹到 900 秒，
@@ -1670,23 +1878,43 @@ window.__ModuleLoader__.load({
             setTimeout(function () { setAdvSaved(false) }, 1600)
           })
           .catch(function (failure) {
-            setBusy(undefined)
+            endBusy('advanced')
             setError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
       /** 重置用量统计。 */
       var resetStats = function () {
-        if (status === undefined) return
-        setBusy('stats')
+        if (status === undefined || busyNow('stats')) return
+        beginBusy('stats')
         postJson(ACTION_PATH, { action: 'stats-reset' }, status.key)
           .then(function (document) {
-            setStatus(document)
-            setBusy(undefined)
+            applyStatus(document)
+            endBusy('stats')
             setError(undefined)
           })
           .catch(function (failure) {
-            setBusy(undefined)
+            endBusy('stats')
+            setError(String(failure && failure.message ? failure.message : failure))
+          })
+      }
+
+      /** 清空最近事件（只影响本机事件账本）。 */
+      var clearEvents = function () {
+        if (status === undefined || busyNow('events')) return
+        var confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
+          ? true
+          : window.confirm(bind(t, 'eventClearConfirm'))
+        if (!confirmed) return
+        beginBusy('events')
+        postJson(ACTION_PATH, { action: 'events-clear' }, status.key)
+          .then(function (document) {
+            applyStatus(document)
+            endBusy('events')
+            setError(undefined)
+          })
+          .catch(function (failure) {
+            endBusy('events')
             setError(String(failure && failure.message ? failure.message : failure))
           })
       }
@@ -1810,6 +2038,17 @@ window.__ModuleLoader__.load({
               : '',
           }, bind(t, 'settingsCorrupt'))
         : null
+      // 浏览器缓存了旧 bundle、宿主已经升到新状态版本时，字段会悄悄缺一块。
+      // 明确告警比让用户对着空区块猜要好。
+      var versionMismatch = status.version !== EXPECTED_STATUS_VERSION
+        ? h('p', {
+            key: 'version-mismatch',
+            style: S.hintWarn,
+          }, bind(t, 'statusVersionMismatch', {
+            host: status.version === undefined ? '?' : String(status.version),
+            client: String(EXPECTED_STATUS_VERSION),
+          }))
+        : null
 
       var tabs = providers.map(function (entry) {
         var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
@@ -1818,9 +2057,13 @@ window.__ModuleLoader__.load({
           'button',
           {
             key: entry.provider,
+            id: 'dsh-rpc-tab-' + entry.provider,
             type: 'button',
             role: 'tab',
             'aria-selected': entry.provider === activeTab,
+            'aria-controls': 'dsh-rpc-status-panel',
+            // 标准 tabs 模式：只有当前 tab 进 Tab 键序列，方向键在 tab 间移动。
+            tabIndex: entry.provider === activeTab ? 0 : -1,
             style: tabStyle(entry.provider === activeTab),
             title: entry.displayName,
             onClick: function () { setActiveTab(entry.provider) },
@@ -1952,8 +2195,8 @@ window.__ModuleLoader__.load({
           }, status.host && status.host.images === true ? 'IMG' : 'TXT')),
         h('p', { key: 'intro', style: S.intro }, bind(t, 'intro')),
         h('div', { key: 'toolbar', style: S.row },
-          h('button', { type: 'button', style: S.buttonPrimary, onClick: refresh, disabled: busy === 'refresh' },
-            busy === 'refresh' ? bind(t, 'refreshing') : bind(t, 'refresh')),
+          h('button', { type: 'button', style: S.buttonPrimary, onClick: refresh, disabled: isBusy('refresh') },
+            isBusy('refresh') ? bind(t, 'refreshing') : bind(t, 'refresh')),
           h('span', { style: S.grow }),
           h('button', {
             type: 'button',
@@ -1964,11 +2207,30 @@ window.__ModuleLoader__.load({
           }, bind(t, 'diagnostics'))),
         error === undefined ? null : h('p', { key: 'err', style: S.hintError }, bind(t, 'error') + ': ' + error),
         settingsCorrupt,
+        versionMismatch,
         alertBanner,
         summaryCards.length === 0
           ? null
           : h('div', { key: 'summary', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 } }, summaryCards),
-        h('div', { key: 'tabs', role: 'tablist', style: S.tabs }, tabs),
+        h('div', {
+          key: 'tabs',
+          role: 'tablist',
+          style: S.tabs,
+          onKeyDown: function (event) {
+            var key = event !== undefined ? event.key : undefined
+            if (key !== 'ArrowRight' && key !== 'ArrowLeft' && key !== 'Home' && key !== 'End') return
+            if (providers.length === 0) return
+            var current = providers.findIndex(function (entry) { return entry.provider === activeTab })
+            if (current === -1) current = 0
+            var next = current
+            if (key === 'ArrowRight') next = (current + 1) % providers.length
+            else if (key === 'ArrowLeft') next = (current - 1 + providers.length) % providers.length
+            else if (key === 'Home') next = 0
+            else next = providers.length - 1
+            if (event.preventDefault !== undefined) event.preventDefault()
+            setActiveTab(providers[next].provider)
+          },
+        }, tabs),
       ]
 
       if (active === undefined) {
@@ -1993,6 +2255,7 @@ window.__ModuleLoader__.load({
       // 目录失败与凭证失败经常是同一个原因（例如没有登录文件）。两处各显示一遍
       // 会得到截图里那种「同一段长文案出现两次」；这里做一次归一化去重。
       var credentialMessage = credential.status !== 'signed-in'
+        && credential.status !== 'disabled'
         && typeof credential.message === 'string' && credential.message !== ''
         ? credential.message
         : undefined
@@ -2008,7 +2271,13 @@ window.__ModuleLoader__.load({
       })[0]
 
       sections.push(
-        h('div', { key: 'status', style: S.section },
+        h('div', {
+          key: 'status',
+          id: 'dsh-rpc-status-panel',
+          role: 'tabpanel',
+          'aria-labelledby': 'dsh-rpc-tab-' + active.provider,
+          style: S.section,
+        },
           h('div', { key: 'h', style: S.sectionHead },
             h('span', { style: S.sectionTitle }, bind(t, 'secStatus'))),
           h('div', { key: 'r', style: S.row },
@@ -2023,16 +2292,20 @@ window.__ModuleLoader__.load({
               ? bind(t, 'kindDesktop')
               : active.kind === 'desktop-auth' ? bind(t, 'kindDesktopAuth') : bind(t, 'kindPat')),
             h('span', {
-              style: credential.status === 'signed-in' ? S.badge : S.badgeWarn,
-            }, credential.status === 'signed-in' ? bind(t, 'signedIn') : bind(t, 'signedOut')),
+              style: credential.status === 'signed-in'
+                ? S.badge
+                : credential.status === 'disabled' ? S.badgeSoft : S.badgeWarn,
+            }, credential.status === 'signed-in'
+              ? bind(t, 'signedIn')
+              : credential.status === 'disabled' ? bind(t, 'disabled') : bind(t, 'signedOut')),
             h('span', {
               title: activeHealth.consecutiveFailures > 0 ? bind(t, 'consecutiveFailures', { count: activeHealth.consecutiveFailures }) : '',
               style: Object.assign({}, S.badgeSoft, { color: healthColor(activeHealth.state) }),
             }, bind(t, healthTextKey(activeHealth.state))),
             h('span', {
-              style: S.badgeSoft,
+              style: active.images === true ? S.badgeSoft : S.badgeWarn,
               title: active.images === true ? bind(t, 'imagesOn') : bind(t, 'imagesOff'),
-            }, 'IMG')),
+            }, active.images === true ? 'IMG' : 'TXT')),
           h('p', { key: 'cat', style: S.hintTiny }, catalogText),
           credential.status === 'signed-in' && credential.email
             ? h('p', { key: 'who', style: S.hintTiny }, credential.email)
@@ -2066,7 +2339,7 @@ window.__ModuleLoader__.load({
       var loginJob = active.login
       var loginWaiting = loginJob !== undefined && (loginJob.phase === 'waiting' || loginJob.phase === 'starting')
       // 登录等待中也要禁用「新增账号」：否则连点几次会起多个登录任务。
-      var loginBusy = busy === 'login' || loginWaiting
+      var loginBusy = isBusy('login') || loginWaiting
       var accountItems = accountRows.map(function (account, index) {
         var snapshot = account.credits || { state: 'none' }
         var cooling = typeof account.cooldownUntil === 'number' && account.cooldownUntil > Date.now()
@@ -2106,23 +2379,23 @@ window.__ModuleLoader__.load({
           ? h('button', {
               type: 'button',
               style: S.buttonGhost,
-              disabled: busy === resetKey,
+              disabled: isBusy(resetKey),
               onClick: function () { resetCooldown(active.provider, account.id) },
             }, bind(t, 'resetCooldown'))
           : null,
         h('button', {
           type: 'button',
           style: S.buttonGhost,
-          disabled: busy === testKey,
+          disabled: isBusy(testKey),
           title: bind(t, 'testAccount'),
           onClick: function () { testAccount(active.provider, account.id) },
-        }, busy === testKey ? bind(t, 'testing') : bind(t, 'testAccount')),
+        }, isBusy(testKey) ? bind(t, 'testing') : bind(t, 'testAccount')),
         account.active
           ? null
           : h('button', {
               type: 'button',
               style: S.buttonGhost,
-              disabled: busy === 'accounts',
+              disabled: isBusy('save'),
               onClick: function () {
                 var patch = { activeAccount: {} }
                 patch.activeAccount[active.provider] = account.id
@@ -2133,7 +2406,7 @@ window.__ModuleLoader__.load({
           ? h('button', {
               type: 'button',
               style: S.buttonGhost,
-              disabled: busy === 'accounts',
+              disabled: isBusy('save'),
               onClick: function () {
                 // 删除用显式 id，而不是回传一个「少了这一条」的列表：
                 // 列表可能是轮询前的旧快照，整表覆盖会把刚登录的账号一起冲掉。
@@ -2151,9 +2424,12 @@ window.__ModuleLoader__.load({
       })
 
       var addAccount = function () {
+        // 保存请求在飞时再点一次会创建两个同密钥账号（旧代码的 disabled
+        // 依赖一个从未被设置的 'accounts' 键，等于没有保护）。
+        if (busyNow('save')) return
         var secret = accSecret.trim()
         var label = accLabel.trim() === '' ? bind(t, 'accountDefaultLabel') : accLabel.trim()
-        var next = { id: 'acc-' + String(Date.now()), label: label, enabled: true }
+        var next = { id: newAccountId(), label: label, enabled: true }
         if (isPatProvider) {
           if (secret === '') return
           next.pat = secret
@@ -2221,9 +2497,9 @@ window.__ModuleLoader__.load({
             h('button', {
               type: 'button',
               style: S.buttonGhost,
-              disabled: busy === 'checkin',
+              disabled: isBusy('checkin'),
               onClick: function () { runCheckin(active.provider) },
-            }, busy === 'checkin' ? bind(t, 'checkinRunning') : bind(t, 'checkinNow')),
+            }, isBusy('checkin') ? bind(t, 'checkinRunning') : bind(t, 'checkinNow')),
             h('label', { style: Object.assign({}, S.row, { cursor: 'pointer' }) },
               h('input', {
                 type: 'checkbox',
@@ -2253,7 +2529,7 @@ window.__ModuleLoader__.load({
                   : h('span', {
                       style: loginJob.phase === 'failed' ? S.hintWarn : S.hintTiny,
                     }, loginJob.message),
-                loginJob !== undefined && typeof loginJob.authUrl === 'string'
+                loginJob !== undefined && typeof loginJob.authUrl === 'string' && /^https?:\/\//i.test(loginJob.authUrl)
                   ? h('a', {
                       href: loginJob.authUrl,
                       target: '_blank',
@@ -2285,7 +2561,7 @@ window.__ModuleLoader__.load({
                   h('button', {
                     type: 'button',
                     style: S.button,
-                    disabled: busy === 'accounts' || accSecret.trim() === '',
+                    disabled: isBusy('save') || accSecret.trim() === '',
                     onClick: addAccount,
                   }, bind(t, 'addAccount'))),
                 h('input', {
@@ -2313,8 +2589,8 @@ window.__ModuleLoader__.load({
           type: 'button',
           style: S.buttonGhost,
           onClick: refreshCredits,
-          disabled: busy === 'credits',
-        }, busy === 'credits' ? bind(t, 'creditsRefreshing') : bind(t, 'creditsRefresh')))
+          disabled: isBusy('credits'),
+        }, isBusy('credits') ? bind(t, 'creditsRefreshing') : bind(t, 'creditsRefresh')))
 
       var creditsBody = []
       if (credits.state === 'ok') {
@@ -2581,8 +2857,8 @@ window.__ModuleLoader__.load({
               type: 'button',
               style: S.buttonGhost,
               onClick: resetStats,
-              disabled: busy === 'stats',
-            }, busy === 'stats' ? bind(t, 'refreshing') : bind(t, 'usageReset'))),
+              disabled: isBusy('stats'),
+            }, isBusy('stats') ? bind(t, 'usageResetting') : bind(t, 'usageReset'))),
         )
         if (statsDoc.since > 0) {
           usageBody.push(h('p', { key: 'since', style: S.hintTiny }, bind(t, 'usageSince', { time: formatTime(statsDoc.since) })))
@@ -2715,7 +2991,9 @@ window.__ModuleLoader__.load({
               counters: counters,
             })
           })
-          accountModelRows.sort(function (a, b) { return b.counters.totalTokens - a.counters.totalTokens })
+          accountModelRows.sort(function (a, b) {
+            return (Number(b.counters.totalTokens) || 0) - (Number(a.counters.totalTokens) || 0)
+          })
           accountModelRows = accountModelRows.slice(0, 8)
         }
         // 上方那张汇总表用的是同一个口径（今日 / 累计），直接拿来当分母。
@@ -2726,7 +3004,7 @@ window.__ModuleLoader__.load({
           ? bind(t, 'usageAccountModelCoverage', {
             covered: formatNumber(accountModelCovered),
             total: formatNumber(accountModelTotal),
-            percent: String(Math.max(1, Math.round((accountModelCovered / accountModelTotal) * 100))),
+            percent: String(Math.min(99, Math.max(1, Math.round((accountModelCovered / accountModelTotal) * 100)))),
           })
           : undefined
         if (accountModelRows.length > 0) {
@@ -2869,9 +3147,9 @@ window.__ModuleLoader__.load({
               style: { color: 'var(--dsw-alias-label-link, var(--dsw-alias-state-business-primary, #2f6fed))' },
             }, bind(t, 'patOpen'))),
           h('div', { key: 'btns', style: S.row },
-            h('button', { type: 'button', style: S.buttonPrimary, onClick: savePat, disabled: busy === 'save' || patDraft.trim() === '' },
-              busy === 'save' ? bind(t, 'saving') : bind(t, 'save')),
-            h('button', { type: 'button', style: S.button, onClick: clearPat, disabled: busy === 'save' || !configured },
+            h('button', { type: 'button', style: S.buttonPrimary, onClick: savePat, disabled: isBusy('save') || patDraft.trim() === '' },
+              isBusy('save') ? bind(t, 'saving') : bind(t, 'save')),
+            h('button', { type: 'button', style: S.button, onClick: clearPat, disabled: isBusy('save') || !configured },
               bind(t, 'clear'))),
         )
       } else if (active.kind === 'desktop-auth') {
@@ -2892,8 +3170,8 @@ window.__ModuleLoader__.load({
           h('p', { key: 'h', style: S.hintTiny },
             traeConfigured ? bind(t, 'traeSignedIn', { name: credential.name || credential.userId || '—' }) : bind(t, 'traeSignInHint')),
           h('div', { key: 'btns', style: S.row },
-            h('button', { type: 'button', style: S.buttonPrimary, onClick: saveTrae, disabled: busy === 'save' },
-              busy === 'save' ? bind(t, 'saving') : bind(t, 'save'))),
+            h('button', { type: 'button', style: S.buttonPrimary, onClick: saveTrae, disabled: isBusy('save') },
+              isBusy('save') ? bind(t, 'saving') : bind(t, 'save'))),
         )
       } else {
         connectionBody.push(
@@ -2918,8 +3196,8 @@ window.__ModuleLoader__.load({
             }),
             h('span', { style: S.hintTiny }, bind(t, 'authFileHint'))),
           h('div', { key: 'btns', style: S.row },
-            h('button', { type: 'button', style: S.buttonPrimary, onClick: saveDesktop, disabled: busy === 'save' },
-              busy === 'save' ? bind(t, 'saving') : bind(t, 'save'))),
+            h('button', { type: 'button', style: S.buttonPrimary, onClick: saveDesktop, disabled: isBusy('save') },
+              isBusy('save') ? bind(t, 'saving') : bind(t, 'save'))),
         )
       }
 
@@ -3039,28 +3317,35 @@ window.__ModuleLoader__.load({
               h('button', {
                 type: 'button',
                 style: S.button,
-                disabled: busy === 'advanced',
+                disabled: isBusy('advanced'),
                 onClick: saveAdvanced,
-              }, busy === 'advanced' ? bind(t, 'saving') : bind(t, 'advancedSave')),
+              }, isBusy('advanced') ? bind(t, 'saving') : bind(t, 'advancedSave')),
               advSaved ? h('span', { style: S.hintTiny }, bind(t, 'advancedSaved')) : null)),
         ),
       )
 
       // ── 模型 ────────────────────────────────────────────────────
       var models = safeArray(active.models)
-      var available = models.filter(function (row) { return !row.unavailable || row.forced })
-      var unavailable = models.filter(function (row) { return row.unavailable && !row.forced })
+      // 可用列表**不再**包含 forced 的「账号不支持」模型：那个勾选框代表
+      // 「启用/停用」，而 forced 是另一件事。把 forced 行放回下方折叠区，
+      // 勾选态 = 是否强制显示，语义才一致（见 2.0.0 修复）。
+      var available = models.filter(function (row) { return !row.unavailable })
+      var unavailable = models.filter(function (row) { return row.unavailable })
       var probe = status.probe || {}
       var query = searchDraft.trim().toLowerCase()
       var matches = function (row) {
         if (query === '') return true
-        return row.name.toLowerCase().indexOf(query) !== -1 || row.id.toLowerCase().indexOf(query) !== -1
+        // 坏缓存里 name/id 可能缺失或不是字符串；搜索框只有在模型多于 6 个时
+        // 才出现，这里一抛异常整张卡片都会被宿主的错误边界替换掉。
+        var name = typeof row.name === 'string' ? row.name : ''
+        var id = typeof row.id === 'string' ? row.id : ''
+        return name.toLowerCase().indexOf(query) !== -1 || id.toLowerCase().indexOf(query) !== -1
       }
       var shown = available.filter(matches)
 
       var modelMetaText = function (model) {
         var parts = [formatWindow(model.contextWindow)]
-        parts.push(model.reasoningEfforts && model.reasoningEfforts.length > 0
+        parts.push(Array.isArray(model.reasoningEfforts) && model.reasoningEfforts.length > 0
           ? model.reasoningEfforts.join('/')
           : bind(t, 'noReasoning'))
         if (model.supportsImages) parts.push(bind(t, 'imagesShort'))
@@ -3076,10 +3361,10 @@ window.__ModuleLoader__.load({
             h('span', { style: S.grow }),
             models.length === 0
               ? null
-              : h('button', { type: 'button', style: S.buttonGhost, onClick: function () { setAllModels(active, false) }, disabled: busy === 'save' }, bind(t, 'showAll')),
+              : h('button', { type: 'button', style: S.buttonGhost, onClick: function () { setAllModels(active, false) }, disabled: isBusy('save') }, bind(t, 'showAll')),
             models.length === 0
               ? null
-              : h('button', { type: 'button', style: S.buttonGhost, onClick: function () { setAllModels(active, true) }, disabled: busy === 'save' }, bind(t, 'hideAll'))),
+              : h('button', { type: 'button', style: S.buttonGhost, onClick: function () { setAllModels(active, true) }, disabled: isBusy('save') }, bind(t, 'hideAll'))),
           models.length > 6
             ? h('input', {
                 style: S.input,
@@ -3090,8 +3375,8 @@ window.__ModuleLoader__.load({
               })
             : null,
           h('div', { key: 'probe', style: S.row },
-            h('button', { type: 'button', style: S.button, onClick: runProbeNow, disabled: busy === 'probe' || models.length === 0 },
-              busy === 'probe' ? bind(t, 'probing') : bind(t, 'probe')),
+            h('button', { type: 'button', style: S.button, onClick: runProbeNow, disabled: isBusy('probe') || models.length === 0 },
+              isBusy('probe') ? bind(t, 'probing') : bind(t, 'probe')),
             h('span', { style: S.modelMeta },
               probe.lastRunAt > 0
                 ? bind(t, 'probeLast', { time: formatTime(probe.lastRunAt) })
@@ -3148,12 +3433,14 @@ window.__ModuleLoader__.load({
                 },
                 h('input', {
                   type: 'checkbox',
-                  checked: false,
+                  checked: model.forced === true,
                   'aria-label': model.name,
+                  title: bind(t, 'forceShow'),
                   onChange: function () { toggleModel(active, model) },
                 }),
                 h('span', { style: S.modelMeta }, model.name),
                 h('span', { style: S.badge }, bind(t, 'unavailable')),
+                model.forced === true ? h('span', { style: S.badgeSoft }, bind(t, 'forced')) : null,
                 h('span', { style: S.grow }),
                 h('span', { style: S.modelId }, model.id))
               })),
@@ -3163,6 +3450,126 @@ window.__ModuleLoader__.load({
 
       if (forcedCount(active) > 0) {
         sections.push(h('p', { key: 'forced', style: S.hintTiny }, bind(t, 'forced') + ': ' + forcedCount(active)))
+      }
+
+      // ── 最近事件 ────────────────────────────────────────────────
+      //
+      // 2.0.0：换号、令牌续期、目录/额度降级、签到与探测以前只进宿主日志。
+      // 用户看到的是结果（「怎么换账号了」「额度怎么又读不到」），原因已经
+      // 随着日志轮转消失。事件账本把这些元数据做成可筛选的时间线。
+      //
+      // 老宿主（status v7 之前）没有 `events`，整块直接不渲染。
+      var eventDoc = status.events
+      if (eventDoc !== null && typeof eventDoc === 'object' && Array.isArray(eventDoc.items)) {
+        var allEvents = eventDoc.items.filter(function (event) {
+          return event !== null && typeof event === 'object'
+            && typeof event.at === 'number' && typeof event.type === 'string'
+        })
+        var eventFilters = [
+          { id: 'all', label: 'eventAll', count: allEvents.length },
+          { id: 'switch', label: 'eventSwitchFilter', count: allEvents.filter(function (event) { return event.type === 'account-switch' }).length },
+          { id: 'problem', label: 'eventProblemFilter', count: allEvents.filter(function (event) { return event.level === 'warn' || event.level === 'error' }).length },
+          { id: 'credential', label: 'eventCredentialFilter', count: allEvents.filter(function (event) { return event.type === 'credential' || event.type === 'credential-refresh' || event.type === 'login' }).length },
+        ]
+        var matchesEventFilter = function (event) {
+          if (eventFilter === 'switch') return event.type === 'account-switch'
+          if (eventFilter === 'problem') return event.level === 'warn' || event.level === 'error'
+          if (eventFilter === 'credential') return event.type === 'credential' || event.type === 'credential-refresh' || event.type === 'login'
+          return true
+        }
+        var filteredEvents = allEvents.filter(matchesEventFilter)
+        var visibleEvents = filteredEvents.slice(0, eventsExpanded === true ? 30 : 6)
+        var eventFilterButton = function (filter) {
+          var selected = eventFilter === filter.id
+          return h('button', {
+            key: 'ef' + filter.id,
+            type: 'button',
+            'aria-pressed': selected,
+            onClick: function () {
+              setEventFilter(filter.id)
+              setEventsExpanded(false)
+            },
+            style: {
+              font: 'inherit',
+              fontSize: TEXT.tiny,
+              lineHeight: '16px',
+              padding: '0 7px',
+              borderRadius: 999,
+              cursor: 'pointer',
+              border: '0.5px solid ' + (selected
+                ? 'var(--dsw-alias-state-business-primary, #2f6fed)'
+                : 'var(--dsw-alias-border-l2)'),
+              background: selected ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))' : 'transparent',
+              color: selected ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)',
+              whiteSpace: 'nowrap',
+              flex: '0 0 auto',
+            },
+          }, bind(t, filter.label) + (filter.count > 0 ? ' ' + String(filter.count) : ''))
+        }
+        var eventRows = visibleEvents.map(function (event, index) {
+          var typeLabel = bind(t, eventTextKey(event.type))
+          var rawMessage = typeof event.message === 'string' ? event.message : ''
+          var message = rawMessage === '' || rawMessage === event.type ? typeLabel : rawMessage
+          var scope = typeof event.provider === 'string' ? shortProviderName(event.provider) : ''
+          return h('li', {
+            key: typeof event.id === 'string' ? event.id : 'ev' + String(index),
+            style: Object.assign({}, S.modelRow, {
+              flexWrap: 'wrap',
+              alignItems: 'baseline',
+              gap: 6,
+            }, index > 0 ? S.modelRowDivider : {}),
+          },
+          h('span', { style: Object.assign({}, dot(eventColor(event.level)), { alignSelf: 'center' }) }),
+          h('span', {
+            style: Object.assign({}, S.modelMeta, { fontVariantNumeric: 'tabular-nums' }),
+            title: formatTime(event.at),
+          }, formatShortTime(event.at)),
+          h('span', { style: S.badgeSoft }, typeLabel),
+          scope === '' ? null : h('span', { style: S.modelId }, scope),
+          h('span', {
+            style: Object.assign({}, S.modelName, {
+              flex: '1 1 200px',
+              whiteSpace: 'normal',
+              overflow: 'visible',
+              textOverflow: 'clip',
+            }),
+            title: rawMessage,
+          }, message))
+        })
+        var eventsFooter = filteredEvents.length > 6
+          ? h('button', {
+              key: 'more',
+              type: 'button',
+              style: S.buttonGhost,
+              'aria-expanded': eventsExpanded === true,
+              onClick: function () { setEventsExpanded(!eventsExpanded) },
+            }, eventsExpanded === true
+              ? bind(t, 'eventLess')
+              : bind(t, 'eventMore', { count: filteredEvents.length }))
+          : null
+        sections.push(
+          h('div', { key: 'events', style: S.section },
+            h('div', { key: 'h', style: S.sectionHead },
+              h('span', { style: S.sectionTitle }, bind(t, 'eventTitle')),
+              h('span', { style: S.sectionCount }, String(typeof eventDoc.count === 'number' ? eventDoc.count : allEvents.length)),
+              h('span', { style: S.grow }),
+              allEvents.length === 0
+                ? null
+                : h('button', {
+                    type: 'button',
+                    style: S.buttonGhost,
+                    disabled: isBusy('events'),
+                    onClick: clearEvents,
+                  }, bind(t, 'eventClear'))),
+            h('p', { key: 'hint', style: S.hintTiny }, bind(t, 'eventHint')),
+            h('div', { key: 'filters', style: Object.assign({}, S.row, { flexWrap: 'wrap' }) }, eventFilters.map(eventFilterButton)),
+            allEvents.length === 0
+              ? h('p', { key: 'empty', style: S.hint }, bind(t, 'eventEmpty'))
+              : filteredEvents.length === 0
+                ? h('p', { key: 'nomatch', style: S.hint }, bind(t, 'eventNoMatch'))
+                : h('ul', { key: 'list', style: S.modelList }, eventRows),
+            eventsFooter),
+        )
       }
 
       // ── 诊断 ────────────────────────────────────────────────────
@@ -3175,7 +3582,7 @@ window.__ModuleLoader__.load({
               showDiag ? bind(t, 'hide') : bind(t, 'show')),
             h('button', { type: 'button', style: S.buttonGhost, onClick: copyDiagnostics },
               copied ? bind(t, 'copied') : bind(t, 'copyDiagnostics'))),
-          showDiag ? h('pre', { key: 'pre', id: 'dsh-reverse-proxy-diagnostics', style: S.pre }, JSON.stringify(displayStatus(status), null, 2)) : null),
+          showDiag ? h('pre', { key: 'pre', id: 'dsh-reverse-proxy-diagnostics', style: S.pre }, diagnosticsJson) : null),
       )
 
       return h('div', { style: S.card }, sections)
@@ -3279,6 +3686,8 @@ window.__ModuleLoader__.load({
         var statusState = useState(undefined)
         var status = statusState[0]
         var setStatus = statusState[1]
+        // 与卡片同名：写入点统一走这里（侧栏没有竞态，只起可读性作用）。
+        var applyStatus = function (document) { setStatus(document) }
         var busyState = useState(false)
         var busy = busyState[0]
         var setBusy = busyState[1]
@@ -3299,6 +3708,8 @@ window.__ModuleLoader__.load({
           var disposed = false
           var handles = []
           var interval
+          var loading = false
+          var lastAt = 0
 
           /** 这份状态里有没有可用的额度数字。 */
           var hasCredits = function (document) {
@@ -3311,13 +3722,19 @@ window.__ModuleLoader__.load({
           }
 
           var load = function () {
+            // 与卡片同一类保护：冷启动重试、定时轮询与「回到前台」可能
+            // 同时触发，不能让两个 /status?light=1 互相覆盖。
+            if (loading || disposed) return
+            loading = true
             fetchStatus(true)
               .then(function (document) {
+                loading = false
                 if (disposed) return
-                setStatus(document)
+                lastAt = Date.now()
+                applyStatus(document)
                 if (hasCredits(document)) settle()
-              })
-              .catch(function () {
+              }, function () {
+                loading = false
                 /* 侧栏小卡不该弹错误；读不到就保持原样 */
               })
           }
@@ -3325,7 +3742,12 @@ window.__ModuleLoader__.load({
           /** 进入常态轮询（只进一次）。 */
           var settle = function () {
             if (interval !== undefined || disposed) return
-            interval = setInterval(load, 60000)
+            interval = setInterval(function () {
+              if (disposed) return
+              // 后台标签页不轮询；回到前台时由 visibilitychange 补一次。
+              if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return
+              load()
+            }, 120000)
             handles.push(interval)
           }
 
@@ -3338,8 +3760,20 @@ window.__ModuleLoader__.load({
           handles = handles.concat(retries)
           handles.push(setTimeout(settle, 12000))
 
+          var onVisibility = function () {
+            if (disposed) return
+            if (typeof document === 'undefined' || document.visibilityState === 'hidden') return
+            if (Date.now() - lastAt >= 30000) load()
+          }
+          if (typeof document !== 'undefined' && typeof document.addEventListener === 'function') {
+            document.addEventListener('visibilitychange', onVisibility)
+          }
+
           return function () {
             disposed = true
+            if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
+              document.removeEventListener('visibilitychange', onVisibility)
+            }
             handles.forEach(function (handle) {
               clearTimeout(handle)
               clearInterval(handle)
@@ -3374,7 +3808,7 @@ window.__ModuleLoader__.load({
           setFailed(false)
           postJson(ACTION_PATH, { action: 'credits' }, status.key)
             .then(function (document) {
-              setStatus(document)
+              applyStatus(document)
               setBusy(false)
             })
             .catch(function () {

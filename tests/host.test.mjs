@@ -45,7 +45,7 @@ function fakeResponse() {
 /** 发一个 GET。 */
 async function get(handler, url) {
   const res = fakeResponse()
-  handler({ method: 'GET', url, headers: { host: '127.0.0.1:65466' } }, res)
+  handler({ method: 'GET', url, headers: { host: '127.0.0.1:65466' }, socket: { remoteAddress: '127.0.0.1' } }, res)
   await res.done
   return { status: res.status, body: JSON.parse(res.body) }
 }
@@ -57,6 +57,7 @@ async function post(handler, url, key, payload) {
   req.method = 'POST'
   req.url = url
   req.headers = { host: '127.0.0.1:65466', 'x-rpc-key': key }
+  req.socket = { remoteAddress: '127.0.0.1' }
   process.nextTick(() => {
     req.emit('data', Buffer.from(JSON.stringify(payload)))
     req.emit('end')
@@ -66,7 +67,7 @@ async function post(handler, url, key, payload) {
   return { status: res.status, body: JSON.parse(res.body) }
 }
 
-test('宿主入口：注册六个 provider，status v7 与诊断接口可用', async () => {
+test('宿主入口：注册六个 provider，status v8 与诊断接口可用', async () => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-host-'))
   const dataDir = join(root, DATA_DIR_NAME)
   mkdirSync(dataDir, { recursive: true })
@@ -148,7 +149,10 @@ test('宿主入口：注册六个 provider，status v7 与诊断接口可用', a
 
     const full = await get(handlers[STATUS_PATH], STATUS_PATH)
     assert.equal(full.status, 200)
-    assert.equal(full.body.version, 7)
+    assert.equal(full.body.version, 8)
+    assert.ok(full.body.events.count >= 1, '启动事件应已写入账本')
+    assert.ok(Array.isArray(full.body.events.items), '完整状态带事件明细')
+    assert.equal(typeof full.body.events.items[0].type, 'string')
     assert.equal(full.body.plugin.version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version)
     assert.equal(full.body.providers.length, 6)
     assert.equal(full.body.host.images, true, '注入了附件服务后应声明图片可用')
@@ -178,6 +182,8 @@ test('宿主入口：注册六个 provider，status v7 与诊断接口可用', a
     const light = await get(handlers[STATUS_PATH], `${STATUS_PATH}?light=1`)
     assert.equal(light.status, 200)
     assert.equal(light.body.providers[0].models, undefined, '轻量状态不带模型清单')
+    assert.equal(light.body.events.items, undefined, '轻量状态只带事件摘要')
+    assert.ok(typeof light.body.events.count === 'number')
     assert.equal(light.body.providers[0].usage.today.requests, 0)
     assert.ok(Array.isArray(light.body.stats.daily), '轻量状态带最近 14 天用量')
     // 侧栏小卡只读「当前账号」的 label；账号级额度/用量/冷却全由卡片使用。
@@ -216,7 +222,13 @@ test('宿主入口：注册六个 provider，status v7 与诊断接口可用', a
 
     const reset = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, { action: 'stats-reset' })
     assert.equal(reset.status, 200)
-    assert.equal(reset.body.version, 7)
+    assert.equal(reset.body.version, 8)
+    assert.ok(reset.body.events.items.some((event) => event.type === 'stats'), '重置统计要写进事件账本')
+
+    const cleared = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, { action: 'events-clear' })
+    assert.equal(cleared.status, 200)
+    assert.equal(cleared.body.events.count, 1, '清空后只留「已清空」这一条')
+    assert.equal(cleared.body.events.items[0].type, 'events')
 
     // 账号测试在没有模型时给出明确错误，而不是伪造成功。
     const tested = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, {
@@ -360,6 +372,7 @@ test('手动「检测账号可用模型」不会被正在跑的后台探测静�
     req.method = 'POST'
     req.url = ACTION_PATH
     req.headers = { host: '127.0.0.1:65466', 'x-rpc-key': full.body.key }
+    req.socket = { remoteAddress: '127.0.0.1' }
     process.nextTick(() => {
       req.emit('data', Buffer.from(JSON.stringify({ action: 'probe' })))
       req.emit('end')
@@ -481,6 +494,7 @@ test('手动「立即签到」不会被正在跑的自动签到静默跳过', as
     req.method = 'POST'
     req.url = ACTION_PATH
     req.headers = { host: '127.0.0.1:65466', 'x-rpc-key': full.body.key }
+    req.socket = { remoteAddress: '127.0.0.1' }
     process.nextTick(() => {
       req.emit('data', Buffer.from(JSON.stringify({ action: 'checkin', provider: 'workbuddy' })))
       req.emit('end')

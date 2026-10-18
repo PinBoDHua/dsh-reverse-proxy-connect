@@ -82,13 +82,14 @@ const React = {
   useState,
   useEffect: (fn) => effects.push(fn),
   useCallback: (fn) => fn,
+  useMemo: (fn) => fn(),
   useRef,
 }
 
 // ---------- 假的 /status ----------
 const STATUS = {
-  version: 4,
-  plugin: { name: 'dsh-reverse-proxy-connect', version: '9.9.9', host: 'in-process', api: 4, node: '24.0.0' },
+  version: 8,
+  plugin: { name: 'dsh-reverse-proxy-connect', version: '9.9.9', host: 'in-process', api: 8, node: '24.0.0' },
   host: { images: true, stats: true, catalogCache: true },
   key: 'k',
   providers: [
@@ -151,6 +152,28 @@ const STATUS = {
     advanced: { idleTimeoutMs: 180000, catalogRefreshMs: 600000, creditsRefreshMs: 120000, stats: true, catalogCache: true },
   },
   probe: { enabled: true, lastRunAt: 1792234000000, results: {} },
+  // v8：事件账本（2.0.0）。卡片只渲染最近 50 条，这里给 3 条覆盖三种筛选。
+  events: {
+    version: 1,
+    count: 3,
+    latestAt: 1792234000000,
+    limit: 50,
+    items: [
+      {
+        id: 'ev-1', at: 1792234000000, type: 'account-switch', level: 'warn', provider: 'workbuddy',
+        message: '账号「本机登录」请求失败（RATE_LIMIT），切换到「备用账号」',
+        data: { from: 'default', to: 'acc-2', reason: 'RATE_LIMIT' },
+      },
+      {
+        id: 'ev-2', at: 1792233600000, type: 'credential-refresh', level: 'info', provider: 'workbuddy',
+        message: '登录令牌已自动续期（本机登录）',
+      },
+      {
+        id: 'ev-3', at: 1792233000000, type: 'credits', level: 'warn', provider: 'qoder-global',
+        message: '额度读取失败（默认令牌）：HTTP 503',
+      },
+    ],
+  },
   stats: {
     enabled: true,
     since: 1792000000000,
@@ -1261,5 +1284,113 @@ if (wbaiTab !== undefined) {
   }
   console.log('✓ 单账号 provider 不渲染账号 × 模型表')
 }
+
+// ── 2.0.0：最近事件 ─────────────────────────────────────────────
+//
+// 这一块回答的是用户最常问的两个问题：「怎么突然换账号了」「额度什么时候
+// 开始读不到的」。它只渲染服务端下发的元数据，不能让一个坏字段把卡片打崩。
+cardTree = await mount(card, { t: (key) => key })
+let eventText = textOf(cardTree)
+for (const needle of ['eventTitle', 'eventHint', 'eventSwitch', 'eventRefresh', 'eventCredits']) {
+  if (!eventText.includes(needle)) throw new Error(`事件区块缺少 ${needle}`)
+}
+if (!eventText.includes('切换到「备用账号」')) throw new Error('换号事件的消息没有渲染')
+if (!eventText.includes('HTTP 503')) throw new Error('额度失败事件的消息没有渲染')
+
+// 筛选「换号」后，只留下 account-switch 那一条。
+const switchFilter = find(cardTree, (node) => node.type === 'button' && textOf(node).startsWith('eventSwitchFilter'))
+if (switchFilter === undefined) throw new Error('缺少「换号」筛选按钮')
+switchFilter.props.onClick()
+cardTree = await render(card, { t: (key) => key })
+eventText = textOf(cardTree)
+if (!eventText.includes('切换到「备用账号」')) throw new Error('筛选「换号」后应保留换号事件')
+if (eventText.includes('登录令牌已自动续期') || eventText.includes('HTTP 503')) {
+  throw new Error('筛选「换号」后不该出现其它类型的事件')
+}
+const selectedSwitch = find(cardTree, (node) => node.type === 'button' && textOf(node).startsWith('eventSwitchFilter'))
+if (selectedSwitch.props['aria-pressed'] !== true) throw new Error('筛选按钮没有 aria-pressed 选中态')
+console.log('✓ 最近事件可筛选，换号/续期/额度失败分开显示')
+
+// 清空是写操作：必须带控制密钥走 /action，不能只清本地状态。
+const clearButton = find(cardTree, (node) => node.type === 'button' && textOf(node) === 'eventClear')
+if (clearButton === undefined) throw new Error('缺少「清空事件」按钮')
+const beforeClear = calls.length
+clearButton.props.onClick()
+const clearCall = calls[calls.length - 1]
+cardTree = await render(card, { t: (key) => key })
+if (calls.length === beforeClear || !clearCall.url.includes('/action')) throw new Error('清空事件没有发 /action 请求')
+if (!String(clearCall.body).includes('events-clear')) throw new Error('清空事件的请求体不对')
+console.log('✓ 清空事件走服务端事件账本')
+
+// 老宿主（status v7 之前）没有 events 字段：整块隐藏，而不是渲染半个空区块。
+const eventsSnapshot = STATUS.events
+delete STATUS.events
+cardTree = await mount(card, { t: (key) => key })
+if (textOf(cardTree).includes('eventTitle')) throw new Error('没有事件字段时不该渲染事件区块')
+STATUS.events = eventsSnapshot
+console.log('✓ 老宿主没有事件账本时整块隐藏')
+
+// ── 2.0.0：审查修复的回归 ───────────────────────────────────────
+//
+// 1) forced 模型不能混在「可用列表」里：那个勾选框代表启用/停用，点一下却
+//    会取消强制显示，语义完全错位。
+const wbModelsSnapshot = STATUS.providers[0].models.slice()
+STATUS.providers[0].models.push({
+  id: 'paid-only', name: 'Paid Only', contextWindow: 128000, maxTokens: 32000,
+  supportsImages: false, reasoningEfforts: [], disabled: false, unavailable: true, forced: true,
+})
+STATUS.providers[0].modelCount = STATUS.providers[0].models.length
+cardTree = await mount(card, { t: (key) => key })
+if (!textOf(cardTree).includes('unavailableCount')) throw new Error('有 unavailable 模型时应渲染折叠区')
+const forcedInput = find(cardTree, (node) => node.type === 'input' && node.props?.['aria-label'] === 'Paid Only')
+if (forcedInput === undefined) throw new Error('forced 模型应出现在「账号不支持」折叠区')
+if (forcedInput.props.checked !== true) throw new Error('forced 模型的勾选态应为 true')
+const beforeUnforce = calls.length
+forcedInput.props.onChange()
+const unforceCall = calls[calls.length - 1]
+if (calls.length === beforeUnforce || !String(unforceCall.body).includes('forcedModels')) {
+  throw new Error('取消强制显示应发送 forcedModels 补丁')
+}
+if (String(unforceCall.body).includes('paid-only')) throw new Error('取消强制显示后不应再包含该模型 id')
+STATUS.providers[0].models = wbModelsSnapshot
+STATUS.providers[0].modelCount = wbModelsSnapshot.length
+console.log('✓ forced 模型只出现在「账号不支持」区，勾选即强制显示')
+
+// 2) 状态版本不一致要显式告警，而不是静默少渲染字段。
+const versionSnapshot = STATUS.version
+STATUS.version = 7
+cardTree = await mount(card, { t: (key) => key })
+if (!textOf(cardTree).includes('statusVersionMismatch')) throw new Error('状态版本不匹配时没有告警')
+STATUS.version = versionSnapshot
+console.log('✓ 状态版本不一致时给出明确告警')
+
+// 3) 部分模型数据缺 name/id 时，搜索不能把整张卡片打崩。
+const searchModels = STATUS.providers[0].models.slice()
+STATUS.providers[0].models = Array.from({ length: 7 }, (_, index) => ({
+  id: 'm' + index, name: index === 0 ? undefined : 'Model ' + index,
+  contextWindow: 1000, maxTokens: 100, supportsImages: false, reasoningEfforts: [], disabled: false,
+}))
+STATUS.providers[0].modelCount = 7
+cardTree = await mount(card, { t: (key) => key })
+const searchInput = find(cardTree, (node) => node.type === 'input' && node.props?.type === 'search')
+if (searchInput === undefined) throw new Error('模型多于 6 个时应出现搜索框')
+searchInput.props.onChange({ target: { value: 'zzz' } })
+cardTree = await render(card, { t: (key) => key })
+if (!textOf(cardTree).includes('searchEmpty')) throw new Error('无匹配时应显示空结果，而不是抛错')
+STATUS.providers[0].models = searchModels
+STATUS.providers[0].modelCount = searchModels.length
+console.log('✓ 坏模型数据 + 搜索不会打崩卡片')
+
+// 4) tabs 支持方向键（WAI-ARIA 的标准模式）。
+cardTree = await mount(card, { t: (key) => key })
+const tablist = find(cardTree, (node) => node.props?.role === 'tablist')
+if (tablist === undefined) throw new Error('缺少 tablist')
+let prevented = false
+tablist.props.onKeyDown({ key: 'ArrowRight', preventDefault() { prevented = true } })
+cardTree = await render(card, { t: (key) => key })
+const aiTab = find(cardTree, (node) => node.type === 'button' && textOf(node) === 'WorkBuddy AI')
+if (aiTab === undefined || aiTab.props['aria-selected'] !== true) throw new Error('ArrowRight 应切到下一个 provider')
+if (!prevented) throw new Error('方向键应 preventDefault，避免滚动页面')
+console.log('✓ provider 标签支持方向键切换')
 
 console.log('client-credits: OK')

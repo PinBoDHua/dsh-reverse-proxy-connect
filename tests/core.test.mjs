@@ -180,6 +180,22 @@ test('WorkBuddy 目录按 cli 花名册取交集，虚拟 id 保留为保守默�
   assert.equal(models[2].name, 'Auto')
 })
 
+test('WorkBuddy 目录：重复 id 只保留第一份（宿主会拒绝整份重复目录）', () => {
+  const models = parseWorkBuddyCatalog(
+    {
+      agents: [{ name: 'cli', models: ['dup', 'dup', 'ok'] }],
+      models: [
+        { id: 'dup', name: 'First', maxInputTokens: 1000, maxOutputTokens: 100 },
+        { id: 'dup', name: 'Second', maxInputTokens: 2000, maxOutputTokens: 200 },
+        { id: 'ok', name: 'OK', maxInputTokens: 3000, maxOutputTokens: 300 },
+      ],
+    },
+    'workbuddy',
+  )
+  assert.deepEqual(models.map((model) => model.id), ['dup', 'ok'])
+  assert.equal(models.length, 2)
+})
+
 test('WorkBuddy：没有 cli 花名册时必须报错，而不是退到 agents[0]', () => {
   assert.throws(
     () =>

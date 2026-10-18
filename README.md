@@ -4,6 +4,14 @@
 **Trae**（国内版 / 国际版）账号里的模型接进 **DeepSeek Harness**。
 一个插件、六个 provider、一张设置卡片、一套账号池。
 
+> **2.0.0 新增「事件账本」，并修掉一批会静默丢账号/丢统计/丢回答的问题**。
+> 换号、令牌续期、目录/额度降级、签到与探测不再只写宿主日志，而是进入一张
+> 可筛选、可清空、可导出的时间线（`events.json`，最多 100 条元数据）；
+> `node lib/bin.js events` 与「复制诊断」也能看到。同时：settings.json 暂时
+> 读不到时**拒绝写盘**，不再拿默认值把 PAT 与账号池覆盖；统计在两个进程
+> 同时写入时按 max 合并，只读命令不再重写文件；Qoder 排队不再换号；空回答
+> 报 `EMPTY_RESPONSE` 而不是记成成功。状态接口升到 **v8**。
+>
 > **1.8.0 修「读不到被显示成 0」**。额度有四种状态（读到了 / 有旧数字但这次读失败 /
 > 没有额度端点 / 读失败），1.7.x 把它们混成了两种，于是没配 PAT 的 Qoder 与没有
 > 额度端点的 Trae 国际版在诊断里写作「0 / 0 credits · 缓存」—— 那个 0 是占位值。
@@ -32,6 +40,46 @@
 | `trae-global` | Trae Global | 本机 `storage.json`（同上，国际版目录） | 视账号 |
 
 ---
+
+## 2.0.0 事件账本与可靠性
+
+后台一直在做事，但以前只写宿主日志：令牌快到期自动续期、额度耗尽自动换号、
+目录拉取失败退回磁盘缓存、签到失败 10 分钟后重试…… 出问题时用户只看到结果，
+原因已经随日志轮转消失。
+
+**事件账本**把这些元数据留下来：
+
+```text
+14:02:11  换号      账号「本机登录」请求失败（RATE_LIMIT），切换到「备用账号」
+13:40:05  额度      额度读取失败（默认令牌）：HTTP 503
+12:30:00  令牌续期  登录令牌已自动续期（本机登录）
+09:00:02  签到      签到：2 个账号，本次领到 100 分
+```
+
+- 卡片底部「最近事件」可筛 **全部 / 换号 / 异常 / 凭证**，可展开 30 条、
+  可一键清空；只清账本，不动账号与设置；
+- `node lib/bin.js events --limit 50 --type credits`（加 `--json` 输出机器可读）；
+- 「复制诊断」带最近 12 条，路径与令牌仍按既有规则脱敏；
+- 只记类型/级别/provider/账号/一句人话/少量数字，**不记请求内容、不记令牌**；
+  消息里的 `Bearer …`、JWT、`pt-…` 还会再兜底替换；
+- 内存 200 条、磁盘 100 条，重复事件按时间窗去重。
+
+同一个版本还修了三类「静默丢东西」：
+
+1. **settings.json 暂时读不到时拒绝写盘**。旧实现把 EBUSY/EPERM 也当坏文件，
+   30 秒后的自动签到 patch 会把默认值写回去 —— PAT 与账号池被无人值守地清空。
+   现在区分「不存在 / 读不出来 / 确实是坏文件」；读不出来时只读运行并重试，
+   坏文件先备份，备份失败则禁止写盘。
+2. **统计不再互相覆盖**。宿主与 CLI（或两个窗口）同时写入时按字段 max 合并；
+   只读命令不再重写 `stats.json`；不认识的更高版本拒绝写回。
+3. **空回答不再算成功**。终态 `stop` 却没有任何正文/思考/工具时抛
+   `EMPTY_RESPONSE`（宿主会重试）；200 的 HTML 登录页/JSON 网关错误直接报
+   `MALFORMED_RESPONSE`；网络断开归为 `TRANSPORT`；`content_filter` 带
+   `CONTENT_FILTER` 原因。
+
+升级注意：状态接口升到 **v8**（新增 `events`），旧浏览器 bundle 会在卡片顶部
+提示版本不一致；新增 `events.json`；空回答、Qoder 排队换号、forced 模型位置
+等行为有变化，详见 CHANGELOG。
 
 ## 1.8.0 读不到就该说读不到
 
@@ -557,7 +605,7 @@ null」：一个坏行就会让宿主的 `SlotErrorBoundary` 把整个插件设�
 # 预览（默认不写盘）
 node scripts/install.mjs
 
-# 安装或升级
+# 安装或升级（可加 --profile <dir> 指定非默认 profile）
 node scripts/install.mjs --apply
 
 # 卸载
@@ -566,7 +614,10 @@ node scripts/install.mjs --apply --uninstall
 
 脚本会复制插件到 profile 的 `node_modules`，并把包名写进 profile `package.json` 的
 `dependencies` 与 `dsh.profile.bundles`；落盘前先备份到
-`<DSH_HOME>/dsh-reverse-proxy-connect-backup-<时间戳>/`，并附一份 `restore.ps1`。
+`<DSH_HOME>/dsh-reverse-proxy-connect-backup-<时间戳>/`（含旧插件目录），并附一份
+`restore.ps1`。安装先复制到临时目录再换名，复制或写清单失败会自动恢复上一版，
+不会留下「清单还在、目录已空」的状态；`.env`、日志与 `_` 开头的本地草稿不会
+被复制进 profile。
 
 装完**完全退出并重启 DeepSeek Harness**（宿主半边需要重新加载），再刷新页面。
 
@@ -848,7 +899,8 @@ node lib/bin.js usage workbuddy
 - 今日与累计用量、当前会话、最近 14 天柱状图、模型用量榜、最近请求、重置统计；
 - 填 Qoder PAT（带官方 PAT 页面链接）、填 WorkBuddy 的 App 路径与登录文件路径；
 - 高级设置（超时 / 刷新间隔 / 统计 / 目录缓存 / 预警阈值与开关 / 提前换号阈值 / 自动探测开关 / Qoder 排队等待）；
-- 「刷新」立刻重拉目录与额度；「诊断」与「复制诊断」输出脱敏文本。
+- 「最近事件」时间线：全部 / 换号 / 异常 / 凭证筛选，可展开、可清空（只清账本）；
+- 「刷新」立刻重拉目录与额度；「诊断」与「复制诊断」输出脱敏文本（含最近 12 条事件）。
 
 **侧栏底部**还有一枚常驻小卡：
 
@@ -886,6 +938,7 @@ node lib/bin.js doctor [--strict]      # 逐项体检；--strict 有问题时退
 node lib/bin.js models [provider]      # 列模型
 node lib/bin.js credits [provider]     # 列积分与套餐包明细
 node lib/bin.js usage [provider]       # 今日/累计/当前会话/每日历史与最近请求
+node lib/bin.js events [--limit N] [--type T] [--json]  # 最近事件（换号/续期/降级/签到/探测）
 node lib/bin.js probe [provider]       # 重跑能力探测
 node lib/bin.js test [provider] [accountId]  # 真发一次 1-token 请求验证账号
 node lib/bin.js checkin [provider]     # 立即签到
@@ -897,12 +950,17 @@ node lib/bin.js ask <provider> <model> "提示词"   # 真发一次，打印流
 `ask` 是最快的排障手段：它跳过 GUI，直接走运行时，能看到正文、工具调用与 usage。
 思考内容默认折叠成字数（`ASK_SHOW_REASONING=1` 可展开）。
 
+所有命令都接受 `--profile <dir>`（等价于设置 `DSH_PROFILE_DIR`），并优先使用
+`$DSH_HOME/profiles/desktop`；找不到 profile 时会直接报错，而不是悄悄读
+`~/.dsh` 下的另一份空设置。
+
 ## 数据与隐私
 
 全部自有文件在 `<profile>/.dsh-reverse-proxy-connect/`：
 
 ```
 settings.json          # PAT、账号池、模型开关、探测结果、路径覆盖、高级参数（0600）
+events.json            # 最近事件账本 v1：类型/级别/provider/账号/一句人话（最多 100 条，不含请求内容）
 credits-cache.json     # 上一次成功的额度快照（启动秒显）
 credits-history.json   # 额度历史：今日/7 天消耗、速度与耗尽预估（按 provider::账号）
 catalog-cache.json     # 最后一次成功的模型目录（按 provider::账号）
@@ -939,8 +997,8 @@ stats.json             # 用量统计 v4：今日/累计/每日 30 天/按 provi
 ## 开发
 
 ```powershell
-node --test tests/*.test.mjs      # 216 条纯逻辑 / 集成用例
-node tests/client-credits.mjs     # 设置卡片与侧栏小卡的渲染 / 交互用例（38 项）
+node --test tests/*.test.mjs      # 257 条纯逻辑 / 集成用例
+node tests/client-credits.mjs     # 设置卡片与侧栏小卡的渲染 / 交互用例（45 项）
 npm run verify                    # 两套一起跑
 ```
 

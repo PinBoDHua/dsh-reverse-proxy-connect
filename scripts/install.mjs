@@ -10,9 +10,11 @@
  * 备份写到 <DSH_HOME>/dsh-reverse-proxy-connect-backup-<时间戳>/，并留一份 restore.ps1。
  */
 
-import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { cpSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+
+import { resolveProfileDir } from '../lib/profile.js'
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const PLUGIN_NAME = 'dsh-reverse-proxy-connect'
@@ -20,24 +22,39 @@ const PLUGIN_NAME = 'dsh-reverse-proxy-connect'
 const argv = process.argv.slice(2)
 const apply = argv.includes('--apply')
 const uninstall = argv.includes('--uninstall')
-
-/** 解析 profile 目录：环境变量优先，其次 $DSH_HOME/profiles/desktop。 */
-function resolveProfileDir() {
-  if (process.env.DSH_PROFILE_DIR && existsSync(process.env.DSH_PROFILE_DIR)) return process.env.DSH_PROFILE_DIR
-  const home = process.env.DSH_HOME
-  if (home && existsSync(join(home, 'profiles', 'desktop'))) return join(home, 'profiles', 'desktop')
-  throw new Error('找不到 DSH profile 目录。请设置 DSH_PROFILE_DIR，或在 DSH 桌面端进程里运行本脚本。')
+const profileAt = argv.indexOf('--profile')
+if (profileAt !== -1 && typeof argv[profileAt + 1] === 'string' && argv[profileAt + 1] !== '') {
+  process.env.DSH_PROFILE_DIR = argv[profileAt + 1]
 }
 
-const profileDir = resolveProfileDir()
+/** 解析 profile 目录：与 CLI 共用一套规则（DSH_PROFILE_DIR / $DSH_HOME）。 */
+function resolveProfile() {
+  try {
+    return resolveProfileDir(process.env)
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}（可用 --profile <dir> 指定）`)
+  }
+}
+
+const profileDir = resolveProfile()
 const manifestPath = join(profileDir, 'package.json')
 const targetDir = join(profileDir, 'node_modules', PLUGIN_NAME)
 const dshHome = process.env.DSH_HOME ?? dirname(dirname(profileDir))
 const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
 const backupDir = join(dshHome, `${PLUGIN_NAME}-backup-${stamp}`)
 
-/** 不进 profile 的东西：测试与临时脚本。 */
+/** 不进 profile 的东西：测试、临时脚本、点文件与下划线开头的本地草稿。 */
 const COPY_EXCLUDE = new Set(['node_modules', '.git', 'tests', 'scripts', '_probe'])
+
+/** 复制过滤：不把 `.env` / 日志 / `_*.mjs` 之类的本地文件带进 profile。 */
+function copyFilter(source) {
+  const name = basename(source)
+  if (COPY_EXCLUDE.has(name)) return false
+  if (name.startsWith('.')) return false
+  if (name.startsWith('_')) return false
+  if (name.endsWith('.log') || name.endsWith('.tmp')) return false
+  return true
+}
 
 const log = (message) => console.log(message)
 const change = (message) => console.log(`  · ${message}`)
@@ -98,6 +115,13 @@ function backup(relative) {
 
 const backedUp = ['package.json', 'cordis.patch.yml', 'pnpm-lock.yaml', 'pnpm-workspace.yaml'].filter(backup)
 
+// 旧版本插件目录也整份备份：升级失败时 restore.ps1 才能真的回到上一版，
+// 而不是只剩一个「已经装了一半」的空目录。
+const hadPlugin = existsSync(targetDir)
+if (hadPlugin) {
+  cpSync(targetDir, join(backupDir, 'plugin'), { recursive: true })
+}
+
 writeFileSync(
   join(backupDir, 'restore.ps1'),
   `# 一键回滚到安装前的 profile 状态。
@@ -105,36 +129,73 @@ writeFileSync(
 #   pwsh -File "${join(backupDir, 'restore.ps1')}"
 $ErrorActionPreference = 'Stop'
 $profile = '${profileDir.replace(/'/g, "''")}'
+$backup = '${backupDir.replace(/'/g, "''")}'
 foreach ($pair in @(
 ${backedUp.map((f) => `  @('${f}', '${f.replace(/[\\/]/g, '__')}')`).join(',\n')}
 )) {
-  $src = Join-Path '${backupDir.replace(/'/g, "''")}' $pair[1]
+  $src = Join-Path $backup $pair[1]
   if (Test-Path $src) { Copy-Item $src (Join-Path $profile $pair[0]) -Force; Write-Host "restored $($pair[0])" }
 }
 $plugin = Join-Path $profile 'node_modules\\${PLUGIN_NAME}'
-if (Test-Path $plugin) { Remove-Item $plugin -Recurse -Force; Write-Host 'removed plugin copy' }
+$pluginBackup = Join-Path $backup 'plugin'
+if (Test-Path $pluginBackup) {
+  if (Test-Path $plugin) { Remove-Item $plugin -Recurse -Force }
+  Copy-Item $pluginBackup $plugin -Recurse -Force
+  Write-Host 'restored plugin copy'
+} elseif (Test-Path $plugin) {
+  Remove-Item $plugin -Recurse -Force; Write-Host 'removed plugin copy'
+}
 Write-Host '回滚完成。请重新打开 DeepSeek Harness。'
 `,
 )
 
-if (uninstall) {
-  if (existsSync(targetDir)) {
-    rmSync(targetDir, { recursive: true, force: true })
-    log(`已删除 ${targetDir}`)
-  }
-} else {
-  if (existsSync(targetDir)) rmSync(targetDir, { recursive: true, force: true })
+/** 把当前插件目录挪走，失败时能拿回来。 */
+function swapPluginDirectory() {
   mkdirSync(dirname(targetDir), { recursive: true })
-  cpSync(ROOT, targetDir, {
-    recursive: true,
-    filter: (source) => !COPY_EXCLUDE.has(source.split(/[\\/]/).pop()),
-  })
-  log(`已复制插件 -> ${targetDir}`)
+  const stage = `${targetDir}.new-${String(process.pid)}`
+  const old = `${targetDir}.old-${String(process.pid)}`
+  rmSync(stage, { recursive: true, force: true })
+  rmSync(old, { recursive: true, force: true })
+  cpSync(ROOT, stage, { recursive: true, filter: copyFilter })
+  if (existsSync(targetDir)) renameSync(targetDir, old)
+  try {
+    renameSync(stage, targetDir)
+  } catch (error) {
+    // 换名失败：把旧目录放回去，不能留下「清单还在、目录已空」的状态。
+    if (existsSync(old) && !existsSync(targetDir)) renameSync(old, targetDir)
+    rmSync(stage, { recursive: true, force: true })
+    throw error
+  }
+  rmSync(old, { recursive: true, force: true })
 }
 
-if (willWriteManifest) {
-  writeFileSync(manifestPath, nextText)
-  log(`已改写 ${manifestPath}`)
+try {
+  if (uninstall) {
+    if (existsSync(targetDir)) {
+      rmSync(targetDir, { recursive: true, force: true })
+      log(`已删除 ${targetDir}`)
+    }
+  } else {
+    swapPluginDirectory()
+    log(`已复制插件 -> ${targetDir}`)
+  }
+
+  if (willWriteManifest) {
+    writeFileSync(manifestPath, nextText)
+    log(`已改写 ${manifestPath}`)
+  }
+} catch (error) {
+  // 目录/清单任意一步失败：用刚做的备份恢复旧插件，避免 profile 停在半截。
+  if (hadPlugin) {
+    try {
+      rmSync(targetDir, { recursive: true, force: true })
+      cpSync(join(backupDir, 'plugin'), targetDir, { recursive: true })
+      log('安装失败，已恢复上一版插件目录')
+    } catch (restoreError) {
+      log(`安装失败，且自动恢复失败：${restoreError instanceof Error ? restoreError.message : String(restoreError)}`)
+    }
+  }
+  throw error
 }
 
 log('')
