@@ -52,7 +52,7 @@ window.__ModuleLoader__.load({
         if (style === null || style === undefined) return
         style.id = THEME_STYLE_ID
         style.textContent =
-          ':root{--dsh-rpc-warn:#b26b00;--dsh-rpc-fill:rgba(20,28,45,.06)}' +
+          ':root{--dsh-rpc-warn:#9d5c00;--dsh-rpc-fill:rgba(20,28,45,.06)}' +
           'body[data-ds-dark-theme]{--dsh-rpc-warn:#f0a63c;--dsh-rpc-fill:rgba(255,255,255,.08)}'
         var head = document.head
         if (head === undefined || head === null) {
@@ -949,7 +949,7 @@ window.__ModuleLoader__.load({
     /** 健康状态的颜色。 */
     function healthColor(state) {
       if (state === 'ok') return 'var(--dsw-alias-state-success-primary, #1a8f5f)'
-      if (state === 'degraded') return 'var(--dsh-rpc-warn, #b26b00)'
+      if (state === 'degraded') return 'var(--dsh-rpc-warn, #9d5c00)'
       if (state === 'down') return 'var(--dsw-alias-state-error-primary, #b3261e)'
       return 'var(--dsw-alias-label-secondary)'
     }
@@ -1012,7 +1012,7 @@ window.__ModuleLoader__.load({
     /** 事件级别 → 颜色（info 用弱化色，warn/error 与全站状态色一致）。 */
     function eventColor(level) {
       if (level === 'error') return 'var(--dsw-alias-state-error-primary, #b3261e)'
-      if (level === 'warn') return 'var(--dsh-rpc-warn, #b26b00)'
+      if (level === 'warn') return 'var(--dsh-rpc-warn, #9d5c00)'
       return 'var(--dsw-alias-label-secondary)'
     }
 
@@ -1107,8 +1107,8 @@ window.__ModuleLoader__.load({
         lineHeight: '18px',
         padding: '0 7px',
         borderRadius: 999,
-        border: '0.5px solid var(--dsh-rpc-warn, #b26b00)',
-        color: 'var(--dsh-rpc-warn, #b26b00)',
+        border: '0.5px solid var(--dsh-rpc-warn, #9d5c00)',
+        color: 'var(--dsh-rpc-warn, #9d5c00)',
         whiteSpace: 'nowrap',
       },
       badgeSoft: {
@@ -1128,7 +1128,7 @@ window.__ModuleLoader__.load({
       divider: { height: 0, borderTop: '0.5px solid var(--dsw-alias-border-l2)', margin: '2px 0' },
       hint: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-label-secondary)' },
       hintTiny: { margin: 0, fontSize: TEXT.tiny, lineHeight: LINE.dense, color: 'var(--dsw-alias-label-secondary)' },
-      hintWarn: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsh-rpc-warn, #b26b00)' },
+      hintWarn: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsh-rpc-warn, #9d5c00)' },
       hintError: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-state-error-primary, #b3261e)' },
       label: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))', fontWeight: 500 },
 
@@ -1245,7 +1245,7 @@ window.__ModuleLoader__.load({
     }
 
     var DOT_OK = 'var(--dsw-alias-state-success-primary, #1a8f5f)'
-    var DOT_OFF = 'var(--dsh-rpc-warn, #b26b00)'
+    var DOT_OFF = 'var(--dsh-rpc-warn, #9d5c00)'
 
     function tabStyle(active) {
       return {
@@ -2280,7 +2280,7 @@ window.__ModuleLoader__.load({
               lineHeight: '24px',
               fontWeight: 600,
               fontVariantNumeric: 'tabular-nums',
-              color: low ? 'var(--dsh-rpc-warn, #b26b00)' : accent,
+              color: low ? 'var(--dsh-rpc-warn, #9d5c00)' : accent,
             },
           }, valueText),
           h('span', {
@@ -2315,9 +2315,9 @@ window.__ModuleLoader__.load({
               gap: 7,
               padding: '7px 10px',
               borderRadius: 8,
-              border: '0.5px solid var(--dsh-rpc-warn, #b26b00)',
-              background: 'color-mix(in srgb, var(--dsh-rpc-warn, #b26b00) 9%, transparent)',
-              color: 'var(--dsh-rpc-warn, #b26b00)',
+              border: '0.5px solid var(--dsh-rpc-warn, #9d5c00)',
+              background: 'color-mix(in srgb, var(--dsh-rpc-warn, #9d5c00) 9%, transparent)',
+              color: 'var(--dsh-rpc-warn, #9d5c00)',
               fontSize: TEXT.body,
               lineHeight: '19px',
             },
@@ -2766,7 +2766,7 @@ window.__ModuleLoader__.load({
                 fontWeight: 600,
                 letterSpacing: '-.01em',
                 fontVariantNumeric: 'tabular-nums',
-                color: creditsLow ? 'var(--dsh-rpc-warn, #b26b00)' : 'var(--dsw-alias-label-primary)',
+                color: creditsLow ? 'var(--dsh-rpc-warn, #9d5c00)' : 'var(--dsw-alias-label-primary)',
                 opacity: credits.stale === true ? 0.65 : 1,
               },
             }, credits.unlimited === true ? '∞' : formatNumber(credits.remain)),
@@ -2796,7 +2796,7 @@ window.__ModuleLoader__.load({
                 height: '100%',
                 borderRadius: 999,
                 background: creditsLow
-                  ? 'var(--dsh-rpc-warn, #b26b00)'
+                  ? 'var(--dsh-rpc-warn, #9d5c00)'
                   : 'var(--dsw-alias-state-business-primary, #2f6fed)',
                 opacity: 0.9,
               },
@@ -2825,7 +2825,7 @@ window.__ModuleLoader__.load({
             trendChips.push(h('span', { key: 'tr', style: microChip() }, bind(t, 'trendRate', { value: formatNumber(trend.burnPerHour) })))
           }
           if (typeof trend.etaMs === 'number' && trend.etaMs > 0) {
-            trendChips.push(h('span', { key: 'te', style: microChip(creditsLow ? 'var(--dsh-rpc-warn, #b26b00)' : undefined) }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) })))
+            trendChips.push(h('span', { key: 'te', style: microChip(creditsLow ? 'var(--dsh-rpc-warn, #9d5c00)' : undefined) }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) })))
           }
           creditsBody.push(
             h('div', { key: 'trend', style: { display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 7, borderTop: '0.5px solid var(--dsw-alias-border-l2)' } },
@@ -2833,7 +2833,7 @@ window.__ModuleLoader__.load({
                 h('span', { style: S.label }, bind(t, 'trend')),
                 h('span', { style: S.grow }),
                 ...trendChips),
-              sparkline(trend.points, creditsLow ? 'var(--dsh-rpc-warn, #b26b00)' : (PROVIDER_ACCENT[active.provider] || 'currentColor')),
+              sparkline(trend.points, creditsLow ? 'var(--dsh-rpc-warn, #9d5c00)' : (PROVIDER_ACCENT[active.provider] || 'currentColor')),
               typeof trend.etaMs !== 'number'
                 ? h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-secondary)' } }, bind(t, 'trendEtaUnknown'))
                 : null),
@@ -3400,7 +3400,7 @@ window.__ModuleLoader__.load({
                       style: {
                         fontSize: TEXT.tiny,
                         lineHeight: '16px',
-                        color: 'var(--dsh-rpc-warn, #b26b00)',
+                        color: 'var(--dsh-rpc-warn, #9d5c00)',
                         whiteSpace: 'nowrap',
                         flex: '0 0 auto',
                       },
@@ -4294,7 +4294,7 @@ window.__ModuleLoader__.load({
           var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
           var warn = creditsWarning(snapshot, row.entry.provider, sidebarAlertRatio, sidebarAlertsEnabled)
           var stale = snapshot.stale === true
-          var dotColor = warn ? 'var(--dsh-rpc-warn, #b26b00)' : accent
+          var dotColor = warn ? 'var(--dsh-rpc-warn, #9d5c00)' : accent
           var label = row.entry.displayName + ' ' + formatCreditsText(snapshot, t) + (stale ? ' · ' + bind(t, 'creditsCached') : '')
           return h(
             'span',
@@ -4360,7 +4360,7 @@ window.__ModuleLoader__.load({
                   fontSize: 13,
                   fontVariantNumeric: 'tabular-nums',
                   color: warn
-                    ? 'var(--dsh-rpc-warn, #b26b00)'
+                    ? 'var(--dsh-rpc-warn, #9d5c00)'
                     : 'var(--dsw-alias-label-primary, inherit)',
                   opacity: stale ? 0.65 : 1,
                   flex: '0 0 auto',
@@ -4558,9 +4558,9 @@ window.__ModuleLoader__.load({
               ? credential.message
               : typeof snapshot.error === 'string' ? snapshot.error : ''
             var meta = []
-            if (problem !== undefined) meta.push(h('span', { key: 'problem', style: microChip('var(--dsh-rpc-warn, #b26b00)'), title: problemDetail }, problem))
+            if (problem !== undefined) meta.push(h('span', { key: 'problem', style: microChip('var(--dsh-rpc-warn, #9d5c00)'), title: problemDetail }, problem))
             if (snapshot.planName !== undefined && snapshot.planName !== '') meta.push(h('span', { key: 'plan', style: microChip() }, snapshot.planName))
-            if (percent !== undefined) meta.push(h('span', { key: 'pct', style: microChip(warn ? 'var(--dsh-rpc-warn, #b26b00)' : accent) }, bind(t, 'creditsPercent', { percent: percent })))
+            if (percent !== undefined) meta.push(h('span', { key: 'pct', style: microChip(warn ? 'var(--dsh-rpc-warn, #9d5c00)' : accent) }, bind(t, 'creditsPercent', { percent: percent })))
             if (activeAccount !== undefined && problem === undefined) meta.push(h('span', { key: 'acc', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bind(t, 'creditsCurrent', { label: activeAccount.label })))
             if (snapshot.resetAtMs > 0) meta.push(h('span', { key: 'reset', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsResetShort', { date: formatShortDate(snapshot.resetAtMs) })))
             if (sidebarShowUsage && todayUsage !== undefined && todayUsage.requests > 0) meta.push(h('span', { key: 'today', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsToday', { count: todayUsage.requests, tokens: formatNumber(todayUsage.totalTokens || 0) })))
@@ -4571,10 +4571,10 @@ window.__ModuleLoader__.load({
               ? h('div', { key: 'trend', style: { display: 'flex', alignItems: 'center', gap: 7, marginTop: 5, minWidth: 0 } },
                   h('span', { style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'trendToday', { value: formatNumber(trend.spentToday || 0) })),
                   typeof trend.etaMs === 'number' && trend.etaMs > 0
-                    ? h('span', { style: { fontSize: 10.5, color: warn ? 'var(--dsh-rpc-warn, #b26b00)' : 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) }))
+                    ? h('span', { style: { fontSize: 10.5, color: warn ? 'var(--dsh-rpc-warn, #9d5c00)' : 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) }))
                     : null,
                   h('span', { style: { flex: '1 1 40px', minWidth: 24, display: 'flex', alignItems: 'center' } },
-                    sparkline(trend.points, warn ? 'var(--dsh-rpc-warn, #b26b00)' : accent)))
+                    sparkline(trend.points, warn ? 'var(--dsh-rpc-warn, #9d5c00)' : accent)))
               : null
             return h(
               'div',
@@ -4595,14 +4595,14 @@ window.__ModuleLoader__.load({
                     height: 7,
                     borderRadius: 999,
                     flex: '0 0 auto',
-                    background: warn ? 'var(--dsh-rpc-warn, #b26b00)' : accent,
+                    background: warn ? 'var(--dsh-rpc-warn, #9d5c00)' : accent,
                   }, snapshot.stale === true
-                    ? { background: 'transparent', boxShadow: 'inset 0 0 0 1.5px ' + (warn ? 'var(--dsh-rpc-warn, #b26b00)' : accent) }
+                    ? { background: 'transparent', boxShadow: 'inset 0 0 0 1.5px ' + (warn ? 'var(--dsh-rpc-warn, #9d5c00)' : accent) }
                     : {}),
                 }),
                 h('span', { style: { fontSize: 12, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.entry.displayName),
-                exhausted ? h('span', { style: microChip('var(--dsh-rpc-warn, #b26b00)') }, bind(t, qoderFree ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
-                alert === 'low' ? h('span', { style: microChip('var(--dsh-rpc-warn, #b26b00)') }, bind(t, 'alertLow')) : null,
+                exhausted ? h('span', { style: microChip('var(--dsh-rpc-warn, #9d5c00)') }, bind(t, qoderFree ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
+                alert === 'low' ? h('span', { style: microChip('var(--dsh-rpc-warn, #9d5c00)') }, bind(t, 'alertLow')) : null,
                 h('span', { style: { flex: 1, minWidth: 4 } }),
                 h(
                   'span',
@@ -4610,7 +4610,7 @@ window.__ModuleLoader__.load({
                     title: formatCreditsText(snapshot, t),
                     style: { display: 'inline-flex', alignItems: 'baseline', gap: 4, whiteSpace: 'nowrap', flex: '0 0 auto' },
                   },
-                  h('span', { style: { fontSize: 19, lineHeight: '22px', fontWeight: 650, fontVariantNumeric: 'tabular-nums', color: warn ? 'var(--dsh-rpc-warn, #b26b00)' : 'var(--dsw-alias-label-primary)' } }, parts.big),
+                  h('span', { style: { fontSize: 19, lineHeight: '22px', fontWeight: 650, fontVariantNumeric: 'tabular-nums', color: warn ? 'var(--dsh-rpc-warn, #9d5c00)' : 'var(--dsw-alias-label-primary)' } }, parts.big),
                   parts.small !== '' ? h('span', { style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)' } }, parts.small) : null,
                   parts.unit !== '' ? h('span', { style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)' } }, parts.unit) : null,
                 ),
@@ -4625,7 +4625,7 @@ window.__ModuleLoader__.load({
                         width: Math.round(ratio * 100) + '%',
                         height: '100%',
                         borderRadius: 999,
-                        background: warn ? 'var(--dsh-rpc-warn, #b26b00)' : accent,
+                        background: warn ? 'var(--dsh-rpc-warn, #9d5c00)' : accent,
                         opacity: 0.9,
                         transition: 'width .3s ease',
                       },
