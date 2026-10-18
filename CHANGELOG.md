@@ -1,5 +1,88 @@
 # 更新记录
 
+## 1.7.0 — 2026-10-18
+
+这一版是**新增两家 provider**：Trae（国内版）与 Trae Global（国际版）。
+插件从「四家」变成「六家」，但仍然只有一张卡片、一套账号池、一份运行时。
+
+### 新增：Trae / Trae Global
+
+Trae 的接入难度不在协议，而在**三处「看起来能用、其实不能用」的坑**：
+
+1. **凭证是加密的**。`%APPDATA%\Trae CN\User\globalStorage\storage.json` 里的
+   `iCubeAuthInfo://icube.cloudide` 是 `tc` 信封：
+   `[6B 头][32B 随机数][密文]`，密文解出来是 `[64B SHA-512 校验][明文 JSON]`，
+   密钥由「随机数 + 固定盐」两次 SHA-512 派生。解错一个字节就得到乱码，
+   而且看起来像「未登录」。插件按上游两种信封头（`tc` / `AES_PRIVATE`）
+   各用一组盐，并且**校验不过就明确报错**，不拿乱码当账号名。
+2. **`GenerateTempToken` 换出来的令牌不能聊天**。这条最容易踩：名字叫
+   「换临时令牌」，看起来很合理，但实测登录文件里那枚令牌（claims 带
+   `source: "refresh_token"`）直接发 `llm_utils_chat` 就是 200；而
+   `GenerateTempToken` 换来的那枚（claims 带 `type: "user"`）会被 401
+   `code 1001`。所以插件**不做**临时令牌交换 —— 那等于把能用的令牌换成不能用的。
+3. **认证头是一组，不是一枚 token**。除了 `Authorization: Cloud-IDE-JWT …`，
+   还要 `X-Cloudide-Token` / `X-Ide-Token` / `X-Uid` / `X-App-Id` /
+   `X-Ide-Version(-Code)` / `X-Device-*` / `Request-Traffic-Type`。
+   少任何一个都是 401「not able to authenticate you」—— 文案完全看不出缺了哪个。
+
+接入后能做到：
+
+- **模型目录**：`/api/ide/v1/get_detail_param`（`model_list` 对 SOLO 客户端直接
+  400）。实测本账号 46 条配置里筛出 **20 个可聊模型**，带展示名、上下文窗口、
+  多模态与倍率；内部 agent（`browser_use_subagent` 等）与 `custom_model_*`
+  空槽位会被跳过，不会在选择器里出现一个点了就 400 的空行。
+- **聊天**：`/api/agent/v3/llm_utils_chat` 的事件流（`event: output` +
+  `{response, reasoning_content, tool_calls}`），正文 / 思考 / 工具调用 / usage
+  都翻成与另外两家一致的事件。
+- **工具调用**：Trae 的工具定义要求 `parameters` 是**字符串**（上游是 Go 的
+  `FunctionDefinition.parameters string`），传对象会 400。插件自动序列化。
+  工具分片按 `index` 累积，并且**首片等 `name` 到位再发**（与 1.4.0 给
+  WorkBuddy 修的是同一类问题）。
+- **图片输入**：多模态模型（Seed-2.1 系、Kimi、MiMo、Qwen 等）按 OpenAI 形状
+  的 `{type:'image_url', image_url:{url}}` 发送，实测能正常识别。
+- **额度**：`/trae/api/v2/pay/ide_user_ent_usage`，按「总额 − 已消耗」算，
+  不用上游那个带四舍五入的 `consumption_ratio`。总额为 0 时按 Free 处理，
+  不标「已用尽」。
+- **签到**：`/trae/api/v2/ug/checkin_credits/{status,claim}`，每天 100 + 额外奖励。
+- **续期**：`refreshToken` 走 `/cloudide/api/v3/trae/oauth/ExchangeToken`，
+  要求 `ClientID` 与 `ClientSecret`（缺一个就是 400「无效参数」）。
+  续期后的令牌写回账号，不会每个请求都重刷。
+
+### 新增：`desktop-auth` 凭证类型
+
+Trae 既不是 PAT（用户没有令牌可粘贴），也不是 WorkBuddy 那种「路径指向一个
+登录文件」的形态。所以新增第三类 `desktop-auth`：
+
+- 卡片里只显示**一个可选的 `storage.json` 路径**，没有 PAT 输入框、没有 App 路径；
+- 留空自动查找 `%APPDATA%\Trae CN\User\globalStorage\storage.json`
+  （国际版 `Trae\User\globalStorage\storage.json`）；
+- 设置里存到 `settings.trae[provider].storageFile`（与 `settings.qoder` /
+  `settings.workbuddy` 分开，不会互相覆盖）；
+- 「浏览器登录」对 Trae 明确拒绝并说明原因：它的登录是客户端自己的 OAuth，
+  带设备指纹与签名，插件不重放它 —— 用户只要在 Trae 里登录过就够了。
+
+### 行为变更（升级前请确认）
+
+1. **状态文档升到 v7**：新增 `providers[]` 里的 `trae` / `trae-global`，
+   以及 `settings.trae`。按 v6 硬编码的第三方消费者需要同步；本插件客户端
+   对缺失字段都有 fallback。
+2. **`settings.json` 新增 `trae` 字段**，旧文件读入时自动补齐，不需要迁移。
+3. **`credentialKind` 多了一个取值 `desktop-auth`**。按 `desktop` / `pat`
+   二值判断的外部脚本需要把第三类也算进去。
+4. **注册的 provider 从 4 个变成 6 个**：模型选择器里会多出 `Trae` 与
+   `Trae Global` 两组（可以在卡片里单独关掉）。
+
+### 测试
+
+- `node --test tests/*.test.mjs`：**200 条**（新增 29 条 Trae 用例：`tc` 信封
+  解密与校验、两种信封头、路径发现、续期请求形状、请求头三件套、工具
+  `parameters` 序列化、目录过滤、流解析（正文/思考/工具/usage/终态）、
+  name 晚到与 name 缺失兜底、`event: error` 分类、额度口径、签到码、状态映射）；
+- `node tests/client-credits.mjs`：**32 项**（新增「Trae 用登录文件而不是 PAT，
+  路径写进 `settings.trae`」）；
+- 真实链路已实测：解密 → 目录 20 个模型 → 聊天 200 → 工具调用 `tool-calls`
+  → 额度 `199.46 / 800` → 签到状态读取。
+
 ## 1.5.3 — 2026-10-18
 
 两处遗留：手动签到与自动签到的并发（和 1.5.1 修探测时是同一类问题），

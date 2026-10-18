@@ -938,6 +938,55 @@ try {
   STATUS.settings = settingsSnapshot
 }
 
+// Trae：凭证是桌面端的登录态，不是 PAT。卡片必须显示「登录文件」输入框，
+// 而不是 PAT 输入框；保存时补丁要落在 settings.trae 下（不是 settings.qoder）。
+const traeSnapshot = STATUS.providers.slice()
+STATUS.providers = [
+  ...traeSnapshot,
+  {
+    provider: 'trae', displayName: 'Trae', kind: 'desktop-auth', enabled: true,
+    catalogSource: 'live', fetchedAt: 1792234000000,
+    health: { state: 'ok', consecutiveFailures: 0, lastErrorAt: 0 },
+    usage: { requests: 3, ok: 3, failed: 0, totalTokens: 900, avgDurationMs: 1500, today: { requests: 2, totalTokens: 700 } },
+    models: [{ id: 'glm-5.2', name: 'GLM-5.2', contextWindow: 200000, maxTokens: 48000, supportsImages: false, reasoningEfforts: [], credits: 'x0.78', disabled: false }],
+    modelCount: 1,
+    accounts: [{ id: 'default', label: '本机登录', active: true, kind: 'desktop-auth', configured: true, source: 'desktop', credits: { state: 'ok', remain: 199.9, total: 800, unit: 'credits', items: [] } }],
+    credits: { state: 'ok', remain: 199.9, total: 800, unit: 'credits', items: [], fetchedAt: 1792234000000 },
+    credential: { status: 'signed-in', source: 'desktop', name: '用户2906168306', userId: '3616754657145179', file: 'C:\\Users\\x\\AppData\\Roaming\\Trae CN\\User\\globalStorage\\storage.json' },
+    autoSwitch: true,
+  },
+]
+STATUS.settings = { ...settingsSnapshot, trae: { trae: { storageFile: '', configured: true } } }
+try {
+  cardTree = await mount(card, { t: (key) => key })
+  const traeTab = findButton(cardTree, 'Trae')
+  if (traeTab === undefined) throw new Error('找不到 Trae 标签')
+  traeTab.props.onClick()
+  cardTree = await render(card, { t: (key) => key })
+  if (find(cardTree, (node) => node.type === 'input' && node.props.type === 'password') !== undefined) {
+    throw new Error('Trae 不应该显示 PAT 输入框（它的凭证来自客户端登录态）')
+  }
+  const storageInput = find(cardTree, (node) => node.type === 'input' && node.props.type === 'text' && String(node.props.placeholder).includes('storage.json'))
+  if (storageInput === undefined) throw new Error('Trae 缺少登录文件路径输入框')
+  if (!textOf(cardTree).includes('traeSignedIn')) throw new Error('Trae 已登录时没有显示登录态提示')
+  storageInput.props.onChange({ target: { value: 'D:\\trae\\storage.json' } })
+  cardTree = await render(card, { t: (key) => key }, true)
+  const saveTraeButton = findButton(cardTree, 'save')
+  if (saveTraeButton === undefined) throw new Error('找不到 Trae 保存按钮')
+  const beforeTrae = calls.length
+  saveTraeButton.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  const traeCall = calls[calls.length - 1]
+  if (calls.length === beforeTrae) throw new Error('保存 Trae 路径没有发请求')
+  if (!String(traeCall.body).includes('"trae"') || !String(traeCall.body).includes('storage.json')) {
+    throw new Error(`Trae 路径应写进 settings.trae，实际：${String(traeCall.body).slice(0, 220)}`)
+  }
+  console.log('✓ Trae 用登录文件而不是 PAT，路径写进 settings.trae')
+} finally {
+  STATUS.providers = traeSnapshot
+  STATUS.settings = settingsSnapshot
+}
+
 // 连点两个模型：第一个 POST 还没回来时点第二个，第二个请求必须带上第一个的改动。
 // 旧实现每次都基于「上一次 /status」算 disabledModels，后到的那次会把前一次覆盖掉。
 const toggleProviderSnapshot = STATUS.providers[0]

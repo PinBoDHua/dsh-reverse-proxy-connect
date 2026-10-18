@@ -66,12 +66,17 @@ window.__ModuleLoader__.load({
       appPathHint: '留空自动查找。填 WorkBuddy.exe / WorkBuddyAI.exe 的完整路径可跳过注册表探测。',
       authFile: '登录文件（可选）',
       authFileHint: '留空读取默认位置：%LOCALAPPDATA%\\CodeBuddyExtension\\Data\\Public\\auth。',
+      traeStorageFile: 'Trae 登录文件（可选）',
+      traeStorageFileHint: '留空自动查找：%APPDATA%\\Trae CN\\User\\globalStorage\\storage.json（国际版为 Trae\\User\\globalStorage\\storage.json）。',
+      traeSignedIn: '已读取本机 Trae 登录：{name}',
+      traeSignInHint: '还没有读到 Trae 登录。请先打开 Trae 客户端登录一次，插件会直接复用那份登录态（不需要粘贴令牌）。',
       maxContext: '使用上游声明的最大上下文窗口',
       diagnostics: '诊断',
       copyDiagnostics: '复制诊断',
       copied: '已复制',
       kindDesktop: '读取桌面端登录',
       kindPat: '使用个人访问令牌',
+      kindDesktopAuth: '复用桌面端登录态',
       fixed: '固定',
       reasoning: '推理档位',
       noReasoning: '不支持推理档位',
@@ -279,12 +284,17 @@ window.__ModuleLoader__.load({
       appPathHint: 'Leave empty to auto-detect. Point it at WorkBuddy.exe / WorkBuddyAI.exe to skip registry probing.',
       authFile: 'Sign-in file (optional)',
       authFileHint: 'Empty reads the default location: %LOCALAPPDATA%\\CodeBuddyExtension\\Data\\Public\\auth.',
+      traeStorageFile: 'Trae sign-in file (optional)',
+      traeStorageFileHint: 'Empty auto-detects: %APPDATA%\\Trae CN\\User\\globalStorage\\storage.json (Trae\\User\\globalStorage\\storage.json for the global build).',
+      traeSignedIn: 'Using the local Trae sign-in: {name}',
+      traeSignInHint: 'No Trae sign-in found yet. Open the Trae client and sign in once — the plugin reuses that session, no token needed.',
       maxContext: 'Use the upstream maximum context window',
       diagnostics: 'Diagnostics',
       copyDiagnostics: 'Copy diagnostics',
       copied: 'Copied',
       kindDesktop: 'Reads the desktop sign-in',
       kindPat: 'Uses a personal access token',
+      kindDesktopAuth: 'Reuses the desktop session',
       fixed: 'fixed',
       reasoning: 'Reasoning levels',
       noReasoning: 'No reasoning levels',
@@ -523,6 +533,8 @@ window.__ModuleLoader__.load({
       'workbuddy-ai': '#7a5af8',
       qoder: '#12a594',
       'qoder-global': '#0f9d8f',
+      trae: '#e0533d',
+      'trae-global': '#d97757',
     }
 
     /** 短名，给小卡用。 */
@@ -531,6 +543,8 @@ window.__ModuleLoader__.load({
       if (provider === 'workbuddy-ai') return 'WBAI'
       if (provider === 'qoder') return 'QD'
       if (provider === 'qoder-global') return 'QDG'
+      if (provider === 'trae') return 'TRAE'
+      if (provider === 'trae-global') return 'TRAEG'
       return provider.slice(0, 4).toUpperCase()
     }
 
@@ -1263,6 +1277,12 @@ window.__ModuleLoader__.load({
             setAppPathDraft(desktop.electronPath || '')
             setAuthFileDraft(desktop.authFile || '')
           }
+          // Trae 的路径覆盖存在 settings.trae 下（不是 settings.workbuddy）。
+          var trae = status.settings.trae && status.settings.trae[active.provider]
+          if (trae) {
+            setAppPathDraft('')
+            setAuthFileDraft(trae.storageFile || '')
+          }
           var advanced = status.settings.advanced || {}
           if (typeof advanced.idleTimeoutMs === 'number') setAdvIdle(String(Math.round(advanced.idleTimeoutMs / 1000)))
           if (typeof advanced.catalogRefreshMs === 'number') setAdvCatalog(String(Math.round(advanced.catalogRefreshMs / 1000)))
@@ -1723,6 +1743,14 @@ window.__ModuleLoader__.load({
         mutate(patch)
       }
 
+      /** Trae 只保存 storage.json 的路径覆盖（凭证本身由客户端维护）。 */
+      var saveTrae = function () {
+        if (active === undefined) return
+        var patch = { trae: {} }
+        patch.trae[active.provider] = { storageFile: authFileDraft.trim() }
+        mutate(patch)
+      }
+
       var copyDiagnostics = function () {
         var write = function (text) {
           if (navigator.clipboard && navigator.clipboard.writeText) {
@@ -1972,7 +2000,9 @@ window.__ModuleLoader__.load({
                 onChange: function () { toggleProvider(active) },
               }),
               h('span', { style: S.label }, bind(t, 'enabled'))),
-            h('span', { style: S.badgeSoft }, active.kind === 'desktop' ? bind(t, 'kindDesktop') : bind(t, 'kindPat')),
+            h('span', { style: S.badgeSoft }, active.kind === 'desktop'
+              ? bind(t, 'kindDesktop')
+              : active.kind === 'desktop-auth' ? bind(t, 'kindDesktopAuth') : bind(t, 'kindPat')),
             h('span', {
               style: credential.status === 'signed-in' ? S.badge : S.badgeWarn,
             }, credential.status === 'signed-in' ? bind(t, 'signedIn') : bind(t, 'signedOut')),
@@ -2671,6 +2701,27 @@ window.__ModuleLoader__.load({
               busy === 'save' ? bind(t, 'saving') : bind(t, 'save')),
             h('button', { type: 'button', style: S.button, onClick: clearPat, disabled: busy === 'save' || !configured },
               bind(t, 'clear'))),
+        )
+      } else if (active.kind === 'desktop-auth') {
+        // Trae：不需要 PAT，也不需要找 App 可执行文件 —— 凭证就在客户端的
+        // `storage.json` 里。能填的只有一个可选的路径覆盖。
+        var traeConfigured = status.settings && status.settings.trae && status.settings.trae[active.provider] && status.settings.trae[active.provider].configured
+        connectionBody.push(
+          h('div', { key: 'st', style: S.field },
+            h('span', { style: S.label }, bind(t, 'traeStorageFile')),
+            h('input', {
+              style: S.input,
+              type: 'text',
+              value: authFileDraft,
+              placeholder: credential.file || '%APPDATA%\\Trae CN\\User\\globalStorage\\storage.json',
+              onChange: function (event) { setAuthFileDraft(event.target.value) },
+            }),
+            h('span', { style: S.hintTiny }, bind(t, 'traeStorageFileHint'))),
+          h('p', { key: 'h', style: S.hintTiny },
+            traeConfigured ? bind(t, 'traeSignedIn', { name: credential.name || credential.userId || '—' }) : bind(t, 'traeSignInHint')),
+          h('div', { key: 'btns', style: S.row },
+            h('button', { type: 'button', style: S.buttonPrimary, onClick: saveTrae, disabled: busy === 'save' },
+              busy === 'save' ? bind(t, 'saving') : bind(t, 'save'))),
         )
       } else {
         connectionBody.push(

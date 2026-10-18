@@ -66,7 +66,7 @@ async function post(handler, url, key, payload) {
   return { status: res.status, body: JSON.parse(res.body) }
 }
 
-test('宿主入口：注册四个 provider，status v6 与诊断接口可用', async () => {
+test('宿主入口：注册六个 provider，status v7 与诊断接口可用', async () => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-host-'))
   const dataDir = join(root, DATA_DIR_NAME)
   mkdirSync(dataDir, { recursive: true })
@@ -77,6 +77,8 @@ test('宿主入口：注册四个 provider，status v6 与诊断接口可用', a
       'workbuddy-ai': { enabled: false },
       qoder: { enabled: false },
       'qoder-global': { enabled: false },
+      trae: { enabled: false },
+      'trae-global': { enabled: false },
     },
   }))
 
@@ -126,7 +128,7 @@ test('宿主入口：注册四个 provider，status v6 与诊断接口可用', a
     },
     llm: {
       registerAdapter(ids, adapter) {
-        assert.deepEqual(ids, ['workbuddy', 'workbuddy-ai', 'qoder', 'qoder-global'])
+        assert.deepEqual(ids, ['workbuddy', 'workbuddy-ai', 'qoder', 'qoder-global', 'trae', 'trae-global'])
         registeredAdapter = adapter
         return () => {}
       },
@@ -146,9 +148,9 @@ test('宿主入口：注册四个 provider，status v6 与诊断接口可用', a
 
     const full = await get(handlers[STATUS_PATH], STATUS_PATH)
     assert.equal(full.status, 200)
-    assert.equal(full.body.version, 6)
+    assert.equal(full.body.version, 7)
     assert.equal(full.body.plugin.version, JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version)
-    assert.equal(full.body.providers.length, 4)
+    assert.equal(full.body.providers.length, 6)
     assert.equal(full.body.host.images, true, '注入了附件服务后应声明图片可用')
     // 适配器门面必须把 canAcceptImages 透给 runtime；漏掉时模型会永远只声明
     // text 模态，宿主在附件准入阶段就会拒绝图片。
@@ -194,12 +196,12 @@ test('宿主入口：注册四个 provider，status v6 与诊断接口可用', a
     assert.equal(diagnostics.status, 200)
     assert.equal(diagnostics.body.plugin.version, full.body.plugin.version)
     assert.equal(diagnostics.body.key, undefined)
-    assert.equal(diagnostics.body.providers.length, 4)
+    assert.equal(diagnostics.body.providers.length, 6)
     assert.ok(!JSON.stringify(diagnostics.body).includes(full.body.key), '诊断里不能带控制密钥')
 
     const reset = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, { action: 'stats-reset' })
     assert.equal(reset.status, 200)
-    assert.equal(reset.body.version, 6)
+    assert.equal(reset.body.version, 7)
 
     // 账号测试在没有模型时给出明确错误，而不是伪造成功。
     const tested = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, {
