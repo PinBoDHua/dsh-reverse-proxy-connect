@@ -15,7 +15,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -64,6 +64,49 @@ test('时长格式：分钟/小时/天三档，且 252 天不再摊成六位数�
   assert.equal(formatDurationZh(3 * 3_600_000 + 20 * 60_000), '3 小时 20 分')
   assert.equal(formatDurationZh(252 * 86_400_000), '252 天')
   assert.equal(formatDurationZh(undefined), '—')
+})
+
+test('时长格式与浏览器半边逐字一致：同一份数据两边不能显示成两个数', () => {
+  // 浏览器 bundle 不能 import 本模块，所以两边的规则是手抄的。这里把 client.js
+  // 里的 formatCompactDuration 原样抠出来跑一遍，确保两边对所有输入一致 ——
+  // 否则卡片说「3h 20m」、侧栏说「200m」那种对不上很难查。
+  const source = readFileSync(new URL('../client/client.js', import.meta.url), 'utf8')
+  const start = source.indexOf('function formatCompactDuration(ms) {')
+  assert.ok(start > 0, 'client.js 里找不到 formatCompactDuration')
+  let depth = 0
+  let end = start
+  for (let index = source.indexOf('{', start); index < source.length; index++) {
+    if (source[index] === '{') depth++
+    else if (source[index] === '}') {
+      depth--
+      if (depth === 0) {
+        end = index + 1
+        break
+      }
+    }
+  }
+  const clientFormat = new Function(`${source.slice(start, end)}; return formatCompactDuration`)()
+  const samples = [
+    1_000,
+    59_000,
+    60_000,
+    45 * 60_000,
+    59 * 60_000,
+    60 * 60_000,
+    3 * 3_600_000,
+    3 * 3_600_000 + 20 * 60_000,
+    23 * 3_600_000 + 59 * 60_000,
+    24 * 3_600_000,
+    252 * 86_400_000,
+    400 * 86_400_000,
+  ]
+  for (const ms of samples) {
+    assert.equal(formatCompactDuration(ms), clientFormat(ms), `${String(ms)}ms 两边不一致`)
+  }
+  // 非法值也一致。
+  for (const value of [undefined, Number.NaN, 0, -1]) {
+    assert.equal(formatCompactDuration(value), clientFormat(value), `${String(value)} 两边不一致`)
+  }
 })
 
 // ---------- creditsFor ----------
