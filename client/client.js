@@ -1197,6 +1197,10 @@ window.__ModuleLoader__.load({
       var searchState = useState('')
       var searchDraft = searchState[0]
       var setSearchDraft = searchState[1]
+      // 账号 × 模型表的统计口径：默认「今日」，与卡片上方那个「今日」对齐。
+      var accountModelRangeState = useState('today')
+      var accountModelRange = accountModelRangeState[0]
+      var setAccountModelRange = accountModelRangeState[1]
       var accLabelState = useState('')
       var accLabel = accLabelState[0]
       var setAccLabel = accLabelState[1]
@@ -2660,23 +2664,38 @@ window.__ModuleLoader__.load({
           )
         }
 
-        // 账号 × 模型：stats.accountModels 是 v4 新增的交叉维度，键有三段。
+        // 账号 × 模型：stats.accountModels / accountModelToday 是 v4 新增的交叉维度。
         //
         // 为什么需要它：`models` 只回答「这个模型一共花了多少」，`accounts` 只回答
         // 「这个账号一共花了多少」；两个账号都用同一个模型时，用户真正想知道的是
         // 「到底是哪个账号在烧 token」，这两份独立计数都答不了。
         //
+        // **默认显示「今日」**：卡片上方写的就是「今日 1,159 次 / 366M tokens」，
+        // 交叉表如果默认给累计，两处数字永远对不上 —— 交叉维度是升级后才开始累积的，
+        // 累计值天然小于历史总量。用户看到「今日 176M，表里只有 10M」会以为坏了。
+        //
         // 只在「该 provider 下账号数 > 1」时显示：单账号时这一栏和模型用量完全
         // 重复，白白多一张表。
+        //
+        // 老宿主（1.9.0 之前）只下发 `accountModels`，没有今日那一份。这时不要把
+        // 「今日」按钮画成选中却显示累计数据 —— 那正是这版要消灭的「数字对不上」。
+        // 没有今日数据就只显示「累计」，也不渲染切换按钮。
+        var hasAccountModelToday = statsDoc.accountModelToday !== null
+          && typeof statsDoc.accountModelToday === 'object'
+          && statsDoc.accountModelToday !== undefined
+        var effectiveAccountModelRange = hasAccountModelToday ? accountModelRange : 'all'
+        var accountModelSource = effectiveAccountModelRange === 'all'
+          ? statsDoc.accountModels
+          : statsDoc.accountModelToday
         var accountModelRows = []
         if (Array.isArray(active.accounts) && active.accounts.length > 1
-          && statsDoc.accountModels !== null && typeof statsDoc.accountModels === 'object') {
+          && accountModelSource !== null && typeof accountModelSource === 'object') {
           var labelOfAccount = {}
           safeArray(active.accounts).forEach(function (account) {
             if (account !== null && typeof account.id === 'string') labelOfAccount[account.id] = account.label
           })
-          Object.keys(statsDoc.accountModels).forEach(function (key) {
-            var counters = statsDoc.accountModels[key]
+          Object.keys(accountModelSource).forEach(function (key) {
+            var counters = accountModelSource[key]
             if (counters === null || typeof counters !== 'object') return
             // 快照里已经拆好三段（provider / accountId / model），不再自己拆键。
             if (counters.provider !== active.provider) return
@@ -2694,10 +2713,41 @@ window.__ModuleLoader__.load({
         }
         if (accountModelRows.length > 0) {
           var accountModelColumns = 'minmax(84px, 1.1fr) minmax(104px, 1.5fr) minmax(46px, .7fr) minmax(70px, .9fr) minmax(56px, .8fr)'
+          // 切换按钮：两个口径的起点不同（今日 vs 累计），必须让用户能选，
+          // 而不是只能看一个然后怀疑数字。老宿主没有今日数据时渲染按钮会把
+          // 「今日」画成选中却显示累计，所以干脆不渲染。
+          var rangeButton = function (key, label, value) {
+            return h('button', {
+              key: 'r' + key,
+              type: 'button',
+              onClick: function () { setAccountModelRange(value) },
+              style: {
+                font: 'inherit',
+                fontSize: TEXT.tiny,
+                lineHeight: '16px',
+                padding: '0 7px',
+                borderRadius: 999,
+                cursor: 'pointer',
+                border: '0.5px solid ' + (effectiveAccountModelRange === value
+                  ? 'var(--dsw-alias-state-business-primary, #2f6fed)'
+                  : 'var(--dsw-alias-border-l2)'),
+                background: effectiveAccountModelRange === value
+                  ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))'
+                  : 'transparent',
+                color: effectiveAccountModelRange === value
+                  ? 'var(--dsw-alias-label-primary)'
+                  : 'var(--dsw-alias-label-tertiary)',
+                whiteSpace: 'nowrap',
+                flex: '0 0 auto',
+              },
+            }, label)
+          }
           usageBody.push(
             h('div', { key: 'accountmodels', style: { display: 'flex', flexDirection: 'column', gap: 4 } },
-              h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 6, flexWrap: 'wrap' } },
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
                 h('span', { style: S.sectionTitle }, bind(t, 'usageAccountModels')),
+                hasAccountModelToday ? rangeButton('today', bind(t, 'usageToday'), 'today') : null,
+                hasAccountModelToday ? rangeButton('all', bind(t, 'usageTotal'), 'all') : null,
                 h('span', { style: S.grow }),
                 h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)', opacity: 0.8 }, title: bind(t, 'usageAccountModelsHint') }, bind(t, 'usageAccountModelsHint'))),
               h('div', { style: usageTableFrame },

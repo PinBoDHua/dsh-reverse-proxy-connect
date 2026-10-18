@@ -164,11 +164,18 @@ const STATUS = {
     },
     // v4：账号 × 模型交叉维度。WorkBuddy 有两个账号，默认账号用了 auto，
     // 备用账号也用了 auto —— 这正是「哪个账号烧的 token」要看的那一格。
+    //
+    // 今日与累计刻意给不同的数字：卡片默认显示「今日」，必须与上方那个
+    // 「今日 4 次」同一口径；拿成累计会让用户看到两个对不上的数。
     accountModels: {
       'workbuddy::default::auto': { provider: 'workbuddy', accountId: 'default', model: 'auto', requests: 6, totalTokens: 300, avgDurationMs: 1200 },
       'workbuddy::acc-2::auto': { provider: 'workbuddy', accountId: 'acc-2', model: 'auto', requests: 2, totalTokens: 100, avgDurationMs: 1100 },
       'workbuddy::default::glm-5.3': { provider: 'workbuddy', accountId: 'default', model: 'glm-5.3', requests: 2, totalTokens: 80, avgDurationMs: 900 },
       'qoder-global::default::qfmodel': { provider: 'qoder-global', accountId: 'default', model: 'qfmodel', requests: 1, totalTokens: 10, avgDurationMs: 300 },
+    },
+    accountModelToday: {
+      'workbuddy::default::auto': { provider: 'workbuddy', accountId: 'default', model: 'auto', requests: 2, totalTokens: 50, avgDurationMs: 1000 },
+      'workbuddy::acc-2::auto': { provider: 'workbuddy', accountId: 'acc-2', model: 'auto', requests: 1, totalTokens: 20, avgDurationMs: 900 },
     },
     daily: [
       { date: '2026-10-15', requests: 1, totalTokens: 10 },
@@ -1192,13 +1199,35 @@ if (!pairText.includes('usageAccountModels')) {
 for (const label of ['usageAccountCol', 'usageAccountModelsHint', 'usageModelCalls', 'usageModelTokens']) {
   if (!pairText.includes(label)) throw new Error(`账号 × 模型表缺少 ${label}`)
 }
-// 每一行必须能同时看到账号名与模型名，且 token 数正确。
-// 表头与数据行共用同一套 gridTemplateColumns，所以再按「有没有 label 文本」筛掉表头。
-const pairRows = findAll(cardTree, (node) => node.type === 'div'
+
+/** 账号 × 模型的数据行（表头与数据行共用同一套 gridTemplateColumns，按文本筛掉表头）。 */
+const pairRowNodes = (tree) => findAll(tree, (node) => node.type === 'div'
   && typeof node.props?.style?.gridTemplateColumns === 'string'
   && node.props.style.gridTemplateColumns === 'minmax(84px, 1.1fr) minmax(104px, 1.5fr) minmax(46px, .7fr) minmax(70px, .9fr) minmax(56px, .8fr)'
   && !textOf(node).includes('usageAccountCol'))
-if (pairRows.length !== 3) throw new Error(`账号 × 模型应有 3 行（default/auto、acc-2/auto、default/glm-5.3），实际 ${pairRows.length}`)
+
+// 默认口径必须是「今日」：卡片上方写的是「今日 4 次」，交叉表也必须按今日，
+// 否则两处数字对不上（交叉维度是升级后才开始累积的，累计值天然更小）。
+let pairRows = pairRowNodes(cardTree)
+if (pairRows.length !== 2) {
+  throw new Error(`默认「今日」应有 2 行（default/auto、acc-2/auto），实际 ${pairRows.length}`)
+}
+const todayJoined = pairRows.map((row) => textOf(row)).join(' || ')
+if (!todayJoined.includes('50') || todayJoined.includes('300')) {
+  throw new Error(`默认应显示今日的 50 tok，而不是累计的 300：${todayJoined}`)
+}
+if (todayJoined.includes('glm-5.3')) {
+  throw new Error('今日没有 glm-5.3 的请求，不该出现这一行')
+}
+console.log('✓ 账号 × 模型默认按「今日」口径，与上方今日数字一致')
+
+// 切到「累计」应换成另一组数字。
+const allRangeButton = find(cardTree, (node) => node.type === 'button' && textOf(node) === 'usageTotal')
+if (allRangeButton === undefined) throw new Error('缺少「累计」切换按钮')
+allRangeButton.props.onClick()
+cardTree = await render(card, { t: (key) => key })
+pairRows = pairRowNodes(cardTree)
+if (pairRows.length !== 3) throw new Error(`「累计」应有 3 行，实际 ${pairRows.length}`)
 const joined = pairRows.map((row) => textOf(row)).join(' || ')
 if (!joined.includes('本机登录') || !joined.includes('备用账号')) {
   throw new Error(`账号列应显示设置里的 label 而不是 id：${joined}`)
@@ -1211,7 +1240,7 @@ const firstPair = textOf(pairRows[0])
 if (!firstPair.includes('300') || !firstPair.includes('本机登录')) {
   throw new Error(`账号 × 模型应按 token 倒序，第一行应是「本机登录 / auto / 300」：${firstPair}`)
 }
-console.log('✓ 账号 × 模型用量按 token 倒序，账号显示名称')
+console.log('✓ 账号 × 模型可切到「累计」，按 token 倒序且显示账号名称')
 
 // 只有一个账号时不该渲染这张表（和模型用量完全重复）。
 const wbaiTab = findButton(cardTree, 'WorkBuddy AI')

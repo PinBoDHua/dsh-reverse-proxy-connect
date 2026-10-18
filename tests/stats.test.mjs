@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -452,6 +452,90 @@ test('统计：账号 × 模型的键能容忍模型 id 里带 ::，并丢掉坏
     assert.equal(pair.accountId, 'default')
     assert.equal(pair.model, 'vendor::model-x', '模型 id 要原样保留，不能只取最后一段')
     stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：账号 × 模型有「今日」口径，且跨天自动清零', () => {
+  // 事故现场：卡片上方写「今日 1,159 次 / 366M tokens」，交叉表却给累计的
+  // 24 次 / 10M —— 交叉维度是升级后才开始累积的，累计值天然小于历史总量，
+  // 两个数并排放着，用户只会以为坏了。所以必须单独记一份「今日」。
+  const dir = tempDir()
+  const day1 = new Date(2026, 9, 18, 10, 0, 0).getTime()
+  const day2 = new Date(2026, 9, 19, 10, 0, 0).getTime()
+  try {
+    let clock = day1
+    const stats = new Stats({ filePath: statsPathOf(dir), enabled: () => true, now: () => clock })
+    stats.record({ provider: 'workbuddy', accountId: 'a', model: 'hy3', kind: 'stop', durationMs: 10, usage: { inputTokens: 100, outputTokens: 50 } })
+    stats.record({ provider: 'workbuddy', accountId: 'b', model: 'hy3', kind: 'stop', durationMs: 10, usage: { inputTokens: 60, outputTokens: 40 } })
+    let snapshot = stats.snapshot()
+    // 今日与累计在第一天相同。
+    assert.equal(snapshot.accountModelToday['workbuddy::a::hy3'].totalTokens, 150)
+    assert.equal(snapshot.accountModels['workbuddy::a::hy3'].totalTokens, 150)
+    assert.equal(snapshot.accountModelToday['workbuddy::b::hy3'].totalTokens, 100)
+
+    // 跨天：今日清零，累计保留。
+    clock = day2
+    stats.record({ provider: 'workbuddy', accountId: 'a', model: 'hy3', kind: 'stop', durationMs: 10, usage: { inputTokens: 7, outputTokens: 3 } })
+    snapshot = stats.snapshot()
+    assert.equal(snapshot.accountModelToday['workbuddy::a::hy3'].totalTokens, 10, '今日应只剩新的一天那 10 tok')
+    assert.equal(snapshot.accountModelToday['workbuddy::b::hy3'], undefined, '前一天 b 账号的今日应被清掉')
+    assert.equal(snapshot.accountModels['workbuddy::a::hy3'].totalTokens, 160, '累计不能被日切影响')
+    assert.equal(snapshot.accountModels['workbuddy::b::hy3'].totalTokens, 100, '累计不能丢另一个账号')
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：今日口径落盘后重启仍是今日，跨天则不复活', () => {
+  const dir = tempDir()
+  const day1 = new Date(2026, 9, 18, 10, 0, 0).getTime()
+  const day2 = new Date(2026, 9, 19, 10, 0, 0).getTime()
+  try {
+    const filePath = statsPathOf(dir)
+    const first = new Stats({ filePath, enabled: () => true, now: () => day1 })
+    first.record({ provider: 'workbuddy', accountId: 'a', model: 'hy3', kind: 'stop', durationMs: 10, usage: { inputTokens: 11, outputTokens: 22 } })
+    first.stop()
+
+    // 同一天重启：今日还在。
+    const sameDay = new Stats({ filePath, enabled: () => true, now: () => day1 + 3600_000 })
+    assert.equal(sameDay.snapshot().accountModelToday['workbuddy::a::hy3'].totalTokens, 33)
+    sameDay.stop()
+
+    // 第二天重启：今日必须为空，累计还在 —— 否则「今日」会跨天累积。
+    const nextDay = new Stats({ filePath, enabled: () => true, now: () => day2 })
+    const snapshot = nextDay.snapshot()
+    assert.deepEqual(snapshot.accountModelToday, {}, '跨天重启后今日口径必须清零')
+    assert.equal(snapshot.accountModels['workbuddy::a::hy3'].totalTokens, 33, '累计不受日切影响')
+    nextDay.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('统计：today 日期缺失或损坏时，不以「今天」的名义复活旧今日桶', () => {
+  // `data.today.date` 在 today 缺失时会被归一化成「今天」，用它当判据会把
+  // 昨天的 accountModelToday 当成今天的。判据必须看**文件里**写的日期。
+  const dir = tempDir()
+  const day1 = new Date(2026, 9, 18, 10, 0, 0).getTime()
+  const day2 = new Date(2026, 9, 19, 10, 0, 0).getTime()
+  try {
+    const filePath = statsPathOf(dir)
+    const first = new Stats({ filePath, enabled: () => true, now: () => day1 })
+    first.record({ provider: 'workbuddy', accountId: 'a', model: 'hy3', kind: 'stop', durationMs: 10, usage: { inputTokens: 5, outputTokens: 5 } })
+    first.stop()
+
+    // 手改文件：把 today 整块删掉（模拟半截写入 / 手改），只留今日桶。
+    const raw = JSON.parse(readFileSync(filePath, 'utf8'))
+    delete raw.today
+    writeFileSync(filePath, JSON.stringify(raw), 'utf8')
+
+    const reloaded = new Stats({ filePath, enabled: () => true, now: () => day2 })
+    assert.deepEqual(reloaded.snapshot().accountModelToday, {}, 'today 缺失时不能复活旧今日桶')
+    assert.equal(reloaded.snapshot().accountModels['workbuddy::a::hy3'].totalTokens, 10, '累计仍然保留')
+    reloaded.stop()
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

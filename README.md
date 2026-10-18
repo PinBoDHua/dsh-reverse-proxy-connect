@@ -729,7 +729,8 @@ GLM-5.3 · x0.79        Hy3 · 免费        Kimi-K3 · x1.62
 - 今日 / 累计的请求数、token 数、成功率、平均耗时；
 - 每个 provider、每个账号、每个模型各一份；
 - **账号 × 模型**交叉一份：回答「哪个账号、用了哪个模型、花了多少 token」——
-  两个账号都用过同一个模型时，账号维度和模型维度都只给得出合计；
+  两个账号都用过同一个模型时，账号维度和模型维度都只给得出合计。
+  这一栏有**今日**与**累计**两个口径，卡片默认今日（与上方「今日 N 次」对齐）；
 - **每日历史保留 30 天**（卡片显示最近 14 天柱状图）；
 - **当前会话**单独计数（DSH 的 `sessionId`），卡片里多一行；
 - 模型用量榜（按请求数取前 5）、账号 × 模型表（按 token 取前 8，账号数 > 1 时才显示）
@@ -737,8 +738,8 @@ GLM-5.3 · x0.79        Hy3 · 免费        Kimi-K3 · x1.62
 - 健康状态：连续 2 次失败 = 降级，连续 3 次 = 不可用；一次成功立即恢复。
 
 `stats.json` 从 v1/v2/v3 升级到 v4 时会保留累计、今日、每日历史与账号/模型维度，
-不会清零。但 `accountModels` **不做回填**：两份独立计数推不出交叉值，老数据没有
-这一栏，从升级后的下一次请求开始累积。
+不会清零。但 `accountModels` / `accountModelToday` **不做回填**：两份独立计数
+推不出交叉值，老数据没有这一栏，从升级后的下一次请求开始累积。
 
 命令行也能看：
 
@@ -747,11 +748,13 @@ node lib/bin.js usage
 node lib/bin.js usage workbuddy
 ```
 
-`usage` 末尾会多一段按 token 倒序的账号 × 模型明细：
+`usage` 末尾会多出两段按 token 倒序的账号 × 模型明细（今日 / 累计）：
 
 ```text
-  账号 × 模型：
-    - 本机登录  auto  1 次  260 tokens
+  账号 × 模型（今日）：
+    - 本机登录  deepseek-v4.1-flash  62 次  30,451,846 tokens
+  账号 × 模型（累计）：
+    - 本机登录  deepseek-v4.1-flash  80 次  40,302,127 tokens
 ```
 
 ## 图片输入
@@ -899,7 +902,7 @@ settings.json          # PAT、账号池、模型开关、探测结果、路径�
 credits-cache.json     # 上一次成功的额度快照（启动秒显）
 credits-history.json   # 额度历史：今日/7 天消耗、速度与耗尽预估（按 provider::账号）
 catalog-cache.json     # 最后一次成功的模型目录（按 provider::账号）
-stats.json             # 用量统计 v4：今日/累计/每日 30 天/按 provider 的每日与会话/模型/账号×模型（不含请求内容）
+stats.json             # 用量统计 v4：今日/累计/每日 30 天/按 provider 的每日与会话/模型/账号×模型（今日+累计，不含请求内容）
 .qoder-machine-id      # Qoder 设备标识种子（优先复用 ~/.qoder/.auth/machine_id）
 ```
 
@@ -932,8 +935,8 @@ stats.json             # 用量统计 v4：今日/累计/每日 30 天/按 provi
 ## 开发
 
 ```powershell
-node --test tests/*.test.mjs      # 207 条纯逻辑 / 集成用例
-node tests/client-credits.mjs     # 设置卡片与侧栏小卡的渲染 / 交互用例（35 项）
+node --test tests/*.test.mjs      # 216 条纯逻辑 / 集成用例
+node tests/client-credits.mjs     # 设置卡片与侧栏小卡的渲染 / 交互用例（38 项）
 npm run verify                    # 两套一起跑
 ```
 
