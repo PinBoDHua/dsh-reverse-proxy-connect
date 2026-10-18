@@ -99,7 +99,9 @@ const STATUS = {
       usage: {
         requests: 12, ok: 11, failed: 1, aborted: 0, inputTokens: 100, outputTokens: 200, totalTokens: 300,
         avgDurationMs: 1200, successRate: 11 / 12,
-        today: { requests: 3, totalTokens: 80 },
+        // 今日 10 次，但 accountModelToday 只覆盖了 3 次 —— 复刻真实场景：
+        // 交叉维度从升级后才开始累积，覆盖率必然小于 100%。
+        today: { requests: 10, totalTokens: 80 },
         last: { at: 1792234000000, model: 'auto', kind: 'stop', durationMs: 1000, totalTokens: 20 },
       },
       models: [{ id: 'auto', name: 'Auto', contextWindow: 256000, maxTokens: 32000, supportsImages: true, reasoningEfforts: [], disabled: false, unavailable: false, forced: false }],
@@ -1219,7 +1221,14 @@ if (!todayJoined.includes('50') || todayJoined.includes('300')) {
 if (todayJoined.includes('glm-5.3')) {
   throw new Error('今日没有 glm-5.3 的请求，不该出现这一行')
 }
-console.log('✓ 账号 × 模型默认按「今日」口径，与上方今日数字一致')
+// 覆盖率提示：交叉维度只从升级后开始累积，覆盖的请求数一定小于上方总量。
+// 必须显式写出来（「已记录 3 / 4 次」），否则用户拿它和上方「今日 4 次」
+// 对比只会觉得数字坏了 —— 这正是用户反馈的那个现象。
+const coverageText = textOf(cardTree)
+if (!coverageText.includes('usageAccountModelCoverage')) {
+  throw new Error('交叉维度覆盖不全时没说清楚：用户会以为数字漏记了')
+}
+console.log('✓ 账号 × 模型默认按「今日」口径，并标明覆盖率')
 
 // 切到「累计」应换成另一组数字。
 const allRangeButton = find(cardTree, (node) => node.type === 'button' && textOf(node) === 'usageTotal')

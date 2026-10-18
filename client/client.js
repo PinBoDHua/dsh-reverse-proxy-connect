@@ -245,6 +245,7 @@ window.__ModuleLoader__.load({
       usageTopModels: '模型用量',
       usageAccountModels: '账号 × 模型用量',
       usageAccountModelsHint: '同一个模型可能被多个账号用过；这一栏按账号分开算 token。',
+      usageAccountModelCoverage: '已记录 {covered} / {total} 次（{percent}%）：历史请求拆不出账号，只从 1.9.x 起累积',
       usageAccountCol: '账号',
       usageAllAccounts: '全部账号',
       usageModelCalls: '请求',
@@ -467,6 +468,7 @@ window.__ModuleLoader__.load({
       usageTopModels: 'Model usage',
       usageAccountModels: 'Account × model usage',
       usageAccountModelsHint: 'The same model can be used by several accounts; this table splits tokens per account.',
+      usageAccountModelCoverage: 'Recorded {covered} of {total} requests ({percent}%): older requests carry no account split',
       usageAccountCol: 'Account',
       usageAllAccounts: 'All accounts',
       usageModelCalls: 'Requests',
@@ -2688,6 +2690,10 @@ window.__ModuleLoader__.load({
           ? statsDoc.accountModels
           : statsDoc.accountModelToday
         var accountModelRows = []
+        // 交叉维度只从 1.9.x 开始累积。历史请求拆不出来，所以这里的次数
+        // **一定**小于卡片上方的总量 —— 不写清楚，用户只会觉得「数字不对」。
+        // 把「已覆盖 X / 共 Y 次」显式摆出来，缺口就是解释而不是 bug。
+        var accountModelCovered = 0
         if (Array.isArray(active.accounts) && active.accounts.length > 1
           && accountModelSource !== null && typeof accountModelSource === 'object') {
           var labelOfAccount = {}
@@ -2701,6 +2707,7 @@ window.__ModuleLoader__.load({
             if (counters.provider !== active.provider) return
             if (typeof counters.accountId !== 'string' || typeof counters.model !== 'string') return
             if (!(counters.requests > 0)) return
+            accountModelCovered += counters.requests
             accountModelRows.push({
               accountId: counters.accountId,
               label: labelOfAccount[counters.accountId] || counters.accountId,
@@ -2711,6 +2718,17 @@ window.__ModuleLoader__.load({
           accountModelRows.sort(function (a, b) { return b.counters.totalTokens - a.counters.totalTokens })
           accountModelRows = accountModelRows.slice(0, 8)
         }
+        // 上方那张汇总表用的是同一个口径（今日 / 累计），直接拿来当分母。
+        var accountModelTotal = effectiveAccountModelRange === 'all'
+          ? (typeof providerUsage.requests === 'number' ? providerUsage.requests : 0)
+          : (typeof usageToday.requests === 'number' ? usageToday.requests : 0)
+        var accountModelCoverage = accountModelRows.length > 0 && accountModelTotal > 0 && accountModelCovered < accountModelTotal
+          ? bind(t, 'usageAccountModelCoverage', {
+            covered: formatNumber(accountModelCovered),
+            total: formatNumber(accountModelTotal),
+            percent: String(Math.max(1, Math.round((accountModelCovered / accountModelTotal) * 100))),
+          })
+          : undefined
         if (accountModelRows.length > 0) {
           var accountModelColumns = 'minmax(84px, 1.1fr) minmax(104px, 1.5fr) minmax(46px, .7fr) minmax(70px, .9fr) minmax(56px, .8fr)'
           // 切换按钮：两个口径的起点不同（今日 vs 累计），必须让用户能选，
@@ -2748,6 +2766,20 @@ window.__ModuleLoader__.load({
                 h('span', { style: S.sectionTitle }, bind(t, 'usageAccountModels')),
                 hasAccountModelToday ? rangeButton('today', bind(t, 'usageToday'), 'today') : null,
                 hasAccountModelToday ? rangeButton('all', bind(t, 'usageTotal'), 'all') : null,
+                // 覆盖率：这批数字只覆盖升级之后的请求，缺口要写明。
+                // 不写的话，用户拿它和上方的「今日 N 次」对比只会觉得坏了。
+                accountModelCoverage === undefined
+                  ? null
+                  : h('span', {
+                      title: bind(t, 'usageAccountModelsHint'),
+                      style: {
+                        fontSize: TEXT.tiny,
+                        lineHeight: '16px',
+                        color: 'var(--dsw-alias-state-warning-primary, #b26b00)',
+                        whiteSpace: 'nowrap',
+                        flex: '0 0 auto',
+                      },
+                    }, accountModelCoverage),
                 h('span', { style: S.grow }),
                 h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)', opacity: 0.8 }, title: bind(t, 'usageAccountModelsHint') }, bind(t, 'usageAccountModelsHint'))),
               h('div', { style: usageTableFrame },
