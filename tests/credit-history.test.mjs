@@ -200,3 +200,50 @@ test('额度历史：重复样本不写盘，删除账号会清掉历史', () =>
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('额度历史：CLI 退出落盘不能把宿主刚记的样本冲掉（跨进程合并）', () => {
+  // 用户可见行为：命令行跑完 `credits`/`doctor` 退出后，卡片上的「今日消耗 /
+  // 预计可用」不能因为一次旁路落盘而跳变。
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-history-'))
+  try {
+    const filePath = creditsHistoryPathOf(dir)
+    // 宿主与 CLI 从同一份（空的）文件启动。
+    const host = new CreditHistory({ filePath, persistDelayMs: 60_000 })
+    const cli = new CreditHistory({ filePath, persistDelayMs: 60_000 })
+
+    // 宿主先记一个样本并落盘（真实路径：后台每 2 分钟的额度刷新）。
+    host.record('workbuddy', 'a', { state: 'ok', remain: 900, total: 1200 }, at(20))
+    host.flush()
+
+    // CLI 也记了自己的样本，退出时整文件落盘 —— 必须先把宿主刚写的内容合并进来。
+    cli.record('workbuddy', 'a', { state: 'ok', remain: 880, total: 1200 }, at(21))
+    cli.flush()
+
+    const saved = JSON.parse(readFileSync(filePath, 'utf8'))
+    const remains = saved.entries['workbuddy::a'].recent.map((point) => point.remain)
+    assert.deepEqual(remains, [900, 880], '宿主刚记的样本不能被 CLI 的旧副本覆盖')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('额度历史：删除账号后，另一个进程写回的旧条目不能把历史复活', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-history-'))
+  try {
+    const filePath = creditsHistoryPathOf(dir)
+    const first = new CreditHistory({ filePath, persistDelayMs: 60_000 })
+    first.record('qoder', 'a', { state: 'ok', remain: 100, total: 200 }, at(8))
+    first.flush()
+
+    const cli = new CreditHistory({ filePath, persistDelayMs: 60_000 })
+    // 宿主又写了一次（磁盘已变化）；CLI 随后删除账号 —— 删除必须赢。
+    first.record('qoder', 'a', { state: 'ok', remain: 90, total: 200 }, at(9))
+    first.flush()
+    assert.equal(cli.forget('qoder', 'a'), true)
+
+    const saved = JSON.parse(readFileSync(filePath, 'utf8'))
+    assert.equal(saved.entries['qoder::a'], undefined, '已删除账号的额度历史不能被磁盘旧副本复活')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

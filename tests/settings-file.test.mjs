@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { SettingsStore, defaults } from '../lib/settings.js'
+import { applyLoginAccount } from '../lib/accounts.js'
 
 /** 临时目录。 */
 function tempDir() {
@@ -64,6 +65,60 @@ test('设置写盘：另一个进程改过文件时先重读再合并，不能�
     const saved = JSON.parse(readFileSync(file, 'utf8'))
     assert.equal(saved.accounts.qoder.find((account) => account.id === 'cli-acc')?.pat, 'pt-CLI')
     assert.equal(saved.checkin.lastRunAt, 2)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('CLI 登录写回：登录等待期宿主新增的账号与续期的令牌不能被旧快照覆盖', () => {
+  const dir = tempDir()
+  try {
+    const file = join(dir, 'settings.json')
+    const token = (accessToken, refreshToken, uid) => ({
+      accessToken,
+      refreshToken,
+      expiresAtMs: Date.now() + 3600_000,
+      refreshExpiresAtMs: 0,
+      domain: 'codebuddy.cn',
+      uid,
+      enterpriseId: '',
+    })
+    const base = defaults()
+    base.accounts.workbuddy = [{ id: 'acc-old', label: '旧账号', enabled: true, token: token('TOKEN-OLD', 'R1', 'uid-old') }]
+    base.activeAccount.workbuddy = 'acc-old'
+    new SettingsStore(file).patch(base)
+
+    // CLI 启动 `node lib/bin.js login` 时读到快照，然后开始等浏览器登录（最长 5 分钟）。
+    const cli = new SettingsStore(file)
+    // 等待期间宿主把旧账号令牌续期了，并且新增了一个账号（GUI 登录 / 后台写回）。
+    const host = new SettingsStore(file)
+    host.patch({
+      accounts: {
+        workbuddy: [
+          { id: 'acc-old', label: '旧账号', enabled: true, token: token('TOKEN-REFRESHED', 'R2', 'uid-old') },
+          { id: 'acc-host-new', label: '宿主新账号', enabled: true, token: token('TOKEN-HOST', 'R3', 'uid-host') },
+        ],
+      },
+    })
+
+    // 浏览器登录完成：走与 `bin.js login` 相同的落盘入口。
+    applyLoginAccount(cli, 'workbuddy', {
+      uid: 'uid-cli',
+      label: '浏览器登录账号',
+      token: token('TOKEN-CLI', 'R4', 'uid-cli'),
+    })
+
+    const saved = JSON.parse(readFileSync(file, 'utf8'))
+    const rows = saved.accounts.workbuddy
+    assert.ok(rows.some((row) => row.id === 'acc-host-new'), '等待期间宿主新增的账号必须保留')
+    assert.equal(
+      rows.find((row) => row.id === 'acc-old')?.token?.accessToken,
+      'TOKEN-REFRESHED',
+      '宿主续期后的令牌不能被回退成登录开始时的旧值',
+    )
+    const added = rows.find((row) => row.token?.uid === 'uid-cli')
+    assert.ok(added !== undefined, '本次登录的账号必须写入')
+    assert.equal(saved.activeAccount.workbuddy, added.id, '当前账号应指向本次登录的账号')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

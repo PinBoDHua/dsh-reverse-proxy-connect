@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { Runtime, failureCodeOf, isProviderScopedFailure, parseOpenAiSse, qoderQueueFailure } from '../lib/runtime.js'
+import { Runtime, failureCodeOf, isProviderScopedFailure, parseOpenAiSse, qoderQueueFailure, resetHintOf } from '../lib/runtime.js'
 import { Stats } from '../lib/stats.js'
 import { defaults } from '../lib/settings.js'
 import { DeadlineError, openDeadline, sleep } from '../lib/timeout.js'
@@ -140,6 +140,20 @@ test('content_filter 终态带可路由的 failure，而不是空 error', async 
   const finish = events.find((event) => event.type === 'finish')
   assert.equal(finish.kind, 'error')
   assert.equal(finish.failure.code, 'CONTENT_FILTER')
+})
+
+test('限额重置时间只从限额语境里提取：账号降级/模型下线/风控日期不能显示成「限额至」', () => {
+  // 用户可见行为：卡片上的「限额至 …」必须是真正的限额重置时间；把账号降级、
+  // 模型下线、风控解除的日期显示成限额时间会让人按错误时间等待或换号。
+  assert.equal(
+    resetHintOf('您的使用量已超出频率限制，将在 2026-10-19 15:33:04 UTC+8 重置', 'RATE_LIMIT'),
+    '2026-10-19 15:33:04 UTC+8',
+  )
+  assert.equal(resetHintOf('当前账号类型暂不支持该模型，账号于 2026-10-18 09:00:00 完成降级', 'AUTH'), undefined)
+  assert.equal(resetHintOf('模型 deepseek-v4.1-flash 将于 2026-12-01 00:00:00 下线', 'upstream-error'), undefined)
+  assert.equal(resetHintOf('请求触发风控，账号已限制至 2026-10-20 08:30:00', 'upstream-error'), undefined)
+  // 文案本身没有限额语义词、但错误 code 明确是额度类：仍然提取（上游文案可能只有时间）。
+  assert.equal(resetHintOf('将在 2026-10-19 15:33:04 恢复', 'QUOTA'), '2026-10-19 15:33:04')
 })
 
 test('网络错误归到 TRANSPORT（DSH 会重试），而不是不重试的 upstream-error', () => {

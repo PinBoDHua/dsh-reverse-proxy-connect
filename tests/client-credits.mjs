@@ -233,13 +233,26 @@ const STATUS = {
 }
 
 const calls = []
+// 失败注入：'status' 让 /status 直接 reject（首屏错误态），'action' 让 /action reject（刷新失败提示）。
+let fetchFailure = null
 async function fakeFetch(url, init) {
-  calls.push({ url: String(url), method: init?.method ?? 'GET', body: init?.body })
-  return { ok: true, status: 200, json: async () => STATUS }
+  const target = String(url)
+  calls.push({ url: target, method: init?.method ?? 'GET', body: init?.body })
+  if (fetchFailure === 'status' && target.includes('/status')) throw new Error('fetch failed: ECONNREFUSED')
+  if (fetchFailure === 'action' && target.includes('/action')) throw new Error('HTTP 500 upstream reset')
+  return {
+    ok: true,
+    status: 200,
+    json: async () => STATUS,
+    text: async () => JSON.stringify({ ok: true, diagnostics: 'audit' }),
+  }
 }
 
 // ---------- 载入 bundle ----------
 let captured
+// 记录注入的 <style>，验证主题 token 只注入一次（幂等）。
+const injectedStyles = []
+const styleById = new Map()
 const sandbox = {
   console,
   setTimeout,
@@ -249,11 +262,17 @@ const sandbox = {
   fetch: fakeFetch,
   navigator: {},
   document: {
-    createElement: () => ({}),
+    createElement: (tag) => ({ tagName: tag, id: '', textContent: '', children: [], appendChild(child) { this.children.push(child) } }),
+    getElementById: (id) => styleById.get(id) ?? null,
     querySelector: () => null,
     addEventListener: () => {},
     removeEventListener: () => {},
-    head: { appendChild: () => {} },
+    head: {
+      appendChild: (element) => {
+        if (element && element.id) styleById.set(element.id, element)
+        injectedStyles.push(element)
+      },
+    },
   },
 }
 sandbox.window = {
@@ -470,7 +489,7 @@ const warned = []
   if (node === null || node === undefined) return
   if (Array.isArray(node)) { node.forEach(walk); return }
   if (typeof node !== 'object') return
-  if (typeof node.props?.style?.color === 'string' && node.props.style.color.includes('state-warning')) {
+  if (typeof node.props?.style?.color === 'string' && node.props.style.color.includes('rpc-warn')) {
     const inner = []
     ;(function collect(child) {
       if (typeof child === 'string' || typeof child === 'number') { inner.push(String(child)); return }
@@ -571,7 +590,7 @@ collapsedToggle.props.onMouseEnter()
 tree = await render(pill, { t: (key) => key, wide: true })
 const hoveredToggle = find(tree, (node) => node.type === 'button' && node.props?.['aria-expanded'] !== undefined)
 const hoverBackground = String(hoveredToggle.props.style?.background)
-if (hoverBackground === idleBackground || !hoverBackground.includes('bg-l2')) {
+if (hoverBackground === idleBackground || !hoverBackground.includes('rpc-fill')) {
   throw new Error(`悬停没有底色反馈：idle=${idleBackground} hover=${hoverBackground}`)
 }
 if (!String(hoveredToggle.props.style?.border).includes('border-l3')) {
@@ -643,7 +662,7 @@ cardTree = await mount(card, { t: (key) => key })
 const v4Text = textOf(cardTree)
 if (!v4Text.includes('healthOk')) throw new Error('卡片没有显示健康状态')
 if (!v4Text.includes('healthDegraded')) throw new Error('降级状态没有显示')
-if (!v4Text.includes('IMG')) throw new Error('卡片没有标记图片输入能力')
+if (!v4Text.includes('imagesShort')) throw new Error('卡片没有标记图片输入能力')
 if (!v4Text.includes('usage')) throw new Error('卡片缺少用量分组')
 if (!v4Text.includes('usageToday') || !v4Text.includes('usageTotal')) {
   throw new Error('用量区块缺少今日/累计')
@@ -860,7 +879,7 @@ try {
     if (node === null || node === undefined || typeof node !== 'object') return
     if (Array.isArray(node)) { node.forEach(walk); return }
     if (typeof node.props?.style?.color === 'string'
-      && node.props.style.color.includes('state-warning')
+      && node.props.style.color.includes('rpc-warn')
       && typeof node.props.style.fontSize === 'number'
       && node.props.style.fontSize >= 19) stillWarned.push(textOf(node))
     walk(node.children)
@@ -1509,5 +1528,158 @@ try {
 } finally {
   STATUS.providers[0].accounts = modelTestSnapshot
 }
+
+// ── 2.2.1 UI/UX 修复回归 ─────────────────────────────────────────
+// 9) 宿主没有 bg-l2 / state-warning-primary 这两个 token，插件自建
+//    --dsh-rpc-fill / --dsh-rpc-warn（亮/暗各一套）；重复 apply 不得重复注入。
+if (injectedStyles.length !== 1) throw new Error(`主题样式应只注入一次，实际 ${injectedStyles.length}`)
+const themeCss = String(injectedStyles[0].textContent)
+if (!themeCss.includes('--dsh-rpc-warn') || !themeCss.includes('--dsh-rpc-fill')) {
+  throw new Error('主题样式缺少 --dsh-rpc-warn / --dsh-rpc-fill')
+}
+if (!themeCss.includes('body[data-ds-dark-theme]')) throw new Error('主题样式缺少暗色主题覆盖')
+captured.apply(ctx)
+if (injectedStyles.length !== 1) throw new Error('重复 apply 时主题样式被重复注入')
+console.log('✓ 主题 token 自建属性只注入一次（亮/暗各一套）')
+
+// 10) 小字对比度：≤12.5px 的文本不得再用 label-tertiary，也不得靠 ≤0.62 的透明度降级。
+cardTree = await mount(card, { t: (key) => key })
+const tinyTextNodes = findAll(cardTree, (node) => typeof node.type === 'string'
+  && textOf(node) !== ''
+  && typeof node.props?.style?.fontSize === 'number'
+  && node.props.style.fontSize <= 12.5)
+const badTiny = tinyTextNodes.filter((node) => {
+  const style = node.props.style
+  if (String(style.color ?? '').includes('label-tertiary')) return true
+  return typeof style.opacity === 'number' && style.opacity <= 0.62
+})
+if (badTiny.length > 0) {
+  throw new Error(`仍有小字用 tertiary/透明度降级：${badTiny.map((node) => textOf(node).slice(0, 20)).join(' | ')}`)
+}
+console.log('✓ 小字统一用 label-secondary，不再叠低透明度')
+
+// 11) 首屏 /status 失败：完整卡片外壳 + 本地化说明 + 可点重试，role=status。
+fetchFailure = 'status'
+try {
+  cardTree = await mount(card, { t: (key) => key })
+  const failText = textOf(cardTree)
+  if (!failText.includes('statusLoadFailed') || !failText.includes('statusLoadFailedHint')) {
+    throw new Error(`首屏失败态缺少本地化说明：${failText}`)
+  }
+  if (failText.includes('ECONNREFUSED')) throw new Error('首屏失败态仍把裸英文错误显示在正文')
+  const retryButton = findButton(cardTree, 'retry')
+  if (retryButton === undefined) throw new Error('首屏失败态缺少重试按钮')
+  if (!find(cardTree, (node) => node.props?.role === 'status')) throw new Error('首屏失败态缺少 role=status')
+  const beforeRetry = calls.length
+  fetchFailure = null
+  retryButton.props.onClick()
+  cardTree = await render(card, { t: (key) => key })
+  if (calls.length === beforeRetry) throw new Error('点重试没有重新请求 /status')
+  if (!textOf(cardTree).includes('v9.9.9')) throw new Error('重试成功后没有恢复正常卡片')
+  console.log('✓ 首屏读取失败有本地化说明与可点的重试按钮')
+} finally {
+  fetchFailure = null
+}
+
+// 12) IMG/TXT 徽标走 locale，不再硬编码。
+cardTree = await mount(card, { t: (key) => key })
+const imgText = textOf(cardTree)
+if (imgText.includes('IMG') || imgText.includes('TXT')) throw new Error('图片能力徽标仍然硬编码 IMG/TXT')
+if (!find(cardTree, (node) => textOf(node) === 'imagesShort')) throw new Error('图片能力徽标没有走 locale')
+console.log('✓ IMG/TXT 徽标改为 locale 文案')
+
+// 13) 未登录 provider 的「立即签到」禁用，已登录 provider 不受影响。
+const signedInCard = await mount(card, { t: (key) => key })
+const signedInCheckin = findButton(signedInCard, 'checkinNow')
+if (signedInCheckin === undefined || signedInCheckin.props.disabled === true) {
+  throw new Error('已登录 provider 的签到按钮被误禁用')
+}
+const qoderCredential = STATUS.providers[2].credential
+STATUS.providers[2].credential = { status: 'signed-out', reason: 'no-credential' }
+try {
+  cardTree = await mount(card, { t: (key) => key, initialProvider: 'qoder-global' })
+  const blockedCheckin = findButton(cardTree, 'checkinNow')
+  if (blockedCheckin === undefined) throw new Error('未登录 provider 缺少签到按钮')
+  if (blockedCheckin.props.disabled !== true) throw new Error('未登录时「立即签到」仍可点')
+  if (blockedCheckin.props.title !== 'checkinNeedLogin') throw new Error('签到禁用没有说明原因')
+  const beforeBlockedClick = calls.length
+  blockedCheckin.props.onClick()
+  if (calls.length !== beforeBlockedClick) throw new Error('禁用状态下仍然发出了签到请求')
+  console.log('✓ 未登录 provider 的「立即签到」禁用并给出原因')
+} finally {
+  STATUS.providers[2].credential = qoderCredential
+}
+
+// 14) aria-controls 只在目标节点真正渲染时输出（折叠态不留悬空引用）。
+cardTree = await mount(card, { t: (key) => key })
+const diagToggleButtons = findAll(cardTree, (node) => node.type === 'button' && textOf(node) === 'diagnostics')
+if (diagToggleButtons.length === 0) throw new Error('找不到诊断按钮')
+if (diagToggleButtons.some((node) => node.props['aria-controls'] !== undefined)) {
+  throw new Error('折叠时 aria-controls 指向了未挂载的诊断节点')
+}
+diagToggleButtons[0].props.onClick()
+cardTree = await render(card, { t: (key) => key })
+const openDiag = findAll(cardTree, (node) => node.type === 'button'
+  && textOf(node) === 'diagnostics' && node.props['aria-controls'] !== undefined)
+if (openDiag.length === 0) throw new Error('展开后诊断按钮没有 aria-controls')
+let fixPill = await mount(pill, { t: (key) => key, wide: true })
+const fixPillToggle = find(fixPill, (node) => node.type === 'button' && node.props?.['aria-expanded'] !== undefined)
+if (fixPillToggle === undefined) throw new Error('找不到胶囊展开按钮')
+if (fixPillToggle.props['aria-controls'] !== undefined) throw new Error('胶囊折叠时 aria-controls 悬空')
+fixPillToggle.props.onClick({ preventDefault() {} })
+fixPill = await render(pill, { t: (key) => key, wide: true })
+const expandedToggle = find(fixPill, (node) => node.type === 'button' && node.props?.['aria-expanded'] === true)
+if (expandedToggle === undefined || expandedToggle.props['aria-controls'] === undefined) {
+  throw new Error('胶囊展开后缺少 aria-controls')
+}
+console.log('✓ aria-controls 只在目标节点真正渲染时输出')
+
+// 15) 文本/数字输入都有可访问名（aria-label）。
+cardTree = await mount(card, { t: (key) => key })
+const ariaLabels = findAll(cardTree, (node) => node.type === 'input' && typeof node.props?.['aria-label'] === 'string')
+  .map((node) => node.props['aria-label'])
+for (const expected of ['appPath', 'authFile', 'advancedIdle', 'advancedCatalog', 'advancedCredits', 'advancedAlert', 'advancedSwitch', 'advancedQueue']) {
+  if (!ariaLabels.includes(expected)) throw new Error(`输入框缺少 aria-label：${expected}`)
+}
+cardTree = await mount(card, { t: (key) => key, initialProvider: 'qoder-global' })
+const patAriaLabels = findAll(cardTree, (node) => node.type === 'input' && typeof node.props?.['aria-label'] === 'string')
+  .map((node) => node.props['aria-label'])
+for (const expected of ['pat', 'accountLabel', 'accountPat']) {
+  if (!patAriaLabels.includes(expected)) throw new Error(`PAT 输入框缺少 aria-label：${expected}`)
+}
+console.log('✓ 文本/数字输入都有 aria-label 可访问名')
+
+// 16) 侧栏刷新失败：面板底部 role=status 文案，不再只有 1.6 秒描边变色。
+fetchFailure = 'action'
+try {
+  fixPill = await mount(pill, { t: (key) => key, wide: true })
+  const pillToggle = find(fixPill, (node) => node.type === 'button' && node.props?.['aria-expanded'] === false)
+  pillToggle.props.onClick({ preventDefault() {} })
+  fixPill = await render(pill, { t: (key) => key, wide: true })
+  const refreshButton = find(fixPill, (node) => node.type === 'button' && textOf(node) === 'creditsRefresh')
+  if (refreshButton === undefined) throw new Error('展开面板里找不到刷新按钮')
+  refreshButton.props.onClick({ preventDefault() {} })
+  fixPill = await render(pill, { t: (key) => key, wide: true })
+  if (!textOf(fixPill).includes('refreshFailed')) throw new Error('刷新失败没有可见文案提示')
+  if (!find(fixPill, (node) => node.props?.role === 'status' && textOf(node).includes('refreshFailed'))) {
+    throw new Error('刷新失败提示缺少 role=status')
+  }
+  console.log('✓ 侧栏刷新失败有 role=status 文案')
+} finally {
+  fetchFailure = null
+}
+
+// 17) 诊断复制失败不再静默：按钮变「复制失败」并给出可手动复制的 textarea。
+cardTree = await mount(card, { t: (key) => key })
+const copyButton = find(cardTree, (node) => node.type === 'button' && textOf(node) === 'copyDiagnostics')
+if (copyButton === undefined) throw new Error('找不到「复制诊断」按钮')
+copyButton.props.onClick()
+await new Promise((resolve) => setTimeout(resolve, 10))
+cardTree = await render(card, { t: (key) => key })
+if (!textOf(cardTree).includes('copyFailed')) throw new Error('复制失败没有可见反馈')
+if (!textOf(cardTree).includes('copyFallbackHint')) throw new Error('复制失败没有手动复制说明')
+const fallbackArea = find(cardTree, (node) => node.type === 'textarea' && typeof node.props?.value === 'string' && node.props.value.length > 10)
+if (fallbackArea === undefined) throw new Error('复制失败没有可手动复制的 textarea 兜底')
+console.log('✓ 复制失败有可见反馈与手动复制兜底')
 
 console.log('client-credits: OK')

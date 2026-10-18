@@ -33,6 +33,38 @@ window.__ModuleLoader__.load({
 
     var POLL_MS = 20000
 
+    /**
+     * 插件自带的两组主题自适应属性。
+     *
+     * 宿主 0.2.1 的 ui-theme 里没有 `--dsw-alias-bg-l2` / `--dsw-alias-state-warning-primary`
+     * 这两个名字（真实 token：背景是 `bg-layer-1/2/3`，警告色是 `state-warn-*`），
+     * 旧代码里的 `var(--dsw-alias-bg-l2, ...)` 永远走 fallback —— 亮色下勉强能用，
+     * 暗色下就是一块浅灰。这里注入插件自己的变量，亮/暗主题各一套；注入失败时
+     * 每个使用点仍保留原来的 fallback 值。
+     */
+    var THEME_STYLE_ID = 'dsh-reverse-proxy-connect-theme'
+    function ensureThemeStyles() {
+      try {
+        if (typeof document === 'undefined' || document === null || typeof document.getElementById !== 'function') return
+        if (document.getElementById(THEME_STYLE_ID) !== null && document.getElementById(THEME_STYLE_ID) !== undefined) return
+        if (typeof document.createElement !== 'function') return
+        var style = document.createElement('style')
+        if (style === null || style === undefined) return
+        style.id = THEME_STYLE_ID
+        style.textContent =
+          ':root{--dsh-rpc-warn:#b26b00;--dsh-rpc-fill:rgba(20,28,45,.06)}' +
+          'body[data-ds-dark-theme]{--dsh-rpc-warn:#f0a63c;--dsh-rpc-fill:rgba(255,255,255,.08)}'
+        var head = document.head
+        if (head === undefined || head === null) {
+          head = typeof document.getElementsByTagName === 'function' ? document.getElementsByTagName('head')[0] : undefined
+        }
+        if (head === undefined || head === null || typeof head.appendChild !== 'function') return
+        head.appendChild(style)
+      } catch (_) {
+        /* 宿主没有 DOM（SSR / 纯数据测试）时静默跳过，使用内联 fallback */
+      }
+    }
+
     /** 侧栏底部那一排（宿主 `dsh-client-ui-sidebar` 声明）。 */
     var SIDEBAR_FOOTER_SLOT = 'sidebar.footer.action'
 
@@ -303,6 +335,16 @@ window.__ModuleLoader__.load({
       eventEvents: '账本',
       eventTest: '账号测试',
       eventUnknown: '事件',
+      // 2.3.0：失败重试、a11y 与国际化补齐
+      imagesShortOff: '无图',
+      statusLoadFailed: '读取状态失败',
+      statusLoadFailedHint: '插件没有拿到 /status。宿主可能还没就绪，也可能后台进程刚重启；可以稍等或手动重试。',
+      retry: '重试',
+      retrying: '重试中…',
+      checkinNeedLogin: '先登录再签到',
+      refreshFailed: '刷新失败，稍后重试',
+      copyFailed: '复制失败',
+      copyFallbackHint: '自动复制失败，请手动选中下面的文本复制。',
     }
     var en = {
       nav: 'Reverse proxy',
@@ -567,6 +609,16 @@ window.__ModuleLoader__.load({
       eventEvents: 'Journal',
       eventTest: 'Account test',
       eventUnknown: 'Event',
+      // 2.3.0: failure retry, a11y and i18n
+      imagesShortOff: 'no img',
+      statusLoadFailed: 'Failed to load status',
+      statusLoadFailedHint: 'The plugin could not read /status. The host may not be ready yet, or the backend just restarted; wait a moment or retry.',
+      retry: 'Retry',
+      retrying: 'Retrying…',
+      checkinNeedLogin: 'Sign in before checking in',
+      refreshFailed: 'Refresh failed, please try again later',
+      copyFailed: 'Copy failed',
+      copyFallbackHint: 'Automatic copy failed. Select the text below and copy it manually.',
     }
 
     function bind(t, key, vars) {
@@ -834,8 +886,8 @@ window.__ModuleLoader__.load({
         fontSize: 10,
         lineHeight: '15px',
         fontWeight: 500,
-        color: color === undefined ? 'var(--dsw-alias-label-tertiary)' : color,
-        background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))',
+        color: color === undefined ? 'var(--dsw-alias-label-secondary)' : color,
+        background: 'var(--dsh-rpc-fill, rgba(127,127,127,.10))',
         whiteSpace: 'nowrap',
         flex: '0 0 auto',
       }
@@ -897,9 +949,9 @@ window.__ModuleLoader__.load({
     /** 健康状态的颜色。 */
     function healthColor(state) {
       if (state === 'ok') return 'var(--dsw-alias-state-success-primary, #1a8f5f)'
-      if (state === 'degraded') return 'var(--dsw-alias-state-warning-primary, #b26b00)'
+      if (state === 'degraded') return 'var(--dsh-rpc-warn, #b26b00)'
       if (state === 'down') return 'var(--dsw-alias-state-error-primary, #b3261e)'
-      return 'var(--dsw-alias-label-tertiary)'
+      return 'var(--dsw-alias-label-secondary)'
     }
 
     /** 毫秒 → 人话。 */
@@ -960,8 +1012,8 @@ window.__ModuleLoader__.load({
     /** 事件级别 → 颜色（info 用弱化色，warn/error 与全站状态色一致）。 */
     function eventColor(level) {
       if (level === 'error') return 'var(--dsw-alias-state-error-primary, #b3261e)'
-      if (level === 'warn') return 'var(--dsw-alias-state-warning-primary, #b26b00)'
-      return 'var(--dsw-alias-label-tertiary)'
+      if (level === 'warn') return 'var(--dsh-rpc-warn, #b26b00)'
+      return 'var(--dsw-alias-label-secondary)'
     }
 
     /** Qoder PAT 页面（按区域）。 */
@@ -990,6 +1042,9 @@ window.__ModuleLoader__.load({
       loose: '22px',
     }
 
+    // 小字可读性：≤12.5px 的说明文字统一用 label-secondary（亮色 #61666b ≈ 5.9:1），
+    // 不再用 label-tertiary（亮色 #81858c ≈ 3.6:1）叠 opacity —— 后者在亮色主题下
+    // 连 4.5:1 都不到，叠到 .5 只有 2~3:1。层级靠 secondary vs primary 区分。
     var S = {
       card: {
         border: '0.5px solid var(--dsw-alias-border-l2)',
@@ -998,7 +1053,7 @@ window.__ModuleLoader__.load({
         display: 'flex',
         flexDirection: 'column',
         gap: 14,
-        background: 'var(--dsw-alias-bg-l1, transparent)',
+        background: 'var(--dsw-alias-bg-layer-1, transparent)',
         boxSizing: 'border-box',
         maxWidth: '100%',
       },
@@ -1010,11 +1065,10 @@ window.__ModuleLoader__.load({
         marginLeft: 'auto',
         fontSize: TEXT.tiny,
         fontVariantNumeric: 'tabular-nums',
-        color: 'var(--dsw-alias-label-tertiary)',
-        opacity: 0.75,
+        color: 'var(--dsw-alias-label-secondary)',
         userSelect: 'text',
       },
-      intro: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-label-tertiary)', maxWidth: 620 },
+      intro: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-label-secondary)', maxWidth: 620 },
 
       // 分组：统一用一条极淡的上边线分隔，省掉原来三种不同的 divider
       section: {
@@ -1030,13 +1084,12 @@ window.__ModuleLoader__.load({
         fontSize: TEXT.tiny,
         fontWeight: 600,
         letterSpacing: '.08em',
-        color: 'var(--dsw-alias-label-tertiary)',
+        color: 'var(--dsw-alias-label-secondary)',
       },
       sectionCount: {
         fontSize: TEXT.tiny,
         fontVariantNumeric: 'tabular-nums',
-        color: 'var(--dsw-alias-label-tertiary)',
-        opacity: 0.8,
+        color: 'var(--dsw-alias-label-secondary)',
       },
 
       // 胶囊徽标
@@ -1046,7 +1099,7 @@ window.__ModuleLoader__.load({
         padding: '0 7px',
         borderRadius: 999,
         border: '0.5px solid var(--dsw-alias-border-l2)',
-        color: 'var(--dsw-alias-label-tertiary)',
+        color: 'var(--dsw-alias-label-secondary)',
         whiteSpace: 'nowrap',
       },
       badgeWarn: {
@@ -1054,8 +1107,8 @@ window.__ModuleLoader__.load({
         lineHeight: '18px',
         padding: '0 7px',
         borderRadius: 999,
-        border: '0.5px solid var(--dsw-alias-state-warning-primary, #b26b00)',
-        color: 'var(--dsw-alias-state-warning-primary, #b26b00)',
+        border: '0.5px solid var(--dsh-rpc-warn, #b26b00)',
+        color: 'var(--dsh-rpc-warn, #b26b00)',
         whiteSpace: 'nowrap',
       },
       badgeSoft: {
@@ -1063,8 +1116,8 @@ window.__ModuleLoader__.load({
         lineHeight: '18px',
         padding: '0 7px',
         borderRadius: 999,
-        background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))',
-        color: 'var(--dsw-alias-label-tertiary)',
+        background: 'var(--dsh-rpc-fill, rgba(127,127,127,.10))',
+        color: 'var(--dsw-alias-label-secondary)',
         whiteSpace: 'nowrap',
       },
 
@@ -1073,9 +1126,9 @@ window.__ModuleLoader__.load({
       stack: { display: 'flex', flexDirection: 'column', gap: 6 },
       grow: { flex: 1, minWidth: 0 },
       divider: { height: 0, borderTop: '0.5px solid var(--dsw-alias-border-l2)', margin: '2px 0' },
-      hint: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-label-tertiary)' },
-      hintTiny: { margin: 0, fontSize: TEXT.tiny, lineHeight: LINE.dense, color: 'var(--dsw-alias-label-tertiary)', opacity: 0.85 },
-      hintWarn: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-state-warning-primary, #b26b00)' },
+      hint: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-label-secondary)' },
+      hintTiny: { margin: 0, fontSize: TEXT.tiny, lineHeight: LINE.dense, color: 'var(--dsw-alias-label-secondary)' },
+      hintWarn: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsh-rpc-warn, #b26b00)' },
       hintError: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-state-error-primary, #b3261e)' },
       label: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))', fontWeight: 500 },
 
@@ -1116,7 +1169,7 @@ window.__ModuleLoader__.load({
         cursor: 'pointer',
         border: '0.5px solid var(--dsw-alias-border-l2)',
         background: 'transparent',
-        color: 'var(--dsw-alias-label-tertiary)',
+        color: 'var(--dsw-alias-label-secondary)',
         whiteSpace: 'nowrap',
         flex: '0 0 auto',
       },
@@ -1130,7 +1183,7 @@ window.__ModuleLoader__.load({
         padding: '6px 9px',
         borderRadius: 7,
         border: '0.5px solid var(--dsw-alias-border-l2)',
-        background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.06))',
+        background: 'var(--dsh-rpc-fill, rgba(127,127,127,.06))',
         color: 'var(--dsw-alias-label-primary)',
         width: '100%',
         boxSizing: 'border-box',
@@ -1160,12 +1213,11 @@ window.__ModuleLoader__.load({
       },
       modelRowDivider: { borderTop: '0.5px solid var(--dsw-alias-border-l2)' },
       modelName: { color: 'var(--dsw-alias-label-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-      modelMeta: { color: 'var(--dsw-alias-label-tertiary)', fontSize: TEXT.tiny, whiteSpace: 'nowrap' },
+      modelMeta: { color: 'var(--dsw-alias-label-secondary)', fontSize: TEXT.tiny, whiteSpace: 'nowrap' },
       modelId: {
-        color: 'var(--dsw-alias-label-tertiary)',
+        color: 'var(--dsw-alias-label-secondary)',
         fontSize: TEXT.tiny,
         fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
-        opacity: 0.8,
         whiteSpace: 'nowrap',
       },
 
@@ -1177,7 +1229,7 @@ window.__ModuleLoader__.load({
         padding: '10px 12px',
         borderRadius: 8,
         border: '0.5px solid var(--dsw-alias-border-l2)',
-        background: 'var(--dsw-alias-bg-l2, rgba(0,0,0,.04))',
+        background: 'var(--dsh-rpc-fill, rgba(0,0,0,.04))',
         fontSize: TEXT.tiny,
         lineHeight: LINE.dense,
         maxHeight: 240,
@@ -1193,7 +1245,7 @@ window.__ModuleLoader__.load({
     }
 
     var DOT_OK = 'var(--dsw-alias-state-success-primary, #1a8f5f)'
-    var DOT_OFF = 'var(--dsw-alias-state-warning-primary, #b26b00)'
+    var DOT_OFF = 'var(--dsh-rpc-warn, #b26b00)'
 
     function tabStyle(active) {
       return {
@@ -1204,8 +1256,8 @@ window.__ModuleLoader__.load({
         borderRadius: 8,
         cursor: 'pointer',
         border: '0.5px solid ' + (active ? 'var(--dsw-alias-border-l2)' : 'transparent'),
-        background: active ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))' : 'transparent',
-        color: active ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)',
+        background: active ? 'var(--dsh-rpc-fill, rgba(127,127,127,.10))' : 'transparent',
+        color: active ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
         whiteSpace: 'nowrap',
       }
     }
@@ -1368,6 +1420,13 @@ window.__ModuleLoader__.load({
       var copiedState = useState(false)
       var copied = copiedState[0]
       var setCopied = copiedState[1]
+      // 自动复制失败（无剪贴板权限 / 非安全上下文 / 写入被拒）时的兜底状态。
+      var copyFailedState = useState(false)
+      var copyFailed = copyFailedState[0]
+      var setCopyFailed = copyFailedState[1]
+      var copyFallbackState = useState('')
+      var copyFallback = copyFallbackState[0]
+      var setCopyFallback = copyFallbackState[1]
       // 诊断面板打开时，不要让每次轮询/输入都重新序列化整份状态。
       var diagnosticsJson = React.useMemo(function () {
         return showDiag === true && status !== undefined ? JSON.stringify(displayStatus(status), null, 2) : ''
@@ -1463,6 +1522,13 @@ window.__ModuleLoader__.load({
         },
         [setStatus, setError],
       )
+
+      /** 首屏失败态里的「重试」：复用 load()，用 busy 标记避免连点。 */
+      var retryLoad = function () {
+        if (busyNow('reload')) return
+        beginBusy('reload')
+        load().then(function () { endBusy('reload') }, function () { endBusy('reload') })
+      }
 
       useEffect(function () {
         var disposed = false
@@ -2049,13 +2115,22 @@ window.__ModuleLoader__.load({
       }
 
       var copyDiagnostics = function () {
+        // 自动复制失败（无剪贴板权限 / 非安全上下文 / 写入被拒）不能静默：
+        // 按钮临时变「复制失败」，并渲染可手动全选的 textarea 兜底。
+        var showFallback = function (text) {
+          setCopyFallback(String(text === undefined || text === null ? '' : text))
+          setCopyFailed(true)
+          setTimeout(function () { setCopyFailed(false) }, 6000)
+        }
         var write = function (text) {
-          if (navigator.clipboard && navigator.clipboard.writeText) {
+          if (typeof navigator !== 'undefined' && navigator !== null && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
             navigator.clipboard.writeText(text).then(function () {
               setCopied(true)
               setTimeout(function () { setCopied(false) }, 1500)
-            }, function () {})
+            }, function () { showFallback(text) })
+            return
           }
+          showFallback(text)
         }
         if (status !== undefined) {
           // 新版宿主提供脱敏后的纯文本诊断；旧宿主没有这条路由时退回精简 JSON
@@ -2069,10 +2144,25 @@ window.__ModuleLoader__.load({
       }
 
       if (status === undefined) {
+        // 首屏读取失败时不能再只留一行裸英文错误：给完整卡片外壳 + 本地化说明 +
+        // 可点的「重试」，否则用户只能等 20 秒轮询或重开设置页。
         return h(
           'div',
           { style: S.card },
-          h('p', { style: error === undefined ? S.hint : S.hintError }, error === undefined ? bind(t, 'loading') : bind(t, 'error') + ': ' + error),
+          h('div', { key: 'head', style: S.header },
+            h('h3', { style: S.title }, bind(t, 'title')),
+            h('span', { key: 'grow', style: S.grow }),
+            h('button', {
+              type: 'button',
+              style: S.buttonPrimary,
+              onClick: retryLoad,
+              disabled: isBusy('reload'),
+            }, isBusy('reload') ? bind(t, 'retrying') : bind(t, 'retry'))),
+          error === undefined
+            ? h('p', { key: 'loading', style: S.hint, role: 'status' }, bind(t, 'loading'))
+            : h('div', { key: 'load-fail', role: 'status' },
+                h('p', { style: S.hintError, title: error }, bind(t, 'statusLoadFailed')),
+                h('p', { style: S.hintTiny }, bind(t, 'statusLoadFailedHint'))),
         )
       }
 
@@ -2166,8 +2256,8 @@ window.__ModuleLoader__.load({
               cursor: 'pointer',
               border: '0.5px solid ' + (selected ? 'var(--dsw-alias-state-business-primary, #2f6fed)' : 'var(--dsw-alias-border-l2)'),
               background: selected
-                ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))'
-                : 'var(--dsw-alias-bg-l1, transparent)',
+                ? 'var(--dsh-rpc-fill, rgba(127,127,127,.10))'
+                : 'var(--dsw-alias-bg-layer-1, transparent)',
               color: 'var(--dsw-alias-label-primary)',
               minWidth: 0,
               opacity: entry.enabled === false ? 0.55 : 1,
@@ -2175,13 +2265,12 @@ window.__ModuleLoader__.load({
           },
           h('span', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
             h('span', { title: bind(t, healthTextKey(health.state)), style: Object.assign({}, dot(signed ? healthColor(health.state) : DOT_OFF)) }),
-            h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, entry.displayName),
+            h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, entry.displayName),
             h('span', { style: S.grow }),
             h('span', {
               style: {
                 fontSize: TEXT.tiny,
                 color: healthColor(health.state),
-                opacity: health.state === 'unknown' ? 0.6 : 1,
                 whiteSpace: 'nowrap',
               },
             }, bind(t, healthTextKey(health.state)))),
@@ -2191,11 +2280,11 @@ window.__ModuleLoader__.load({
               lineHeight: '24px',
               fontWeight: 600,
               fontVariantNumeric: 'tabular-nums',
-              color: low ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent,
+              color: low ? 'var(--dsh-rpc-warn, #b26b00)' : accent,
             },
           }, valueText),
           h('span', {
-            style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+            style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
           }, metaParts.join(' · ')),
         )
       })
@@ -2226,9 +2315,9 @@ window.__ModuleLoader__.load({
               gap: 7,
               padding: '7px 10px',
               borderRadius: 8,
-              border: '0.5px solid var(--dsw-alias-state-warning-primary, #b26b00)',
-              background: 'color-mix(in srgb, var(--dsw-alias-state-warning-primary, #b26b00) 9%, transparent)',
-              color: 'var(--dsw-alias-state-warning-primary, #b26b00)',
+              border: '0.5px solid var(--dsh-rpc-warn, #b26b00)',
+              background: 'color-mix(in srgb, var(--dsh-rpc-warn, #b26b00) 9%, transparent)',
+              color: 'var(--dsh-rpc-warn, #b26b00)',
               fontSize: TEXT.body,
               lineHeight: '19px',
             },
@@ -2244,7 +2333,7 @@ window.__ModuleLoader__.load({
           h('span', {
             style: S.badgeSoft,
             title: status.host && status.host.images === true ? bind(t, 'imagesOn') : bind(t, 'imagesOff'),
-          }, status.host && status.host.images === true ? 'IMG' : 'TXT')),
+          }, status.host && status.host.images === true ? bind(t, 'imagesShort') : bind(t, 'imagesShortOff'))),
         h('p', { key: 'intro', style: S.intro }, bind(t, 'intro')),
         h('div', { key: 'toolbar', style: S.row },
           h('button', { type: 'button', style: S.buttonPrimary, onClick: refresh, disabled: isBusy('refresh') },
@@ -2254,7 +2343,8 @@ window.__ModuleLoader__.load({
             type: 'button',
             style: S.buttonGhost,
             'aria-expanded': showDiag,
-            'aria-controls': 'dsh-reverse-proxy-diagnostics',
+            // 折叠时诊断节点还没挂载，aria-controls 指向不存在的 id 会让读屏失效。
+            'aria-controls': showDiag ? 'dsh-reverse-proxy-diagnostics' : undefined,
             onClick: function () { setShowDiag(!showDiag) },
           }, bind(t, 'diagnostics'))),
         error === undefined ? null : h('p', { key: 'err', style: S.hintError }, bind(t, 'error') + ': ' + error),
@@ -2357,7 +2447,7 @@ window.__ModuleLoader__.load({
             h('span', {
               style: active.images === true ? S.badgeSoft : S.badgeWarn,
               title: active.images === true ? bind(t, 'imagesOn') : bind(t, 'imagesOff'),
-            }, active.images === true ? 'IMG' : 'TXT')),
+            }, active.images === true ? bind(t, 'imagesShort') : bind(t, 'imagesShortOff'))),
           h('p', { key: 'cat', style: S.hintTiny }, catalogText),
           credential.status === 'signed-in' && credential.email
             ? h('p', { key: 'who', style: S.hintTiny }, credential.email)
@@ -2540,6 +2630,9 @@ window.__ModuleLoader__.load({
         }
       }
       var checkinFailed = checkinTone === 'hintWarn' && checkin.enabled !== false
+      // 凭证状态明确不是 signed-in（未登录 / 已禁用）时签到必然失败，先禁掉按钮；
+      // credential 缺省（老宿主）按可用处理，避免误伤现有用户。
+      var checkinBlocked = credential.status !== undefined && credential.status !== null && credential.status !== 'signed-in'
 
       sections.push(
         h('div', { key: 'accounts', style: S.section },
@@ -2558,8 +2651,12 @@ window.__ModuleLoader__.load({
             h('button', {
               type: 'button',
               style: S.buttonGhost,
-              disabled: isBusy('checkin'),
-              onClick: function () { runCheckin(active.provider) },
+              disabled: isBusy('checkin') || checkinBlocked,
+              title: checkinBlocked ? bind(t, 'checkinNeedLogin') : undefined,
+              onClick: function () {
+                if (checkinBlocked) return
+                runCheckin(active.provider)
+              },
             }, isBusy('checkin') ? bind(t, 'checkinRunning') : bind(t, 'checkinNow')),
             h('label', { style: Object.assign({}, S.row, { cursor: 'pointer' }) },
               h('input', {
@@ -2595,7 +2692,7 @@ window.__ModuleLoader__.load({
                       href: loginJob.authUrl,
                       target: '_blank',
                       rel: 'noreferrer',
-                      style: { fontSize: 11.5, color: 'var(--dsw-alias-label-link, var(--dsw-alias-state-business-primary, #2f6fed))' },
+                      style: { fontSize: 11.5, color: 'var(--dsw-alias-link, var(--dsw-alias-state-business-primary, #2f6fed))' },
                     }, bind(t, 'loginOpenManually'))
                   : null,
                 loginJob !== undefined && (loginJob.phase === 'waiting' || loginJob.phase === 'starting')
@@ -2615,6 +2712,7 @@ window.__ModuleLoader__.load({
                   h('input', {
                     style: Object.assign({}, S.input, { flex: '1 1 140px', width: 'auto' }),
                     type: 'text',
+                    'aria-label': bind(t, 'accountLabel'),
                     value: accLabel,
                     placeholder: bind(t, 'accountLabel'),
                     onChange: function (event) { setAccLabel(event.target.value) },
@@ -2629,6 +2727,7 @@ window.__ModuleLoader__.load({
                   key: 'secret',
                   style: S.input,
                   type: 'password',
+                  'aria-label': bind(t, 'accountPat'),
                   value: accSecret,
                   placeholder: bind(t, 'accountPat'),
                   onChange: function (event) { setAccSecret(event.target.value) },
@@ -2667,14 +2766,14 @@ window.__ModuleLoader__.load({
                 fontWeight: 600,
                 letterSpacing: '-.01em',
                 fontVariantNumeric: 'tabular-nums',
-                color: creditsLow ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : 'var(--dsw-alias-label-primary)',
+                color: creditsLow ? 'var(--dsh-rpc-warn, #b26b00)' : 'var(--dsw-alias-label-primary)',
                 opacity: credits.stale === true ? 0.65 : 1,
               },
             }, credits.unlimited === true ? '∞' : formatNumber(credits.remain)),
             credits.total > 0
-              ? h('span', { style: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-tertiary)' } },
+              ? h('span', { style: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-secondary)' } },
                   '/ ' + formatNumber(credits.total) + ' ' + bind(t, 'creditsUnit'))
-              : h('span', { style: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-tertiary)' } }, bind(t, 'creditsUnit')),
+              : h('span', { style: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-secondary)' } }, bind(t, 'creditsUnit')),
             credits.planName ? h('span', { style: S.badge }, credits.planName) : null,
             credits.exceeded ? h('span', { style: S.badgeWarn }, bind(t, qoderFreePlan ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
             credits.stale === true ? h('span', { style: S.badgeSoft }, bind(t, 'creditsStale')) : null),
@@ -2686,7 +2785,7 @@ window.__ModuleLoader__.load({
               style: {
                 height: 5,
                 borderRadius: 999,
-                background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.16))',
+                background: 'var(--dsh-rpc-fill, rgba(127,127,127,.16))',
                 overflow: 'hidden',
                 maxWidth: 420,
               },
@@ -2697,7 +2796,7 @@ window.__ModuleLoader__.load({
                 height: '100%',
                 borderRadius: 999,
                 background: creditsLow
-                  ? 'var(--dsw-alias-state-warning-primary, #b26b00)'
+                  ? 'var(--dsh-rpc-warn, #b26b00)'
                   : 'var(--dsw-alias-state-business-primary, #2f6fed)',
                 opacity: 0.9,
               },
@@ -2726,7 +2825,7 @@ window.__ModuleLoader__.load({
             trendChips.push(h('span', { key: 'tr', style: microChip() }, bind(t, 'trendRate', { value: formatNumber(trend.burnPerHour) })))
           }
           if (typeof trend.etaMs === 'number' && trend.etaMs > 0) {
-            trendChips.push(h('span', { key: 'te', style: microChip(creditsLow ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : undefined) }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) })))
+            trendChips.push(h('span', { key: 'te', style: microChip(creditsLow ? 'var(--dsh-rpc-warn, #b26b00)' : undefined) }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) })))
           }
           creditsBody.push(
             h('div', { key: 'trend', style: { display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 7, borderTop: '0.5px solid var(--dsw-alias-border-l2)' } },
@@ -2734,9 +2833,9 @@ window.__ModuleLoader__.load({
                 h('span', { style: S.label }, bind(t, 'trend')),
                 h('span', { style: S.grow }),
                 ...trendChips),
-              sparkline(trend.points, creditsLow ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : (PROVIDER_ACCENT[active.provider] || 'currentColor')),
+              sparkline(trend.points, creditsLow ? 'var(--dsh-rpc-warn, #b26b00)' : (PROVIDER_ACCENT[active.provider] || 'currentColor')),
               typeof trend.etaMs !== 'number'
-                ? h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)' } }, bind(t, 'trendEtaUnknown'))
+                ? h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-secondary)' } }, bind(t, 'trendEtaUnknown'))
                 : null),
           )
         }
@@ -2827,8 +2926,8 @@ window.__ModuleLoader__.load({
       var usageHeadCell = Object.assign({}, usageCell, {
         fontSize: TEXT.tiny,
         fontWeight: 600,
-        color: 'var(--dsw-alias-label-tertiary)',
-        background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.06))',
+        color: 'var(--dsw-alias-label-secondary)',
+        background: 'var(--dsh-rpc-fill, rgba(127,127,127,.06))',
       })
       var usageNumberCell = Object.assign({}, usageCell, {
         textAlign: 'right',
@@ -2836,7 +2935,7 @@ window.__ModuleLoader__.load({
         color: 'var(--dsw-alias-label-primary)',
       })
       var usageLabelCell = Object.assign({}, usageCell, {
-        color: 'var(--dsw-alias-label-tertiary)',
+        color: 'var(--dsw-alias-label-secondary)',
         fontWeight: 500,
       })
       var usageTableFrame = {
@@ -2870,7 +2969,7 @@ window.__ModuleLoader__.load({
             h('span', {
               key: key + '-l',
               style: {
-                color: 'var(--dsw-alias-label-tertiary)',
+                color: 'var(--dsw-alias-label-secondary)',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -2902,12 +3001,12 @@ window.__ModuleLoader__.load({
               padding: '9px 11px 8px',
               borderRadius: 10,
               border: '0.5px solid ' + usageBorder,
-              background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.06))',
+              background: 'var(--dsh-rpc-fill, rgba(127,127,127,.06))',
               boxSizing: 'border-box',
             },
           },
           h('span', {
-            style: { fontSize: TEXT.tiny, fontWeight: 600, letterSpacing: '.06em', color: 'var(--dsw-alias-label-tertiary)' },
+            style: { fontSize: TEXT.tiny, fontWeight: 600, letterSpacing: '.06em', color: 'var(--dsw-alias-label-secondary)' },
           }, label),
           h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 5, minWidth: 0 } },
             h('span', {
@@ -2922,7 +3021,7 @@ window.__ModuleLoader__.load({
             }, present === false ? '—' : formatNumber(data.requests || 0)),
             present === false
               ? null
-              : h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)' } }, bind(t, 'usageCalls'))),
+              : h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-secondary)' } }, bind(t, 'usageCalls'))),
           h('div', {
             style: {
               display: 'grid',
@@ -3040,7 +3139,7 @@ window.__ModuleLoader__.load({
                       display: 'flex',
                       alignItems: 'flex-end',
                       borderRadius: 3,
-                      background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.05))',
+                      background: 'var(--dsh-rpc-fill, rgba(127,127,127,.05))',
                       overflow: 'hidden',
                     },
                   },
@@ -3057,7 +3156,7 @@ window.__ModuleLoader__.load({
                     },
                   }))
                 })),
-              h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--dsw-alias-label-tertiary)', opacity: 0.65 } },
+              h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--dsw-alias-label-secondary)' } },
                 h('span', {}, buckets[0].date.slice(5)),
                 h('span', {}, buckets[buckets.length - 1].date.slice(5)))),
           )
@@ -3094,7 +3193,7 @@ window.__ModuleLoader__.load({
                   h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-primary)' }), title: entry.model }, entry.model || '—'),
                   h('span', { style: usageNumberCell }, formatNumber(entry.counters.requests || 0)),
                   h('span', { style: usageNumberCell }, formatNumber(entry.counters.totalTokens || 0)),
-                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatDuration(entry.counters.avgDurationMs)))
+                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-secondary)' }) }, formatDuration(entry.counters.avgDurationMs)))
                 }))),
           )
         }
@@ -3273,11 +3372,11 @@ window.__ModuleLoader__.load({
                   ? 'var(--dsw-alias-state-business-primary, #2f6fed)'
                   : 'var(--dsw-alias-border-l2)'),
                 background: effectiveAccountModelRange === value
-                  ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))'
+                  ? 'var(--dsh-rpc-fill, rgba(127,127,127,.10))'
                   : 'transparent',
                 color: effectiveAccountModelRange === value
                   ? 'var(--dsw-alias-label-primary)'
-                  : 'var(--dsw-alias-label-tertiary)',
+                  : 'var(--dsw-alias-label-secondary)',
                 whiteSpace: 'nowrap',
                 flex: '0 0 auto',
               },
@@ -3301,13 +3400,13 @@ window.__ModuleLoader__.load({
                       style: {
                         fontSize: TEXT.tiny,
                         lineHeight: '16px',
-                        color: 'var(--dsw-alias-state-warning-primary, #b26b00)',
+                        color: 'var(--dsh-rpc-warn, #b26b00)',
                         whiteSpace: 'nowrap',
                         flex: '0 0 auto',
                       },
                     }, accountModelCoverage),
                 h('span', { style: S.grow }),
-                h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-tertiary)', opacity: 0.8 }, title: bind(t, 'usageAccountModelsHint') }, bind(t, 'usageAccountModelsHint'))),
+                h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-secondary)' }, title: bind(t, 'usageAccountModelsHint') }, bind(t, 'usageAccountModelsHint'))),
               accountModelFallback
                 ? h('p', { key: 'fallback', style: S.hintTiny }, bind(t, 'usageAccountModelTodayEmpty'))
                 : null,
@@ -3328,7 +3427,7 @@ window.__ModuleLoader__.load({
                   h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-primary)' }), title: entry.model }, entry.model || '—'),
                   h('span', { style: usageNumberCell }, formatNumber(entry.counters.requests || 0)),
                   h('span', { style: usageNumberCell }, formatNumber(entry.counters.totalTokens || 0)),
-                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatDuration(entry.counters.avgDurationMs)),
+                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-secondary)' }) }, formatDuration(entry.counters.avgDurationMs)),
                   modelTestCell(entry))
                 }))),
           )
@@ -3357,15 +3456,15 @@ window.__ModuleLoader__.load({
                         key: 'req' + index,
                         style: Object.assign({ display: 'grid', gridTemplateColumns: recentColumns, alignItems: 'center' }, index > 0 ? usageRowLine : {}),
                       },
-                      h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-tertiary)', fontVariantNumeric: 'tabular-nums' }), title: formatTime(entry.at) }, formatShortTime(entry.at)),
+                      h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-secondary)', fontVariantNumeric: 'tabular-nums' }), title: formatTime(entry.at) }, formatShortTime(entry.at)),
                       h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-primary)' }), title: entry.model || '' }, entry.model || '—'),
                       h('span', { style: Object.assign({}, usageCell, { textAlign: 'right' }) },
                         h('span', {
                           style: failed || entry.kind === 'incomplete' ? S.badgeWarn : S.badgeSoft,
                           title: [entry.code, entry.message].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
                         }, bind(t, kindTextKey(entry.kind)))),
-                      h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatDuration(entry.durationMs)),
-                      h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-tertiary)' }) }, formatNumber(entry.totalTokens || 0)),
+                      h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-secondary)' }) }, formatDuration(entry.durationMs)),
+                      h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-secondary)' }) }, formatNumber(entry.totalTokens || 0)),
                     )
                   }))),
         )
@@ -3388,6 +3487,7 @@ window.__ModuleLoader__.load({
             h('input', {
               style: S.input,
               type: 'password',
+              'aria-label': bind(t, 'pat'),
               value: patDraft,
               placeholder: configured ? bind(t, 'patConfigured', { tail: (credential.patTail || '…') }) : bind(t, 'patPlaceholder'),
               onChange: function (event) { setPatDraft(event.target.value) },
@@ -3399,7 +3499,7 @@ window.__ModuleLoader__.load({
               href: PAT_PAGE[active.provider] || PAT_PAGE.qoder,
               target: '_blank',
               rel: 'noreferrer',
-              style: { color: 'var(--dsw-alias-label-link, var(--dsw-alias-state-business-primary, #2f6fed))' },
+              style: { color: 'var(--dsw-alias-link, var(--dsw-alias-state-business-primary, #2f6fed))' },
             }, bind(t, 'patOpen'))),
           h('div', { key: 'btns', style: S.row },
             h('button', { type: 'button', style: S.buttonPrimary, onClick: savePat, disabled: isBusy('save') || patDraft.trim() === '' },
@@ -3417,6 +3517,7 @@ window.__ModuleLoader__.load({
             h('input', {
               style: S.input,
               type: 'text',
+              'aria-label': bind(t, 'traeStorageFile'),
               value: authFileDraft,
               placeholder: credential.file || '%APPDATA%\\Trae CN\\User\\globalStorage\\storage.json',
               onChange: function (event) { setAuthFileDraft(event.target.value) },
@@ -3435,6 +3536,7 @@ window.__ModuleLoader__.load({
             h('input', {
               style: S.input,
               type: 'text',
+              'aria-label': bind(t, 'appPath'),
               value: appPathDraft,
               placeholder: 'D:\\WorkBuddy\\WorkBuddy.exe',
               onChange: function (event) { setAppPathDraft(event.target.value) },
@@ -3445,6 +3547,7 @@ window.__ModuleLoader__.load({
             h('input', {
               style: S.input,
               type: 'text',
+              'aria-label': bind(t, 'authFile'),
               value: authFileDraft,
               placeholder: credential.file || '%LOCALAPPDATA%\\CodeBuddyExtension\\Data\\Public\\auth',
               onChange: function (event) { setAuthFileDraft(event.target.value) },
@@ -3471,7 +3574,7 @@ window.__ModuleLoader__.load({
         h('div', { key: 'advanced', style: S.section },
           h('details', {},
             h('summary', {
-              style: { cursor: 'pointer', fontSize: TEXT.tiny, fontWeight: 600, letterSpacing: '.08em', color: 'var(--dsw-alias-label-tertiary)' },
+              style: { cursor: 'pointer', fontSize: TEXT.tiny, fontWeight: 600, letterSpacing: '.08em', color: 'var(--dsw-alias-label-secondary)' },
             }, bind(t, 'advanced')),
             h('p', { style: Object.assign({}, S.hintTiny, { marginTop: 8 }) }, bind(t, 'advancedHint')),
             h('div', { key: 'idle', style: S.field },
@@ -3479,6 +3582,7 @@ window.__ModuleLoader__.load({
               h('input', {
                 style: S.input,
                 type: 'number',
+                'aria-label': bind(t, 'advancedIdle'),
                 min: 15,
                 max: 900,
                 value: advIdle,
@@ -3491,6 +3595,7 @@ window.__ModuleLoader__.load({
                 h('input', {
                   style: S.input,
                   type: 'number',
+                  'aria-label': bind(t, 'advancedCatalog'),
                   min: 120,
                   max: 86400,
                   value: advCatalog,
@@ -3501,6 +3606,7 @@ window.__ModuleLoader__.load({
                 h('input', {
                   style: S.input,
                   type: 'number',
+                  'aria-label': bind(t, 'advancedCredits'),
                   min: 30,
                   max: 21600,
                   value: advCredits,
@@ -3512,6 +3618,7 @@ window.__ModuleLoader__.load({
                 h('input', {
                   style: S.input,
                   type: 'number',
+                  'aria-label': bind(t, 'advancedAlert'),
                   min: 1,
                   max: 95,
                   value: advAlert,
@@ -3523,6 +3630,7 @@ window.__ModuleLoader__.load({
                 h('input', {
                   style: S.input,
                   type: 'number',
+                  'aria-label': bind(t, 'advancedSwitch'),
                   min: 0,
                   max: 50,
                   value: advSwitch,
@@ -3534,6 +3642,7 @@ window.__ModuleLoader__.load({
               h('input', {
                 style: S.input,
                 type: 'number',
+                'aria-label': bind(t, 'advancedQueue'),
                 min: 15,
                 max: 180,
                 value: advQueue,
@@ -3624,6 +3733,7 @@ window.__ModuleLoader__.load({
             ? h('input', {
                 style: S.input,
                 type: 'search',
+                'aria-label': bind(t, 'searchPlaceholder'),
                 value: searchDraft,
                 placeholder: bind(t, 'searchPlaceholder'),
                 onChange: function (event) { setSearchDraft(event.target.value) },
@@ -3754,8 +3864,8 @@ window.__ModuleLoader__.load({
               border: '0.5px solid ' + (selected
                 ? 'var(--dsw-alias-state-business-primary, #2f6fed)'
                 : 'var(--dsw-alias-border-l2)'),
-              background: selected ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))' : 'transparent',
-              color: selected ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-tertiary)',
+              background: selected ? 'var(--dsh-rpc-fill, rgba(127,127,127,.10))' : 'transparent',
+              color: selected ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
               whiteSpace: 'nowrap',
               flex: '0 0 auto',
             },
@@ -3833,10 +3943,27 @@ window.__ModuleLoader__.load({
           h('div', { key: 'h', style: S.sectionHead },
             h('span', { style: S.sectionTitle }, bind(t, 'diagnostics')),
             h('span', { style: S.grow }),
-            h('button', { type: 'button', style: S.buttonGhost, 'aria-expanded': showDiag, 'aria-controls': 'dsh-reverse-proxy-diagnostics', onClick: function () { setShowDiag(!showDiag) } },
+            h('button', { type: 'button', style: S.buttonGhost, 'aria-expanded': showDiag, 'aria-controls': showDiag ? 'dsh-reverse-proxy-diagnostics' : undefined, onClick: function () { setShowDiag(!showDiag) } },
               showDiag ? bind(t, 'hide') : bind(t, 'show')),
-            h('button', { type: 'button', style: S.buttonGhost, onClick: copyDiagnostics },
-              copied ? bind(t, 'copied') : bind(t, 'copyDiagnostics'))),
+            h('button', {
+              type: 'button',
+              style: Object.assign({}, S.buttonGhost, copyFailed ? { color: 'var(--dsw-alias-state-error-primary)' } : {}),
+              title: copyFailed ? bind(t, 'copyFallbackHint') : undefined,
+              onClick: copyDiagnostics,
+            },
+              copied ? bind(t, 'copied') : copyFailed ? bind(t, 'copyFailed') : bind(t, 'copyDiagnostics'))),
+          copyFallback !== ''
+            ? h('div', { key: 'copy-fallback', role: 'status', style: S.field },
+                h('span', { style: S.hintTiny }, bind(t, 'copyFallbackHint')),
+                h('textarea', {
+                  style: Object.assign({}, S.pre, { width: '100%', boxSizing: 'border-box', minHeight: 72, resize: 'vertical' }),
+                  readOnly: true,
+                  value: copyFallback,
+                  onFocus: function (event) {
+                    if (event !== undefined && event.target !== undefined && typeof event.target.select === 'function') event.target.select()
+                  },
+                }))
+            : null,
           showDiag ? h('pre', { key: 'pre', id: 'dsh-reverse-proxy-diagnostics', style: S.pre }, diagnosticsJson) : null),
       )
 
@@ -3857,6 +3984,7 @@ window.__ModuleLoader__.load({
     }
 
     function apply(ctx) {
+      ensureThemeStyles()
       var NS = 'settings.reverse-proxy'
       try {
         ctx.effect(function () {
@@ -4066,10 +4194,12 @@ window.__ModuleLoader__.load({
               applyStatus(document)
               setBusy(false)
             })
-            .catch(function () {
+            .catch(function (failure) {
               setBusy(false)
-              setFailed(true)
-              setTimeout(function () { setFailed(false) }, 1600)
+              // 刷新失败不能只靠 1.6 秒描边变色：面板底部给一条 5 秒的
+              // role=status 文案（原因放 title），色盲/读屏用户也能感知。
+              setFailed(String(failure && failure.message ? failure.message : failure))
+              setTimeout(function () { setFailed(false) }, 5000)
             })
         }
 
@@ -4119,9 +4249,8 @@ window.__ModuleLoader__.load({
                   borderRadius: 999,
                   border: '0.5px solid var(--dsw-alias-border-l2)',
                   background: 'transparent',
-                  color: 'var(--dsw-alias-label-tertiary)',
+                  color: 'var(--dsw-alias-label-secondary)',
                   fontSize: 12,
-                  opacity: 0.75,
                 },
               },
               h('span', {}, bind(t, 'summary') + ' —'),
@@ -4165,7 +4294,7 @@ window.__ModuleLoader__.load({
           var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
           var warn = creditsWarning(snapshot, row.entry.provider, sidebarAlertRatio, sidebarAlertsEnabled)
           var stale = snapshot.stale === true
-          var dotColor = warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent
+          var dotColor = warn ? 'var(--dsh-rpc-warn, #b26b00)' : accent
           var label = row.entry.displayName + ' ' + formatCreditsText(snapshot, t) + (stale ? ' · ' + bind(t, 'creditsCached') : '')
           return h(
             'span',
@@ -4215,7 +4344,7 @@ window.__ModuleLoader__.load({
               style: {
                 fontSize: 10.5,
                 letterSpacing: '.02em',
-                opacity: stale ? 0.45 : 0.62,
+                opacity: stale ? 0.8 : 1,
                 minWidth: 0,
                 flex: '0 1 auto',
                 overflow: 'hidden',
@@ -4231,7 +4360,7 @@ window.__ModuleLoader__.load({
                   fontSize: 13,
                   fontVariantNumeric: 'tabular-nums',
                   color: warn
-                    ? 'var(--dsw-alias-state-warning-primary, #b26b00)'
+                    ? 'var(--dsh-rpc-warn, #b26b00)'
                     : 'var(--dsw-alias-label-primary, inherit)',
                   opacity: stale ? 0.65 : 1,
                   flex: '0 0 auto',
@@ -4282,12 +4411,13 @@ window.__ModuleLoader__.load({
             onFocus: function () { setHovered(true) },
             onBlur: function () { setHovered(false) },
             'aria-expanded': expanded === true,
-            'aria-controls': PANEL_ID,
+            // 面板只在展开（且宽侧栏）时才渲染；折叠态不要留下悬空引用。
+            'aria-controls': expanded === true && wide ? PANEL_ID : undefined,
             'aria-label': rows
               .map(function (row) {
                 return row.entry.displayName + ' ' + formatCreditsText(row.credits, t)
               })
-              .join('，'),
+              .join(bind(t, 'listSeparator')),
             style: {
               font: 'inherit',
               display: 'flex',
@@ -4314,12 +4444,12 @@ window.__ModuleLoader__.load({
                     : 'var(--dsw-alias-border-l2)'
               ),
               background: expanded === true
-                ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.10))'
+                ? 'var(--dsh-rpc-fill, rgba(127,127,127,.10))'
                 : hovered
-                  ? 'var(--dsw-alias-bg-l2, rgba(127,127,127,.08))'
-                  : 'var(--dsw-alias-bg-l1, transparent)',
+                  ? 'var(--dsh-rpc-fill, rgba(127,127,127,.08))'
+                  : 'var(--dsw-alias-bg-layer-1, transparent)',
               boxShadow: hovered && expanded !== true ? '0 1px 4px rgba(0,0,0,.08)' : 'none',
-              color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-tertiary))',
+              color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-secondary))',
               transition: 'background .12s ease, border-color .12s ease, box-shadow .12s ease',
               opacity: busy ? 0.72 : 1,
               // 这里**不能**再 `overflow:hidden` + `nowrap`：那会把放不下的
@@ -4383,7 +4513,7 @@ window.__ModuleLoader__.load({
               border: '0.5px solid var(--dsw-alias-border-l2)',
               borderRadius: 10,
               padding: '10px 12px 9px',
-              background: 'var(--dsw-alias-bg-l1, transparent)',
+              background: 'var(--dsw-alias-bg-layer-1, transparent)',
               boxShadow: '0 8px 24px rgba(0,0,0,.10)',
               maxHeight: '48vh',
               overflowY: 'auto',
@@ -4396,11 +4526,11 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 6, borderBottom: '0.5px solid var(--dsw-alias-border-l2)' } },
-            h('span', { style: { fontSize: 10.5, fontWeight: 600, letterSpacing: '.08em', opacity: 0.6 } }, bind(t, 'credits')),
+            h('span', { style: { fontSize: 10.5, fontWeight: 600, letterSpacing: '.08em', color: 'var(--dsw-alias-label-secondary)' } }, bind(t, 'credits')),
             h('span', { style: microChip() }, bind(t, 'creditsSources', { count: rows.length })),
             h('span', { style: { flex: 1 } }),
             latestFetched > 0
-              ? h('span', { style: { fontSize: 10, opacity: 0.45, whiteSpace: 'nowrap' } }, bind(t, 'creditsFetchedAt', { time: formatShortTime(latestFetched) }))
+              ? h('span', { style: { fontSize: 10, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsFetchedAt', { time: formatShortTime(latestFetched) }))
               : null,
           ),
           rows.map(function (row, index) {
@@ -4428,23 +4558,23 @@ window.__ModuleLoader__.load({
               ? credential.message
               : typeof snapshot.error === 'string' ? snapshot.error : ''
             var meta = []
-            if (problem !== undefined) meta.push(h('span', { key: 'problem', style: microChip('var(--dsw-alias-state-warning-primary, #b26b00)'), title: problemDetail }, problem))
+            if (problem !== undefined) meta.push(h('span', { key: 'problem', style: microChip('var(--dsh-rpc-warn, #b26b00)'), title: problemDetail }, problem))
             if (snapshot.planName !== undefined && snapshot.planName !== '') meta.push(h('span', { key: 'plan', style: microChip() }, snapshot.planName))
-            if (percent !== undefined) meta.push(h('span', { key: 'pct', style: microChip(warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent) }, bind(t, 'creditsPercent', { percent: percent })))
-            if (activeAccount !== undefined && problem === undefined) meta.push(h('span', { key: 'acc', style: { fontSize: 10.5, opacity: 0.6, maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bind(t, 'creditsCurrent', { label: activeAccount.label })))
-            if (snapshot.resetAtMs > 0) meta.push(h('span', { key: 'reset', style: { fontSize: 10.5, opacity: 0.55, whiteSpace: 'nowrap' } }, bind(t, 'creditsResetShort', { date: formatShortDate(snapshot.resetAtMs) })))
-            if (sidebarShowUsage && todayUsage !== undefined && todayUsage.requests > 0) meta.push(h('span', { key: 'today', style: { fontSize: 10.5, opacity: 0.55, whiteSpace: 'nowrap' } }, bind(t, 'creditsToday', { count: todayUsage.requests, tokens: formatNumber(todayUsage.totalTokens || 0) })))
+            if (percent !== undefined) meta.push(h('span', { key: 'pct', style: microChip(warn ? 'var(--dsh-rpc-warn, #b26b00)' : accent) }, bind(t, 'creditsPercent', { percent: percent })))
+            if (activeAccount !== undefined && problem === undefined) meta.push(h('span', { key: 'acc', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bind(t, 'creditsCurrent', { label: activeAccount.label })))
+            if (snapshot.resetAtMs > 0) meta.push(h('span', { key: 'reset', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsResetShort', { date: formatShortDate(snapshot.resetAtMs) })))
+            if (sidebarShowUsage && todayUsage !== undefined && todayUsage.requests > 0) meta.push(h('span', { key: 'today', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsToday', { count: todayUsage.requests, tokens: formatNumber(todayUsage.totalTokens || 0) })))
             if (snapshot.stale === true) meta.push(h('span', { key: 'cached', style: microChip() }, bind(t, 'creditsCached')))
             var trend = snapshot.trend
             var hasTrend = trend !== null && typeof trend === 'object' && trend.sampleCount > 0
             var trendLine = hasTrend
               ? h('div', { key: 'trend', style: { display: 'flex', alignItems: 'center', gap: 7, marginTop: 5, minWidth: 0 } },
-                  h('span', { style: { fontSize: 10.5, opacity: 0.6, whiteSpace: 'nowrap' } }, bind(t, 'trendToday', { value: formatNumber(trend.spentToday || 0) })),
+                  h('span', { style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'trendToday', { value: formatNumber(trend.spentToday || 0) })),
                   typeof trend.etaMs === 'number' && trend.etaMs > 0
-                    ? h('span', { style: { fontSize: 10.5, opacity: 0.6, whiteSpace: 'nowrap', color: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : undefined } }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) }))
+                    ? h('span', { style: { fontSize: 10.5, color: warn ? 'var(--dsh-rpc-warn, #b26b00)' : 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) }))
                     : null,
                   h('span', { style: { flex: '1 1 40px', minWidth: 24, display: 'flex', alignItems: 'center' } },
-                    sparkline(trend.points, warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent)))
+                    sparkline(trend.points, warn ? 'var(--dsh-rpc-warn, #b26b00)' : accent)))
               : null
             return h(
               'div',
@@ -4465,14 +4595,14 @@ window.__ModuleLoader__.load({
                     height: 7,
                     borderRadius: 999,
                     flex: '0 0 auto',
-                    background: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent,
+                    background: warn ? 'var(--dsh-rpc-warn, #b26b00)' : accent,
                   }, snapshot.stale === true
-                    ? { background: 'transparent', boxShadow: 'inset 0 0 0 1.5px ' + (warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent) }
+                    ? { background: 'transparent', boxShadow: 'inset 0 0 0 1.5px ' + (warn ? 'var(--dsh-rpc-warn, #b26b00)' : accent) }
                     : {}),
                 }),
                 h('span', { style: { fontSize: 12, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.entry.displayName),
-                exhausted ? h('span', { style: microChip('var(--dsw-alias-state-warning-primary, #b26b00)') }, bind(t, qoderFree ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
-                alert === 'low' ? h('span', { style: microChip('var(--dsw-alias-state-warning-primary, #b26b00)') }, bind(t, 'alertLow')) : null,
+                exhausted ? h('span', { style: microChip('var(--dsh-rpc-warn, #b26b00)') }, bind(t, qoderFree ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
+                alert === 'low' ? h('span', { style: microChip('var(--dsh-rpc-warn, #b26b00)') }, bind(t, 'alertLow')) : null,
                 h('span', { style: { flex: 1, minWidth: 4 } }),
                 h(
                   'span',
@@ -4480,22 +4610,22 @@ window.__ModuleLoader__.load({
                     title: formatCreditsText(snapshot, t),
                     style: { display: 'inline-flex', alignItems: 'baseline', gap: 4, whiteSpace: 'nowrap', flex: '0 0 auto' },
                   },
-                  h('span', { style: { fontSize: 19, lineHeight: '22px', fontWeight: 650, fontVariantNumeric: 'tabular-nums', color: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : 'var(--dsw-alias-label-primary)' } }, parts.big),
-                  parts.small !== '' ? h('span', { style: { fontSize: 10.5, opacity: 0.55 } }, parts.small) : null,
-                  parts.unit !== '' ? h('span', { style: { fontSize: 10.5, opacity: 0.55 } }, parts.unit) : null,
+                  h('span', { style: { fontSize: 19, lineHeight: '22px', fontWeight: 650, fontVariantNumeric: 'tabular-nums', color: warn ? 'var(--dsh-rpc-warn, #b26b00)' : 'var(--dsw-alias-label-primary)' } }, parts.big),
+                  parts.small !== '' ? h('span', { style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)' } }, parts.small) : null,
+                  parts.unit !== '' ? h('span', { style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)' } }, parts.unit) : null,
                 ),
               ),
               ratio === undefined
                 ? null
                 : h(
                     'div',
-                    { style: { marginTop: 6, height: 4, borderRadius: 999, background: 'var(--dsw-alias-bg-l2, rgba(127,127,127,.16))', overflow: 'hidden' } },
+                    { style: { marginTop: 6, height: 4, borderRadius: 999, background: 'var(--dsh-rpc-fill, rgba(127,127,127,.16))', overflow: 'hidden' } },
                     h('div', {
                       style: {
                         width: Math.round(ratio * 100) + '%',
                         height: '100%',
                         borderRadius: 999,
-                        background: warn ? 'var(--dsw-alias-state-warning-primary, #b26b00)' : accent,
+                        background: warn ? 'var(--dsh-rpc-warn, #b26b00)' : accent,
                         opacity: 0.9,
                         transition: 'width .3s ease',
                       },
@@ -4510,9 +4640,12 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 8, borderTop: '0.5px solid var(--dsw-alias-border-l2)', paddingTop: 7, marginTop: 2 } },
-            h('span', { style: { fontSize: 10.5, opacity: 0.5, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+            h('span', { style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
               anyStale ? bind(t, 'creditsCachedHint') : bind(t, 'pillHint')),
             h('span', { style: { flex: 1 } }),
+            failed
+              ? h('span', { key: 'refresh-failed', role: 'status', title: String(failed), style: S.hintWarn }, bind(t, 'refreshFailed'))
+              : null,
             h('button', {
               type: 'button',
               onClick: refresh,

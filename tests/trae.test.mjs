@@ -582,6 +582,25 @@ test('Trae：event:error 帧按 code 分类（1005 额度、3003 服务端）', 
   }, (error) => error.kind === 'server')
 })
 
+test('Trae 内容安全拦截：终态带 CONTENT_FILTER failure，而不是一个没有 code 的 error', async () => {
+  // 用户可见行为：模型因内容安全被拦截时，界面/统计要能显示「内容过滤」，
+  // 而不是一句没有 code、没有 message 的通用错误。
+  const text = [
+    'event:output',
+    'data:{"finish_reason":"content_filter"}',
+    '',
+    'event:done',
+    'data:{}',
+    '',
+  ].join('\n')
+  const events = []
+  for await (const event of parseStream(bodyOf(text), undefined)) events.push(event)
+  const finish = events.find((event) => event.type === 'finish')
+  assert.equal(finish.kind, 'error')
+  assert.equal(finish.failure?.code, 'CONTENT_FILTER', 'content_filter 终态必须带可路由的 failure code')
+  assert.match(finish.failure?.message ?? '', /内容安全|content_filter/)
+})
+
 test('Trae：只有元信息帧时发心跳（不转发、但重置空闲计时器）', async () => {
   const text = [
     'event:metadata',
