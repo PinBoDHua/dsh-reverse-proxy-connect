@@ -58,9 +58,277 @@ window.__ModuleLoader__.load({
         var style = document.createElement('style')
         if (style === null || style === undefined) return
         style.id = THEME_STYLE_ID
-        style.textContent =
-          ':root{--dsh-rpc-warn:#9d5c00;--dsh-rpc-fill:rgba(20,28,45,.06)}' +
-          'body[data-ds-dark-theme]{--dsh-rpc-warn:#f0a63c;--dsh-rpc-fill:rgba(255,255,255,.08)}'
+        style.textContent = [
+          ':root{--dsh-rpc-warn:#9d5c00;--dsh-rpc-fill:rgba(20,28,45,.06)}',
+          'body[data-ds-dark-theme]{--dsh-rpc-warn:#f0a63c;--dsh-rpc-fill:rgba(255,255,255,.08)}',
+
+          /* ── 反代连接器 3.0 视觉系统 ─────────────────────────────────
+             单一根容器 .dsh-rpc 提供全部设计变量；卡片、按钮、输入等
+             只用 class，主题切换只改变量，不再在每处内联兜底。 */
+          '.dsh-rpc{',
+          '--rpc-accent:#2154ce;--rpc-accent-soft:color-mix(in srgb,var(--rpc-accent) 9%,transparent);',
+          '--rpc-bg:var(--dsw-alias-bg-layer-1,#fff);',
+          '--rpc-bg-base:var(--dsw-alias-bg-base,#f6f8fc);',
+          '--rpc-surface:color-mix(in srgb,var(--dsw-alias-bg-layer-1,#fff) 70%,var(--dsw-alias-bg-base,#f6f8fc));',
+          '--rpc-surface-2:color-mix(in srgb,var(--dsw-alias-bg-base,#f6f8fc) 78%,var(--dsw-alias-bg-layer-1,#fff));',
+          '--rpc-border:var(--dsw-alias-border-l2,#1b2a4a1a);',
+          '--rpc-border-strong:var(--dsw-alias-border-l3,#1b2a4a24);',
+          '--rpc-text:var(--dsw-alias-label-primary,#0e1626);',
+          '--rpc-muted:var(--dsw-alias-label-secondary,#45526a);',
+          '--rpc-faint:var(--dsw-alias-label-caption,#6c7b94);',
+          '--rpc-success:var(--dsw-alias-state-success-primary,#137036);',
+          '--rpc-danger:var(--dsw-alias-state-error-primary,#bf0f0f);',
+          '--rpc-warn:var(--dsh-rpc-warn,#9d5c00);',
+          '--rpc-shadow:var(--dsw-shadow-lv2,0 4px 12px rgba(16,29,54,.06));',
+          '--rpc-shadow-sm:var(--dsw-shadow-lv1,0 1px 2px rgba(16,29,54,.04));',
+          '--rpc-radius:18px;',
+          'display:flex;flex-direction:column;min-width:0;max-width:100%;box-sizing:border-box;',
+          'flex:0 0 auto;',
+          'border:1px solid var(--rpc-border);border-radius:var(--rpc-radius);',
+          'background:var(--rpc-bg);color:var(--rpc-text);overflow:hidden;',
+          'container-type:inline-size;',
+          '}',
+          'body[data-ds-dark-theme] .dsh-rpc{',
+          '--rpc-bg:var(--dsw-alias-bg-layer-1,#232324);',
+          '--rpc-bg-base:var(--dsw-alias-bg-base,#151517);',
+          '--rpc-border:var(--dsw-alias-border-l2,rgba(255,255,255,.12));',
+          '--rpc-border-strong:var(--dsw-alias-border-l3,rgba(255,255,255,.18));',
+          '--rpc-text:var(--dsw-alias-label-primary,#ebeef2);',
+          '--rpc-muted:var(--dsw-alias-label-secondary,#cfd3d6);',
+          '--rpc-faint:var(--dsw-alias-label-caption,#adb2b8);',
+          '--rpc-shadow:0 6px 20px rgba(0,0,0,.30);--rpc-shadow-sm:0 1px 2px rgba(0,0,0,.24);',
+          '}',
+
+          /* 页头 */
+          '.rpc-hero{position:relative;display:flex;align-items:flex-start;gap:13px;padding:18px 20px 16px;',
+          'border-bottom:1px solid var(--rpc-border);',
+          'background:radial-gradient(120% 160% at 100% 0%,color-mix(in srgb,var(--rpc-accent) 10%,transparent),transparent 58%),',
+          'linear-gradient(180deg,var(--rpc-bg),var(--rpc-surface));}',
+          '.rpc-hero-icon{width:38px;height:38px;flex:0 0 auto;border-radius:11px;display:grid;place-items:center;color:#fff;',
+          'background:linear-gradient(145deg,color-mix(in srgb,var(--rpc-accent) 82%,#fff),var(--rpc-accent));',
+          'box-shadow:0 6px 16px color-mix(in srgb,var(--rpc-accent) 30%,transparent);}',
+          '.rpc-hero-main{min-width:0;flex:1 1 auto;display:flex;flex-direction:column;gap:4px}',
+          '.rpc-hero-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}',
+          '.rpc-hero-title h3{margin:0;font-size:19px;line-height:26px;font-weight:650;letter-spacing:-.01em;color:var(--rpc-text)}',
+          '.rpc-hero-sub{margin:0;font-size:13px;line-height:20px;color:var(--rpc-muted);max-width:640px}',
+          '.rpc-hero-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:2px}',
+          '.rpc-hero-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end;padding-left:8px}',
+
+          /* 服务商选择条（同时是 provider tablist） */
+          '.rpc-rail{display:flex;align-items:stretch;gap:8px;',
+          'overflow-x:auto;padding:12px 20px 13px;border-bottom:1px solid var(--rpc-border);background:var(--rpc-bg);',
+          'scrollbar-width:none;overscroll-behavior-x:contain}',
+          '.rpc-rail::-webkit-scrollbar{display:none}',
+          '.rpc-provider{position:relative;appearance:none;font:inherit;text-align:left;display:flex;flex-direction:column;gap:5px;',
+          'flex:1 1 0;min-width:132px;max-width:230px;padding:9px 11px 8px;border:1px solid var(--rpc-border);border-radius:12px;background:var(--rpc-bg);',
+          'color:var(--rpc-text);cursor:pointer;overflow:hidden;transition:background .14s ease,border-color .14s ease,box-shadow .14s ease,transform .14s ease}',
+          '.rpc-provider::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;',
+          'background:var(--rpc-provider-accent,var(--rpc-accent));opacity:0;transition:opacity .14s ease}',
+          '.rpc-provider:hover{background:var(--rpc-surface);border-color:var(--rpc-border-strong);transform:translateY(-1px);box-shadow:var(--rpc-shadow-sm)}',
+          '.rpc-provider:focus-visible{outline:2px solid color-mix(in srgb,var(--rpc-accent) 55%,transparent);outline-offset:1px}',
+          '.rpc-provider[aria-selected="true"]{background:color-mix(in srgb,var(--rpc-provider-accent,var(--rpc-accent)) 7%,var(--rpc-bg));',
+          'border-color:color-mix(in srgb,var(--rpc-provider-accent,var(--rpc-accent)) 46%,var(--rpc-border));box-shadow:var(--rpc-shadow-sm)}',
+          '.rpc-provider[aria-selected="true"]::before{opacity:1}',
+          '.rpc-provider-top{display:flex;align-items:center;gap:5px;min-width:0}',
+          '.rpc-provider-dot{width:6px;height:6px;border-radius:999px;flex:0 0 auto;background:var(--rpc-provider-accent,var(--rpc-accent))}',
+          '.rpc-provider-name{font-size:12px;font-weight:600;line-height:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto}',
+          '.rpc-provider-health{font-size:10.5px;line-height:14px;white-space:nowrap;color:var(--rpc-muted);flex:0 0 auto}',
+          '.rpc-provider-value{display:flex;align-items:baseline;gap:4px;min-width:0}',
+          '.rpc-provider-meta{font-size:10.5px;line-height:15px;color:var(--rpc-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}',
+          '.rpc-provider-bar{height:3px;border-radius:999px;background:var(--rpc-surface-2);overflow:hidden;margin-top:1px}',
+          '.rpc-provider-bar>i{display:block;height:100%;border-radius:inherit;background:var(--rpc-provider-accent,var(--rpc-accent));opacity:.85}',
+
+          /* 通用卡片与分区 */
+          '.rpc-page{display:flex;flex-direction:column;gap:12px;padding:14px 20px 20px;min-width:0;flex:0 0 auto;animation:rpc-fade .16s ease}',
+          '.rpc-overview{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:12px;align-items:start}',
+          '.rpc-overview-main,.rpc-overview-side{display:flex;flex-direction:column;gap:12px;min-width:0;flex:0 0 auto}',
+          '.rpc-section{display:flex;flex-direction:column;gap:11px;min-width:0;flex:0 0 auto;padding:14px 16px 15px;',
+          'border:1px solid var(--rpc-border);border-radius:14px;background:var(--rpc-bg);',
+          'box-shadow:var(--rpc-shadow-sm);box-sizing:border-box}',
+          '.rpc-section.flush{padding:0;overflow:hidden}',
+          '.rpc-section-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:22px;min-width:0}',
+          '.rpc-section-title{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;line-height:19px;font-weight:650;letter-spacing:.02em;color:var(--rpc-muted)}',
+          '.rpc-section-count{display:inline-flex;align-items:center;height:20px;padding:0 7px;border-radius:999px;',
+          'background:var(--rpc-surface-2);color:var(--rpc-muted);font-size:10.5px;font-variant-numeric:tabular-nums;white-space:nowrap}',
+
+          /* 按钮 */
+          '.rpc-btn{font:inherit;font-size:13px;line-height:1;height:31px;padding:0 12px;border-radius:8px;',
+          'border:1px solid var(--rpc-border);background:var(--rpc-bg);color:var(--rpc-text);cursor:pointer;',
+          'display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;flex:0 0 auto;',
+          'transition:background .12s ease,border-color .12s ease,box-shadow .12s ease,transform .12s ease}',
+          '.rpc-btn:hover:not(:disabled){background:var(--rpc-surface);border-color:var(--rpc-border-strong)}',
+          '.rpc-btn:active:not(:disabled){transform:translateY(.5px)}',
+          '.rpc-btn:focus-visible{outline:2px solid color-mix(in srgb,var(--rpc-accent) 60%,transparent);outline-offset:1px}',
+          '.rpc-btn[disabled]{opacity:.48;cursor:not-allowed}',
+          '.rpc-btn-primary{border-color:transparent;background:var(--rpc-accent);color:#fff;font-weight:600;',
+          'box-shadow:0 1px 2px color-mix(in srgb,var(--rpc-accent) 35%,transparent)}',
+          '.rpc-btn-primary:hover:not(:disabled){background:color-mix(in srgb,var(--rpc-accent) 87%,#000);border-color:transparent}',
+          '.rpc-btn-ghost{border-color:transparent;background:transparent;color:var(--rpc-muted);padding:0 8px}',
+          '.rpc-btn-ghost:hover:not(:disabled){background:var(--rpc-surface-2);color:var(--rpc-text)}',
+          '.rpc-btn-sm{height:26px;font-size:11.5px;padding:0 9px;border-radius:7px;gap:5px}',
+          '.rpc-btn-danger{color:var(--rpc-danger);border-color:color-mix(in srgb,var(--rpc-danger) 32%,var(--rpc-border));background:transparent}',
+          '.rpc-btn-danger:hover:not(:disabled){background:color-mix(in srgb,var(--rpc-danger) 8%,transparent);border-color:color-mix(in srgb,var(--rpc-danger) 48%,var(--rpc-border))}',
+          '.rpc-btn-link{border:0;background:transparent;height:auto;padding:0;color:var(--rpc-accent);font-size:11.5px;text-decoration:underline;text-underline-offset:2px}',
+
+          /* 胶囊 / 徽标 */
+          '.rpc-chip{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 7px;border-radius:6px;',
+          'border:1px solid transparent;background:var(--rpc-surface-2);color:var(--rpc-muted);font-size:10.5px;line-height:1;',
+          'white-space:nowrap;font-variant-numeric:tabular-nums;flex:0 0 auto}',
+          '.rpc-chip-ok{background:color-mix(in srgb,var(--rpc-success) 9%,transparent);border-color:color-mix(in srgb,var(--rpc-success) 18%,transparent);color:var(--rpc-success)}',
+          '.rpc-chip-warn{background:color-mix(in srgb,var(--rpc-warn) 10%,transparent);border-color:color-mix(in srgb,var(--rpc-warn) 22%,transparent);color:var(--rpc-warn)}',
+          '.rpc-chip-error{background:color-mix(in srgb,var(--rpc-danger) 9%,transparent);border-color:color-mix(in srgb,var(--rpc-danger) 20%,transparent);color:var(--rpc-danger)}',
+          '.rpc-chip-accent{background:color-mix(in srgb,var(--rpc-accent) 8%,transparent);border-color:color-mix(in srgb,var(--rpc-accent) 18%,transparent);color:var(--rpc-accent)}',
+
+          /* 文本 / 通用行 */
+          '.rpc-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}',
+          '.rpc-stack{display:flex;flex-direction:column;gap:6px;min-width:0}',
+          '.rpc-grow{flex:1 1 auto;min-width:0}',
+          '.rpc-tiny{font-size:12px;line-height:18px;color:var(--rpc-muted);margin:0}',
+          '.rpc-body{font-size:13px;line-height:20px;color:var(--rpc-muted);margin:0}',
+          '.rpc-label{font-size:12px;font-weight:600;line-height:18px;color:var(--rpc-muted)}',
+          '.rpc-warn-text{font-size:12px;line-height:18px;color:var(--rpc-warn);margin:0}',
+          '.rpc-error-text{font-size:12px;line-height:18px;color:var(--rpc-danger);margin:0}',
+          '.rpc-divider{height:1px;background:var(--rpc-border);border:0;margin:0}',
+
+          /* 表单 */
+          '.rpc-field{display:flex;flex-direction:column;gap:5px;min-width:0}',
+          '.rpc-input{font:inherit;font-size:13px;height:33px;padding:0 10px;border-radius:8px;box-sizing:border-box;width:100%;',
+          'border:1px solid var(--rpc-border);background:var(--rpc-surface-2);color:var(--rpc-text);transition:border-color .12s,box-shadow .12s,background .12s}',
+          '.rpc-input::placeholder{color:var(--rpc-faint)}',
+          '.rpc-input:hover{border-color:var(--rpc-border-strong)}',
+          '.rpc-input:focus{outline:none;border-color:var(--rpc-accent);background:var(--rpc-bg);box-shadow:0 0 0 3px color-mix(in srgb,var(--rpc-accent) 14%,transparent)}',
+          '.rpc-input[aria-invalid="true"]{border-color:var(--rpc-danger);box-shadow:0 0 0 3px color-mix(in srgb,var(--rpc-danger) 12%,transparent)}',
+          '.rpc-check{width:14px;height:14px;margin:0;accent-color:var(--rpc-accent);cursor:pointer;flex:0 0 auto}',
+          '.rpc-check-label{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;line-height:19px;color:var(--rpc-muted);cursor:pointer;white-space:nowrap}',
+          '.rpc-check-label:hover{color:var(--rpc-text)}',
+
+          /* 服务商详情头 */
+          '.rpc-detail{display:flex;flex-direction:column;min-width:0;flex:0 0 auto}',
+          '.rpc-detail-head{display:flex;align-items:flex-start;gap:12px;flex-wrap:wrap;padding:16px 20px 0;min-width:0}',
+          '.rpc-detail-main{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1 1 320px}',
+          '.rpc-detail-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}',
+          '.rpc-detail-title h4{margin:0;font-size:17px;line-height:24px;font-weight:650;letter-spacing:-.01em;color:var(--rpc-text)}',
+          '.rpc-detail-meta{display:flex;align-items:center;gap:5px 8px;flex-wrap:wrap;font-size:12px;line-height:18px;color:var(--rpc-muted);min-width:0}',
+          '.rpc-detail-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}',
+
+          /* 页内导航 */
+          '.rpc-pagenav{display:flex;align-items:center;gap:2px;padding:4px;margin:13px 20px 0;overflow-x:auto;',
+          'background:var(--rpc-surface-2);border:1px solid var(--rpc-border);border-radius:11px;width:fit-content;max-width:calc(100% - 40px);',
+          'scrollbar-width:none;box-sizing:border-box}',
+          '.rpc-pagenav::-webkit-scrollbar{display:none}',
+          '.rpc-pagetab{font:inherit;font-size:12.5px;line-height:1;height:29px;padding:0 10px;border:0;border-radius:8px;',
+          'background:transparent;color:var(--rpc-muted);cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:0 0 auto;',
+          'transition:background .12s,color .12s,box-shadow .12s}',
+          '.rpc-pagetab:hover{color:var(--rpc-text);background:color-mix(in srgb,var(--rpc-bg) 55%,transparent)}',
+          '.rpc-pagetab:focus-visible{outline:2px solid color-mix(in srgb,var(--rpc-accent) 55%,transparent);outline-offset:1px}',
+          '.rpc-pagetab[aria-current="page"]{background:var(--rpc-bg);color:var(--rpc-text);font-weight:600;box-shadow:var(--rpc-shadow-sm)}',
+          '.rpc-pagetab-count{font-size:10px;line-height:1;padding:2px 5px;border-radius:999px;background:var(--rpc-surface-2);color:var(--rpc-muted);font-variant-numeric:tabular-nums}',
+          '.rpc-pagetab[aria-current="page"] .rpc-pagetab-count{background:color-mix(in srgb,var(--rpc-accent) 9%,transparent);color:var(--rpc-accent)}',
+
+          /* 服务状态 KV */
+          '.rpc-kv{display:grid;grid-template-columns:100px minmax(0,1fr);gap:8px 12px;align-items:baseline;font-size:13px;line-height:20px}',
+          '.rpc-kv>dt{color:var(--rpc-muted);font-weight:500;margin:0}',
+          '.rpc-kv>dd{margin:0;color:var(--rpc-text);min-width:0;overflow-wrap:anywhere}',
+          '.rpc-kv-note{grid-column:2;margin:-3px 0 2px;font-size:11.5px;line-height:17px;color:var(--rpc-muted)}',
+
+          /* 额度 */
+          '.rpc-credit-line{display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap;min-width:0}',
+          '.rpc-credit-value{font-size:38px;line-height:40px;font-weight:650;letter-spacing:-.025em;font-variant-numeric:tabular-nums;color:var(--rpc-text)}',
+          '.rpc-credit-unit{font-size:12.5px;line-height:19px;color:var(--rpc-muted);padding-bottom:5px}',
+          '.rpc-progress{height:8px;border-radius:999px;background:var(--rpc-surface-2);overflow:hidden;max-width:520px}',
+          '.rpc-progress>i{display:block;height:100%;border-radius:inherit;background:var(--rpc-accent);transition:width .35s ease}',
+          '.rpc-trend{display:flex;flex-direction:column;gap:7px;padding-top:10px;border-top:1px solid var(--rpc-border);min-width:0}',
+          '.rpc-trend-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}',
+          '.rpc-spark{display:block;width:100%;height:30px}',
+
+          /* 账号表 */
+          '.rpc-table{border:1px solid var(--rpc-border);border-radius:12px;overflow:hidden;background:var(--rpc-bg);min-width:0}',
+          '.rpc-table-scroll{overflow-x:auto;max-width:100%}',
+          '.rpc-table-head{display:grid;align-items:center;gap:10px;padding:9px 13px;background:var(--rpc-surface-2);',
+          'border-bottom:1px solid var(--rpc-border);font-size:11px;font-weight:650;letter-spacing:.045em;color:var(--rpc-muted)}',
+          '.rpc-table-row{display:grid;align-items:start;gap:10px;padding:12px 13px;min-width:0;transition:background .12s ease}',
+          '.rpc-table-row:hover{background:var(--rpc-surface)}',
+          '.rpc-table-row[data-active="true"]{background:color-mix(in srgb,var(--rpc-accent) 5%,transparent);box-shadow:inset 3px 0 0 var(--rpc-accent)}',
+          '.rpc-cell{display:flex;flex-direction:column;gap:2px;min-width:0}',
+          '.rpc-cell-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px;flex-wrap:wrap}',
+
+          /* 列表 / 模型 / 事件 */
+          '.rpc-list{border:1px solid var(--rpc-border);border-radius:12px;overflow:hidden;background:var(--rpc-bg);min-width:0}',
+          '.rpc-list-row{display:flex;align-items:center;gap:9px;padding:9px 12px;min-width:0;font-size:13px;line-height:20px;',
+          'border-top:1px solid var(--rpc-border);transition:background .12s ease}',
+          '.rpc-list-row:first-child{border-top:0}',
+          '.rpc-model-list{max-height:460px;overflow-y:auto;overscroll-behavior:contain}',
+          '.rpc-model-list::-webkit-scrollbar{width:8px}',
+          '.rpc-model-row{position:relative}',
+          '.rpc-list-row:hover{background:var(--rpc-surface)}',
+          '.rpc-model-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--rpc-text);font-weight:500}',
+          '.rpc-model-meta{display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-width:0;color:var(--rpc-muted);font-size:11px;line-height:17px}',
+          '.rpc-model-id{font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Consolas,monospace);font-size:11px;line-height:17px;color:var(--rpc-faint);white-space:nowrap}',
+          '.rpc-event-list{display:flex;flex-direction:column;min-width:0}',
+          '.rpc-event{display:flex;align-items:flex-start;gap:9px;padding:11px 12px;border-top:1px solid var(--rpc-border);min-width:0;font-size:13px;line-height:20px}',
+          '.rpc-event:first-child{border-top:0}',
+          '.rpc-event:hover{background:var(--rpc-surface)}',
+          '.rpc-event-dot{width:7px;height:7px;border-radius:999px;flex:0 0 auto;margin-top:6px}',
+          '.rpc-event-time{font-size:11px;line-height:17px;color:var(--rpc-faint);font-variant-numeric:tabular-nums;white-space:nowrap;flex:0 0 auto;margin-top:1px}',
+          '.rpc-event-msg{flex:1 1 200px;min-width:0;color:var(--rpc-text);overflow-wrap:anywhere}',
+          '.rpc-filters{display:flex;align-items:center;gap:5px;flex-wrap:wrap}',
+          '.rpc-filter{font:inherit;font-size:11.5px;line-height:1;height:25px;padding:0 9px;border-radius:999px;',
+          'border:1px solid var(--rpc-border);background:transparent;color:var(--rpc-muted);cursor:pointer;white-space:nowrap;transition:background .12s ease,color .12s ease,border-color .12s ease}',
+          '.rpc-filter:hover{background:var(--rpc-surface-2);color:var(--rpc-text)}',
+          '.rpc-filter[aria-pressed="true"]{background:color-mix(in srgb,var(--rpc-accent) 9%,transparent);border-color:color-mix(in srgb,var(--rpc-accent) 32%,var(--rpc-border));color:var(--rpc-text);font-weight:600}',
+
+          /* 提示条 / 空状态 */
+          '.rpc-banner{display:flex;align-items:flex-start;gap:8px;margin:0 20px;padding:9px 11px;border-radius:10px;',
+          'font-size:12px;line-height:18px;border:1px solid var(--rpc-border);background:var(--rpc-surface)}',
+          '.rpc-banner-warn{border-color:color-mix(in srgb,var(--rpc-warn) 30%,var(--rpc-border));',
+          'background:color-mix(in srgb,var(--rpc-warn) 8%,transparent);color:var(--rpc-warn)}',
+          '.rpc-banner-error{border-color:color-mix(in srgb,var(--rpc-danger) 28%,var(--rpc-border));',
+          'background:color-mix(in srgb,var(--rpc-danger) 7%,transparent);color:var(--rpc-danger)}',
+          '.rpc-empty{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:28px 18px;text-align:center;',
+          'border:1px dashed var(--rpc-border-strong);border-radius:12px;color:var(--rpc-muted);font-size:12.5px;line-height:19px}',
+          '.rpc-empty-icon{width:34px;height:34px;border-radius:10px;display:grid;place-items:center;background:var(--rpc-surface-2);color:var(--rpc-muted)}',
+          '.rpc-banners{display:flex;flex-direction:column;gap:7px;padding:10px 0 0}',
+          '.rpc-checkin{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;border-radius:10px;',
+          'border:1px solid var(--rpc-border);background:var(--rpc-surface-2);font-size:12px;line-height:18px;min-width:0}',
+          '.rpc-subcard{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:12px;',
+          'border:1px dashed var(--rpc-border-strong);background:var(--rpc-surface);min-width:0}',
+          '.rpc-inline-note{display:flex;align-items:flex-start;gap:6px;font-size:11.5px;line-height:17px;color:var(--rpc-muted);margin:0}',
+          '.rpc-kpi{position:relative;display:flex;flex-direction:column;gap:2px;min-width:0;padding:13px 14px 11px;',
+          'border:1px solid var(--rpc-border);border-radius:13px;overflow:hidden;',
+          'background:linear-gradient(180deg,var(--rpc-bg),var(--rpc-surface-2));box-shadow:var(--rpc-shadow-sm)}',
+          '.rpc-kpi::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--rpc-accent);opacity:.45}',
+          '.rpc-kpi-label{font-size:10.5px;line-height:16px;font-weight:650;letter-spacing:.05em;color:var(--rpc-muted)}',
+          '.rpc-kpi-value{font-size:26px;line-height:32px;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--rpc-text)}',
+          '.rpc-kpi-metrics{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:10px;row-gap:1px;margin-top:6px;',
+          'padding-top:7px;border-top:1px solid var(--rpc-border);min-width:0;font-size:11px;line-height:16px;color:var(--rpc-muted)}',
+          '.rpc-heat{display:flex;align-items:flex-end;gap:4px;height:44px;padding-top:4px;min-width:0}',
+          '.rpc-heat-cell{flex:1 1 0;min-width:4px;max-width:56px;height:38px;display:flex;align-items:flex-end;border-radius:4px 4px 0 0;',
+          'background:transparent;border-bottom:2px solid var(--rpc-surface-2);overflow:hidden}',
+          '.rpc-heat-fill{width:100%;border-radius:4px;background:var(--rpc-accent);transition:height .2s ease,opacity .2s ease}',
+          '.rpc-subsection{display:flex;flex-direction:column;gap:7px;min-width:0}',
+          '.rpc-table-frame{border:1px solid var(--rpc-border);border-radius:10px;overflow-x:auto;background:var(--rpc-bg);min-width:0}',
+
+          /* 页脚 / 诊断 */
+          '.rpc-footer{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 20px 13px;border-top:1px solid var(--rpc-border);',
+          'font-size:10.5px;line-height:16px;color:var(--rpc-faint);background:var(--rpc-bg)}',
+          '.rpc-pre{margin:0;padding:11px 12px;border-radius:10px;border:1px solid var(--rpc-border);background:var(--rpc-surface-2);',
+          'font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Consolas,monospace);font-size:11px;line-height:16px;',
+          'max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-word;color:var(--rpc-text)}',
+          '.rpc-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}',
+
+          /* 动效 / 响应式 */
+          '@keyframes rpc-fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}',
+          '@container (max-width:760px){.rpc-overview{grid-template-columns:1fr}.rpc-detail-head{padding-top:14px}.rpc-provider-health{display:none}}',
+          '@container (max-width:560px){.rpc-hero{flex-wrap:wrap;padding:15px 16px 13px}.rpc-hero-actions{width:100%;justify-content:flex-start;padding-left:0}',
+          '.rpc-rail{padding:10px 14px 11px}.rpc-provider{min-width:124px}',
+          '.rpc-pagenav{margin:12px 14px 0;max-width:calc(100% - 28px)}',
+          '.rpc-page{padding:12px 14px 16px}.rpc-detail-head{padding:14px 14px 0}.rpc-banner{margin:0 14px}.rpc-footer{padding:9px 14px 12px}',
+          '.rpc-kv{grid-template-columns:84px minmax(0,1fr)}}',
+          '@media (prefers-reduced-motion:reduce){.dsh-rpc *{animation:none!important;transition:none!important}}',
+          '.dsh-rpc *::-webkit-scrollbar{width:8px;height:8px}',
+          '.dsh-rpc *::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--rpc-faint) 35%,transparent);border-radius:999px}',
+          '.dsh-rpc *::-webkit-scrollbar-track{background:transparent}',
+        ].join('')
         var head = document.head
         if (head === undefined || head === null) {
           head = typeof document.getElementsByTagName === 'function' ? document.getElementsByTagName('head')[0] : undefined
@@ -171,6 +439,26 @@ window.__ModuleLoader__.load({
       creditsResetShort: '到期 {date}',
       catalogBuiltin: '内置兜底列表（上游不可达且没有存档）',
       summary: '账号总览',
+      navProviders: '服务商',
+      navSections: '详情分区',
+      navOverview: '概览',
+      navAccounts: '账号',
+      navUsage: '用量',
+      navModels: '模型',
+      navSettings: '设置',
+      navActivity: '动态',
+      providersEnabled: '已接入 {count}/{total}',
+      providersCredits: '{count} 家额度可读',
+      updatedAt: '更新于 {time}',
+      autoRefreshHint: '每 20 秒自动刷新',
+      footerHint: '数据来自本机宿主',
+      manageAccounts: '管理账号',
+      displaySettings: '显示',
+      displaySettingsHint: '这些选项只影响 DSH 里的展示，不改变上游账号行为；修改后立即生效。',
+      loginAddTitle: '浏览器登录',
+      statusAccount: '账号凭证',
+      catalogSource: '模型目录',
+      emailLabel: '邮箱',
       secStatus: '状态',
       secConnection: '连接设置',
       show: '展开',
@@ -489,6 +777,26 @@ window.__ModuleLoader__.load({
       creditsResetShort: 'Expires {date}',
       catalogBuiltin: 'Built-in fallback list (upstream unreachable, no saved catalog)',
       summary: 'Accounts',
+      navProviders: 'Providers',
+      navSections: 'Sections',
+      navOverview: 'Overview',
+      navAccounts: 'Accounts',
+      navUsage: 'Usage',
+      navModels: 'Models',
+      navSettings: 'Settings',
+      navActivity: 'Activity',
+      providersEnabled: '{count}/{total} connected',
+      providersCredits: '{count} with readable credits',
+      updatedAt: 'Updated {time}',
+      autoRefreshHint: 'Auto-refresh every 20s',
+      footerHint: 'Data comes from the local host',
+      manageAccounts: 'Manage accounts',
+      displaySettings: 'Display',
+      displaySettingsHint: 'These options only change how DSH shows data; upstream account behaviour is unchanged. Changes apply immediately.',
+      loginAddTitle: 'Browser sign-in',
+      statusAccount: 'Account & credential',
+      catalogSource: 'Model catalog',
+      emailLabel: 'Email',
       secStatus: 'Status',
       secConnection: 'Connection',
       show: 'Expand',
@@ -981,8 +1289,15 @@ window.__ModuleLoader__.load({
         preserveAspectRatio: 'none',
         'aria-hidden': 'true',
         focusable: 'false',
-        style: { display: 'block', width: '100%', height: 22, overflow: 'visible' },
-      }, h('polyline', {
+        style: { display: 'block', width: '100%', height: 26, overflow: 'visible' },
+      },
+      h('polygon', {
+        points: '0,24 ' + coordinates.join(' ') + ' 100,24',
+        fill: color === undefined ? 'currentColor' : color,
+        stroke: 'none',
+        opacity: 0.10,
+      }),
+      h('polyline', {
         points: coordinates.join(' '),
         fill: 'none',
         stroke: color === undefined ? 'currentColor' : color,
@@ -1102,6 +1417,14 @@ window.__ModuleLoader__.load({
       return 'var(--dsw-alias-label-secondary)'
     }
 
+    /** 健康状态 → chip 色调（down 用错误色，degraded 用警告色）。 */
+    function rpcHealthTone(state) {
+      if (state === 'ok') return 'ok'
+      if (state === 'down') return 'error'
+      if (state === 'degraded') return 'warn'
+      return 'muted'
+    }
+
     /** 毫秒 → 人话。 */
     function formatDuration(ms) {
       if (typeof ms !== 'number' || !Number.isFinite(ms) || ms <= 0) return '—'
@@ -1185,159 +1508,208 @@ window.__ModuleLoader__.load({
     // 之前是随手写的，所以「已从上游拉取」「更新于」「上次检测」这些
     // 同类信息一会儿 12 一会儿 12.5、行高也不一致，越看越乱。
     var TEXT = {
-      tiny: 11.5,
-      body: 12.5,
-      strong: 13,
-      title: 16,
+      tiny: 12,
+      body: 13,
+      strong: 13.5,
+      title: 17,
     }
 
     var LINE = {
-      dense: '17px',
-      body: '20px',
-      loose: '22px',
+      dense: '18px',
+      body: '21px',
+      loose: '23px',
     }
 
     // 小字可读性：≤12.5px 的说明文字统一用 label-secondary（亮色 #61666b ≈ 5.9:1），
     // 不再用 label-tertiary（亮色 #81858c ≈ 3.6:1）叠 opacity —— 后者在亮色主题下
     // 连 4.5:1 都不到，叠到 .5 只有 2~3:1。层级靠 secondary vs primary 区分。
     /** 账号表格列宽：账号 / 积分 / 状态 / 签到 / 操作。 */
-    var ACCOUNT_COLUMNS = 'minmax(118px, 1.1fr) 108px minmax(150px, 1.5fr) 86px auto'
+    var ACCOUNT_COLUMNS = 'minmax(108px, 1.2fr) 96px minmax(136px, 1.5fr) 78px auto'
     var S = {
       card: {
-        border: '0.5px solid var(--dsw-alias-border-l2)',
-        borderRadius: 12,
-        padding: '16px 18px 15px',
         display: 'flex',
         flexDirection: 'column',
-        gap: 14,
-        background: 'var(--dsw-alias-bg-layer-1, transparent)',
-        boxSizing: 'border-box',
+        minWidth: 0,
         maxWidth: '100%',
+        boxSizing: 'border-box',
+        border: '1px solid var(--rpc-border, var(--dsw-alias-border-l2))',
+        borderRadius: 18,
+        background: 'var(--rpc-bg, var(--dsw-alias-bg-layer-1))',
+        color: 'var(--rpc-text, var(--dsw-alias-label-primary))',
       },
 
-      // 页头
+      // 页头（保留给首屏加载 / 失败态，正式页头用 .rpc-hero）
       header: { display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' },
-      title: { margin: 0, fontSize: TEXT.title, fontWeight: 600, letterSpacing: '.01em', color: 'var(--dsw-alias-label-primary)' },
+      title: { margin: 0, fontSize: TEXT.title, fontWeight: 650, letterSpacing: '-.01em', color: 'var(--rpc-text, var(--dsw-alias-label-primary))' },
       version: {
-        marginLeft: 'auto',
         fontSize: TEXT.tiny,
         fontVariantNumeric: 'tabular-nums',
-        color: 'var(--dsw-alias-label-secondary)',
+        color: 'var(--rpc-muted, var(--dsw-alias-label-secondary))',
         userSelect: 'text',
       },
-      intro: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-label-secondary)', maxWidth: 620 },
+      intro: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--rpc-muted, var(--dsw-alias-label-secondary))', maxWidth: 620 },
 
-      // 分组：统一用一条极淡的上边线分隔，省掉原来三种不同的 divider
+      // 分区卡片：页内每一块都是独立卡片，不再用一条条上边线切碎
       section: {
         display: 'flex',
         flexDirection: 'column',
-        gap: 9,
-        paddingTop: 12,
-        borderTop: '0.5px solid var(--dsw-alias-border-l2)',
+        gap: 11,
+        minWidth: 0,
+        padding: '14px 16px 15px',
+        border: '1px solid var(--rpc-border, var(--dsw-alias-border-l2))',
+        borderRadius: 14,
+        background: 'var(--rpc-bg, var(--dsw-alias-bg-layer-1))',
+        boxShadow: 'var(--rpc-shadow-sm, none)',
+        boxSizing: 'border-box',
       },
-      sectionHead: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
+      sectionHead: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minHeight: 22, minWidth: 0 },
       sectionTitle: {
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
         margin: 0,
-        fontSize: TEXT.tiny,
-        fontWeight: 600,
-        letterSpacing: '.08em',
-        color: 'var(--dsw-alias-label-secondary)',
+        fontSize: 12.5,
+        lineHeight: '19px',
+        fontWeight: 650,
+        letterSpacing: '.02em',
+        color: 'var(--rpc-muted, var(--dsw-alias-label-secondary))',
       },
       sectionCount: {
-        fontSize: TEXT.tiny,
+        display: 'inline-flex',
+        alignItems: 'center',
+        height: 19,
+        padding: '0 7px',
+        borderRadius: 999,
+        background: 'var(--rpc-surface-2, var(--dsh-rpc-fill))',
+        color: 'var(--rpc-muted, var(--dsw-alias-label-secondary))',
+        fontSize: 10.5,
         fontVariantNumeric: 'tabular-nums',
-        color: 'var(--dsw-alias-label-secondary)',
+        whiteSpace: 'nowrap',
       },
 
       // 胶囊徽标
       badge: {
-        fontSize: TEXT.tiny,
-        lineHeight: '18px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        height: 20,
         padding: '0 7px',
-        borderRadius: 999,
-        border: '0.5px solid var(--dsw-alias-border-l2)',
-        color: 'var(--dsw-alias-label-secondary)',
+        borderRadius: 6,
+        border: '1px solid transparent',
+        background: 'var(--rpc-surface-2, var(--dsh-rpc-fill))',
+        color: 'var(--rpc-muted, var(--dsw-alias-label-secondary))',
+        fontSize: 10.5,
+        lineHeight: 1,
         whiteSpace: 'nowrap',
+        fontVariantNumeric: 'tabular-nums',
       },
       badgeWarn: {
-        fontSize: TEXT.tiny,
-        lineHeight: '18px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        height: 20,
         padding: '0 7px',
-        borderRadius: 999,
-        border: '0.5px solid var(--dsh-rpc-warn, #9d5c00)',
-        color: 'var(--dsh-rpc-warn, #9d5c00)',
+        borderRadius: 6,
+        border: '1px solid color-mix(in srgb, var(--rpc-warn, #9d5c00) 22%, transparent)',
+        background: 'color-mix(in srgb, var(--rpc-warn, #9d5c00) 10%, transparent)',
+        color: 'var(--rpc-warn, #9d5c00)',
+        fontSize: 10.5,
+        lineHeight: 1,
         whiteSpace: 'nowrap',
       },
       badgeError: {
-        fontSize: TEXT.tiny,
-        lineHeight: '18px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        height: 20,
         padding: '0 7px',
-        borderRadius: 999,
-        border: '0.5px solid var(--dsw-alias-state-error-primary, #b3261e)',
-        color: 'var(--dsw-alias-state-error-primary, #b3261e)',
+        borderRadius: 6,
+        border: '1px solid color-mix(in srgb, var(--rpc-danger, #bf0f0f) 20%, transparent)',
+        background: 'color-mix(in srgb, var(--rpc-danger, #bf0f0f) 9%, transparent)',
+        color: 'var(--rpc-danger, #bf0f0f)',
+        fontSize: 10.5,
+        lineHeight: 1,
         whiteSpace: 'nowrap',
       },
       badgeSoft: {
-        fontSize: TEXT.tiny,
-        lineHeight: '18px',
+        display: 'inline-flex',
+        alignItems: 'center',
+        height: 20,
         padding: '0 7px',
-        borderRadius: 999,
-        background: 'var(--dsh-rpc-fill, rgba(127,127,127,.10))',
-        color: 'var(--dsw-alias-label-secondary)',
+        borderRadius: 6,
+        background: 'var(--rpc-surface-2, var(--dsh-rpc-fill))',
+        color: 'var(--rpc-muted, var(--dsw-alias-label-secondary))',
+        fontSize: 10.5,
+        lineHeight: 1,
         whiteSpace: 'nowrap',
+        fontVariantNumeric: 'tabular-nums',
       },
 
       // 通用行
-      row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
-      stack: { display: 'flex', flexDirection: 'column', gap: 6 },
+      row: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 },
+      stack: { display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 },
       grow: { flex: 1, minWidth: 0 },
-      divider: { height: 0, borderTop: '0.5px solid var(--dsw-alias-border-l2)', margin: '2px 0' },
-      hint: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-label-secondary)' },
-      hintTiny: { margin: 0, fontSize: TEXT.tiny, lineHeight: LINE.dense, color: 'var(--dsw-alias-label-secondary)' },
-      hintWarn: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsh-rpc-warn, #9d5c00)' },
-      hintError: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--dsw-alias-state-error-primary, #b3261e)' },
-      label: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))', fontWeight: 500 },
+      divider: { height: 0, borderTop: '1px solid var(--rpc-border, var(--dsw-alias-border-l2))', margin: '2px 0' },
+      hint: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--rpc-muted, var(--dsw-alias-label-secondary))' },
+      hintTiny: { margin: 0, fontSize: TEXT.tiny, lineHeight: LINE.dense, color: 'var(--rpc-muted, var(--dsw-alias-label-secondary))' },
+      hintWarn: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--rpc-warn, #9d5c00)' },
+      hintError: { margin: 0, fontSize: TEXT.body, lineHeight: LINE.body, color: 'var(--rpc-danger, var(--dsw-alias-state-error-primary, #b3261e))' },
+      label: { fontSize: TEXT.body, color: 'var(--rpc-muted, var(--dsw-alias-label-secondary))', fontWeight: 600 },
 
-      // 按钮：三种层级，尺寸统一
+      // 按钮：主 / 次 / 幽灵 / 危险
       button: {
         font: 'inherit',
         fontSize: TEXT.body,
-        lineHeight: '20px',
-        padding: '4px 11px',
-        borderRadius: 7,
+        lineHeight: 1,
+        height: 31,
+        padding: '0 12px',
+        borderRadius: 8,
         cursor: 'pointer',
-        border: '0.5px solid var(--dsw-alias-border-l2)',
-        background: 'transparent',
-        color: 'var(--dsw-alias-label-primary)',
+        border: '1px solid var(--rpc-border, var(--dsw-alias-border-l2))',
+        background: 'var(--rpc-bg, transparent)',
+        color: 'var(--rpc-text, var(--dsw-alias-label-primary))',
         whiteSpace: 'nowrap',
         flex: '0 0 auto',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
       },
       buttonPrimary: {
         font: 'inherit',
         fontSize: TEXT.body,
-        lineHeight: '20px',
-        padding: '4px 12px',
-        borderRadius: 7,
+        lineHeight: 1,
+        height: 31,
+        padding: '0 12px',
+        borderRadius: 8,
         cursor: 'pointer',
-        border: '0.5px solid var(--dsw-alias-state-business-primary, #2f6fed)',
-        background: 'var(--dsw-alias-state-business-primary, #2f6fed)',
+        border: '1px solid transparent',
+        background: 'var(--rpc-accent, var(--dsw-alias-state-business-primary, #2154ce))',
         color: '#fff',
-        fontWeight: 500,
+        fontWeight: 600,
         whiteSpace: 'nowrap',
         flex: '0 0 auto',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 6,
+        boxShadow: '0 1px 2px color-mix(in srgb, var(--rpc-accent, #2154ce) 35%, transparent)',
       },
       buttonGhost: {
         font: 'inherit',
         fontSize: TEXT.tiny,
-        lineHeight: '18px',
-        padding: '2px 9px',
-        borderRadius: 999,
+        lineHeight: 1,
+        height: 26,
+        padding: '0 8px',
+        borderRadius: 7,
         cursor: 'pointer',
-        border: '0.5px solid var(--dsw-alias-border-l2)',
+        border: '1px solid transparent',
         background: 'transparent',
-        color: 'var(--dsw-alias-label-secondary)',
+        color: 'var(--rpc-muted, var(--dsw-alias-label-secondary))',
         whiteSpace: 'nowrap',
         flex: '0 0 auto',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 5,
       },
       linkButton: {
         font: 'inherit',
@@ -1347,8 +1719,9 @@ window.__ModuleLoader__.load({
         border: 0,
         background: 'transparent',
         cursor: 'pointer',
-        color: 'var(--dsw-alias-link, var(--dsw-alias-state-business-primary, #2f6fed))',
+        color: 'var(--rpc-accent, var(--dsw-alias-link, #2154ce))',
         textDecoration: 'underline',
+        textUnderlineOffset: 2,
         whiteSpace: 'nowrap',
         flex: '0 0 auto',
       },
@@ -1359,11 +1732,12 @@ window.__ModuleLoader__.load({
         font: 'inherit',
         fontSize: TEXT.body,
         lineHeight: '20px',
-        padding: '6px 9px',
-        borderRadius: 7,
-        border: '0.5px solid var(--dsw-alias-border-l2)',
-        background: 'var(--dsh-rpc-fill, rgba(127,127,127,.06))',
-        color: 'var(--dsw-alias-label-primary)',
+        height: 33,
+        padding: '0 10px',
+        borderRadius: 8,
+        border: '1px solid var(--rpc-border, var(--dsw-alias-border-l2))',
+        background: 'var(--rpc-surface-2, var(--dsh-rpc-fill))',
+        color: 'var(--rpc-text, var(--dsw-alias-label-primary))',
         width: '100%',
         boxSizing: 'border-box',
       },
@@ -1373,13 +1747,12 @@ window.__ModuleLoader__.load({
         display: 'flex',
         flexDirection: 'column',
         gap: 0,
-        maxHeight: 320,
-        overflowY: 'auto',
         margin: 0,
         padding: 0,
         listStyle: 'none',
-        borderRadius: 8,
-        border: '0.5px solid var(--dsw-alias-border-l2)',
+        borderRadius: 12,
+        border: '1px solid var(--rpc-border, var(--dsw-alias-border-l2))',
+        background: 'var(--rpc-bg, transparent)',
       },
       modelRow: {
         display: 'flex',
@@ -1387,70 +1760,71 @@ window.__ModuleLoader__.load({
         gap: 9,
         fontSize: TEXT.body,
         lineHeight: '21px',
-        padding: '5px 10px',
+        padding: '8px 12px',
         minWidth: 0,
       },
-      modelRowDivider: { borderTop: '0.5px solid var(--dsw-alias-border-l2)' },
-      modelName: { color: 'var(--dsw-alias-label-primary)', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-      modelMeta: { color: 'var(--dsw-alias-label-secondary)', fontSize: TEXT.tiny, whiteSpace: 'nowrap' },
+      modelRowDivider: { borderTop: '1px solid var(--rpc-border, var(--dsw-alias-border-l2))' },
+      modelName: { color: 'var(--rpc-text, var(--dsw-alias-label-primary))', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: 500 },
+      modelMeta: { color: 'var(--rpc-muted, var(--dsw-alias-label-secondary))', fontSize: 11.5, whiteSpace: 'nowrap' },
       modelId: {
-        color: 'var(--dsw-alias-label-secondary)',
-        fontSize: TEXT.tiny,
-        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+        color: 'var(--rpc-faint, var(--dsw-alias-label-secondary))',
+        fontSize: 11,
+        fontFamily: 'var(--ds-font-family-code, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace)',
         whiteSpace: 'nowrap',
       },
 
       // 账号表格：固定列宽让「积分 / 状态 / 签到」在纵向对齐，扫一眼就能比较。
       accountTableScroll: { overflowX: 'auto', maxWidth: '100%' },
       accountTable: {
-        minWidth: 680,
-        border: '0.5px solid var(--dsw-alias-border-l2)',
-        borderRadius: 10,
+        minWidth: 600,
+        border: '1px solid var(--rpc-border, var(--dsw-alias-border-l2))',
+        borderRadius: 12,
         overflow: 'hidden',
-        background: 'var(--dsw-alias-bg-layer-1, transparent)',
+        background: 'var(--rpc-bg, transparent)',
       },
       accountTableHead: {
         display: 'grid',
         gridTemplateColumns: ACCOUNT_COLUMNS,
         alignItems: 'center',
         gap: 10,
-        padding: '7px 12px',
-        background: 'rgba(127,127,127,.10)',
-        borderBottom: '0.5px solid var(--dsw-alias-border-l2)',
-        fontSize: TEXT.tiny,
-        fontWeight: 600,
-        letterSpacing: '.04em',
-        color: 'var(--dsw-alias-label-secondary)',
+        padding: '8px 13px',
+        background: 'var(--rpc-surface-2, rgba(127,127,127,.08))',
+        borderBottom: '1px solid var(--rpc-border, var(--dsw-alias-border-l2))',
+        fontSize: 11,
+        fontWeight: 650,
+        letterSpacing: '.045em',
+        color: 'var(--rpc-muted, var(--dsw-alias-label-secondary))',
       },
       accountRow: {
         display: 'grid',
         gridTemplateColumns: ACCOUNT_COLUMNS,
         alignItems: 'start',
         gap: 10,
-        padding: '9px 12px',
+        padding: '12px 13px',
         minWidth: 0,
       },
-      accountRowDivider: { borderTop: '0.5px solid var(--dsw-alias-border-l2)' },
+      accountRowDivider: { borderTop: '1px solid var(--rpc-border, var(--dsw-alias-border-l2))' },
       accountRowActive: {
-        background: 'var(--dsh-rpc-fill, rgba(127,127,127,.05))',
-        boxShadow: 'inset 2px 0 0 var(--dsw-alias-state-business-primary, #2f6fed)',
+        background: 'color-mix(in srgb, var(--rpc-accent, #2154ce) 5%, transparent)',
+        boxShadow: 'inset 3px 0 0 var(--rpc-accent, #2154ce)',
       },
       accountCell: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 },
       accountNameRow: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
-      accountActions: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' },
+      accountActions: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 5, flexWrap: 'wrap' },
 
-      // 标签页：改成胶囊分段，比下划线更贴合宿主的圆角风格
+      // 标签页（新页内导航用 .rpc-pagenav）
       tabs: { display: 'flex', gap: 4, flexWrap: 'wrap' },
 
       pre: {
         margin: 0,
-        padding: '10px 12px',
-        borderRadius: 8,
-        border: '0.5px solid var(--dsw-alias-border-l2)',
-        background: 'var(--dsh-rpc-fill, rgba(0,0,0,.04))',
-        fontSize: TEXT.tiny,
-        lineHeight: LINE.dense,
-        maxHeight: 240,
+        padding: '11px 12px',
+        borderRadius: 10,
+        border: '1px solid var(--rpc-border, var(--dsw-alias-border-l2))',
+        background: 'var(--rpc-surface-2, var(--dsh-rpc-fill))',
+        fontFamily: 'var(--ds-font-family-code, ui-monospace, SFMono-Regular, Consolas, monospace)',
+        fontSize: 11,
+        lineHeight: 1.5,
+        maxHeight: 260,
         overflow: 'auto',
         whiteSpace: 'pre-wrap',
         wordBreak: 'break-word',
@@ -1466,21 +1840,6 @@ window.__ModuleLoader__.load({
     var DOT_OFF = 'var(--dsh-rpc-warn, #9d5c00)'
     // 账号表里的「非当前账号」不是警告：用中性灰，避免整列看起来都在出问题。
     var DOT_IDLE = 'var(--dsw-alias-label-secondary)'
-
-    function tabStyle(active) {
-      return {
-        font: 'inherit',
-        fontSize: TEXT.body,
-        fontWeight: active ? 600 : 500,
-        padding: '5px 11px',
-        borderRadius: 8,
-        cursor: 'pointer',
-        border: '0.5px solid ' + (active ? 'var(--dsw-alias-border-l2)' : 'transparent'),
-        background: active ? 'var(--dsh-rpc-fill, rgba(127,127,127,.10))' : 'transparent',
-        color: active ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
-        whiteSpace: 'nowrap',
-      }
-    }
 
     // ── 网络 ────────────────────────────────────────────────────────
     /**
@@ -1773,6 +2132,91 @@ window.__ModuleLoader__.load({
       return 'acc-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
     }
 
+    // ── 图标与页签元数据 ────────────────────────────────────────────
+    //
+    // 全部用内联 SVG：插件不能假设宿主提供图标库，也不能加载外部资源。
+    var RPC_ICON_PATHS = {
+      logo: 'M9 3v4M15 3v4M7 7h10v3a5 5 0 0 1-10 0zM12 15v6',
+      refresh: 'M20 11a8 8 0 0 0-14.3-4.9L4 8M4 4v4h4M4 13a8 8 0 0 0 14.3 4.9L20 16M20 20v-4h-4',
+      pulse: 'M3 12h4l2.5-6 4 12 2.5-6h5',
+      users: 'M16 19v-1.5a4.5 4.5 0 0 0-4.5-4.5h-3A4.5 4.5 0 0 0 4 17.5V19M10 9a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7M16 3.5a3.5 3.5 0 0 1 0 7M20 19v-1.5a4.5 4.5 0 0 0-3-4.2',
+      chart: 'M4 20V10M10 20V4M16 20v-7M22 20H2',
+      cube: 'm12 3 8 4.5v9L12 21l-8-4.5v-9L12 3M4 7.5l8 4.5 8-4.5M12 12v9',
+      sliders: 'M4 7h9M17 7h3M4 17h3M11 17h9M15 4v6M7 14v6',
+      grid: 'M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z',
+      check: 'M20 6 9 17l-5-5',
+      alert: 'M12 3 2 21h20L12 3M12 9v5M12 18h.01',
+      clock: 'M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18M12 7v5l3 2',
+      key: 'M14 10a4 4 0 1 0-4-4 4 4 0 0 0 4 4M10.5 10.5 3 18v3h3v-2h2v-2h2l2.5-2.5',
+      image: 'M4 5h16v14H4zM4 15l4-4 4 4 3-3 5 5M15 9h.01',
+      display: 'M3 5h18v12H3zM8 21h8M12 17v4',
+      copy: 'M9 9h10v10H9zM5 15V5h10',
+      external: 'M14 4h6v6M20 4l-9 9M20 14v6H4V4h6',
+      trash: 'M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v5M14 11v5',
+      play: 'm8 5 11 7-11 7z',
+      plus: 'M12 5v14M5 12h14',
+      x: 'M6 6l12 12M18 6 6 18',
+      chevron: 'm6 9 6 6 6-6',
+      shield: 'M12 3 5 6v5c0 4.5 3 8 7 10 4-2 7-5.5 7-10V6z',
+      link: 'M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1',
+      spark: 'M12 3v4M12 17v4M3 12h4M17 12h4M5.6 5.6l2.8 2.8M15.6 15.6l2.8 2.8M18.4 5.6l-2.8 2.8M8.4 15.6l-2.8 2.8',
+      search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16M21 21l-4.3-4.3',
+      wallet: 'M4 7h16v12H4zM4 7V5h13v2M16 13h2',
+    }
+
+    /** 统一尺寸 / 描边的内联图标。 */
+    function rpcIcon(name, size, style) {
+      return h('svg', {
+        width: size === undefined ? 16 : size,
+        height: size === undefined ? 16 : size,
+        viewBox: '0 0 24 24',
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 1.8,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+        'aria-hidden': 'true',
+        focusable: 'false',
+        style: Object.assign({ flex: '0 0 auto' }, style || {}),
+      }, h('path', { d: RPC_ICON_PATHS[name] || RPC_ICON_PATHS.spark }))
+    }
+
+    /** 详情页的分区导航。 */
+    var RPC_PAGES = [
+      { id: 'overview', label: 'navOverview', icon: 'grid' },
+      { id: 'accounts', label: 'navAccounts', icon: 'users' },
+      { id: 'usage', label: 'navUsage', icon: 'chart' },
+      { id: 'models', label: 'navModels', icon: 'cube' },
+      { id: 'settings', label: 'navSettings', icon: 'sliders' },
+      { id: 'activity', label: 'navActivity', icon: 'pulse' },
+    ]
+
+    /** 现有 section key → 详情页 id。 */
+    var RPC_SECTION_PAGE = {
+      status: 'overview',
+      'overview-accounts': 'overview',
+      credits: 'overview',
+      accounts: 'accounts',
+      usage: 'usage',
+      models: 'models',
+      unavail: 'models',
+      forced: 'models',
+      connection: 'settings',
+      display: 'settings',
+      advanced: 'settings',
+      events: 'activity',
+      diag: 'activity',
+    }
+
+    /** chip 色调 → class 后缀。 */
+    function rpcChipClass(tone) {
+      if (tone === 'ok') return 'rpc-chip rpc-chip-ok'
+      if (tone === 'warn') return 'rpc-chip rpc-chip-warn'
+      if (tone === 'error') return 'rpc-chip rpc-chip-error'
+      if (tone === 'accent') return 'rpc-chip rpc-chip-accent'
+      return 'rpc-chip'
+    }
+
     // ── 卡片 ────────────────────────────────────────────────────────
     function ConnectorCard(props) {
       var t = props.t
@@ -1806,6 +2250,11 @@ window.__ModuleLoader__.load({
       var tabState = useState(props.initialProvider || 'workbuddy')
       var activeTab = tabState[0]
       var setActiveTab = tabState[1]
+      // 详情页分区。所有分区保持挂载（切换只改 display），既保留本地草稿，
+      // 也让状态轮询不会因为切页而重置滚动位置。
+      var pageState = useState('overview')
+      var activePage = pageState[0]
+      var setActivePage = pageState[1]
       var patState = useState('')
       var patDraft = patState[0]
       var setPatDraft = patState[1]
@@ -1978,6 +2427,24 @@ window.__ModuleLoader__.load({
       var active = providers.filter(function (entry) {
         return entry.provider === activeTab
       })[0]
+
+      /** 选择服务商：同时回到该服务商的「概览」，避免停留在上一家的设置页。 */
+      var selectProvider = function (provider) {
+        setActiveTab(provider)
+        setActivePage('overview')
+      }
+
+      // 页头摘要：接入数量 / 可读额度数量 / 最近更新时间。
+      var enabledCount = providers.filter(function (entry) { return entry.enabled !== false }).length
+      var readableCount = providers.filter(function (entry) {
+        return entry.credits !== undefined && entry.credits !== null && entry.credits.state === 'ok'
+      }).length
+      var latestUpdate = 0
+      providers.forEach(function (entry) {
+        if (isFiniteNumber(entry.fetchedAt) && entry.fetchedAt > latestUpdate) latestUpdate = entry.fetchedAt
+        var snapshot = entry.credits
+        if (snapshot !== null && typeof snapshot === 'object' && isFiniteNumber(snapshot.fetchedAt) && snapshot.fetchedAt > latestUpdate) latestUpdate = snapshot.fetchedAt
+      })
 
       // 切换标签只重置「这个 provider 的路径草稿」；高级设置是全局的，
       // 不能因为切标签就把用户还没保存的输入清掉。
@@ -2597,21 +3064,28 @@ window.__ModuleLoader__.load({
         // 可点的「重试」，否则用户只能等 20 秒轮询或重开设置页。
         return h(
           'div',
-          { style: S.card },
-          h('div', { key: 'head', style: S.header },
-            h('h3', { style: S.title }, bind(t, 'title')),
-            h('span', { key: 'grow', style: S.grow }),
-            h('button', {
-              type: 'button',
-              style: S.buttonPrimary,
-              onClick: retryLoad,
-              disabled: isBusy('reload'),
-            }, isBusy('reload') ? bind(t, 'retrying') : bind(t, 'retry'))),
-          error === undefined
-            ? h('p', { key: 'loading', style: S.hint, role: 'status' }, bind(t, 'loading'))
-            : h('div', { key: 'load-fail', role: 'status' },
-                h('p', { style: S.hintError, title: error }, bind(t, 'statusLoadFailed')),
-                h('p', { style: S.hintTiny }, bind(t, 'statusLoadFailedHint'))),
+          { className: 'dsh-rpc' },
+          h('header', { className: 'rpc-hero' },
+            h('div', { className: 'rpc-hero-icon' }, rpcIcon('logo', 20)),
+            h('div', { className: 'rpc-hero-main' },
+              h('div', { className: 'rpc-hero-title' }, h('h3', {}, bind(t, 'title'))),
+              h('p', { className: 'rpc-hero-sub' }, bind(t, 'intro'))),
+            h('div', { className: 'rpc-hero-actions' },
+              h('button', {
+                type: 'button',
+                className: 'rpc-btn rpc-btn-primary',
+                onClick: retryLoad,
+                disabled: isBusy('reload'),
+              }, rpcIcon('refresh', 15), isBusy('reload') ? bind(t, 'retrying') : bind(t, 'retry')))),
+          h('div', { className: 'rpc-page' },
+            error === undefined
+              ? h('div', { className: 'rpc-empty', role: 'status' },
+                  h('span', { className: 'rpc-empty-icon' }, rpcIcon('refresh', 18)),
+                  h('span', {}, bind(t, 'loading')))
+              : h('div', { key: 'load-fail', className: 'rpc-empty', role: 'status' },
+                  h('span', { className: 'rpc-empty-icon' }, rpcIcon('alert', 18)),
+                  h('span', { style: { fontWeight: 600, color: 'var(--rpc-text)' }, title: error }, bind(t, 'statusLoadFailed')),
+                  h('span', {}, bind(t, 'statusLoadFailedHint')))),
         )
       }
 
@@ -2643,37 +3117,12 @@ window.__ModuleLoader__.load({
           }))
         : null
 
-      var tabs = providers.map(function (entry) {
-        var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
-        var tabHealth = entry.health || { state: 'unknown' }
-        return h(
-          'button',
-          {
-            key: entry.provider,
-            id: 'dsh-rpc-tab-' + entry.provider,
-            type: 'button',
-            role: 'tab',
-            'aria-selected': entry.provider === activeTab,
-            'aria-controls': 'dsh-rpc-status-panel',
-            // 标准 tabs 模式：只有当前 tab 进 Tab 键序列，方向键在 tab 间移动。
-            tabIndex: entry.provider === activeTab ? 0 : -1,
-            style: tabStyle(entry.provider === activeTab),
-            title: entry.displayName,
-            onClick: function () { setActiveTab(entry.provider) },
-          },
-          h(
-            'span',
-            { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } },
-            h('span', { style: dot(signed ? (tabHealth.state === 'unknown' ? DOT_OK : healthColor(tabHealth.state)) : DOT_OFF) }),
-            entry.displayName,
-          ),
-        )
-      })
-
-      // 账号总览：每家 provider 一张可点的卡片。比原来一行小胶囊多三样东西：
-      // 健康圆点、今日用量、当前账号名 —— 不切标签就能判断「该不该点进去」。
-      // 六家之后用 auto-fit 栅格排布：宽屏一行三张、窄屏自动降成一列。
-      var summaryCards = providers.map(function (entry) {
+      // ── 服务商选择条 ─────────────────────────────────────────────
+      //
+      // 概览卡和标签页原本是两套并行的选择器（上面一排卡片 + 下面一排胶囊），
+      // 同一件事画了两遍，视觉噪音主要来自这里。现在只有一套：每张卡既是
+      // 概览，也是 provider tab。
+      var providerCards = providers.map(function (entry) {
         var health = entry.health || { state: 'unknown' }
         var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
         var credits = entry.credits || { state: 'none' }
@@ -2681,16 +3130,11 @@ window.__ModuleLoader__.load({
         var selected = entry.provider === activeTab
         var accent = PROVIDER_ACCENT[entry.provider] || 'currentColor'
         var low = creditsWarning(credits, entry.provider, alertRatio, alertsEnabled)
-        // Qoder Free 的 0 付费额度不是「用尽」：大数字显示「免费」，避免被读成额度耗尽。
-        // 完整额度文案仍在 title / aria-label 里，信息不丢。
         var freePlan = isQoderFreePlan(entry.provider, credits)
         // 读失败与「真的是 0」必须长得不一样：前者给 `—`，后者才显示 0。
         var valueText = credits.state === 'ok'
           ? credits.unlimited === true ? '∞' : freePlan ? bind(t, 'creditsFree') : compactNumber(credits.remain)
           : '—'
-        // 大数字的完整说明：正常态给完整额度文案；读不到时说明原因（未读取 / 读取失败 + 上游错误）。
-        // state==='none' 也可能是「该 provider 没有额度接口」：宿主会把原因放进
-        // credits.error（如 Trae 国际版），这里必须透出，否则用户会反复刷新白等。
         var valueTitle = credits.state === 'ok'
           ? formatCreditsText(credits, t)
           : typeof credits.error === 'string' && credits.error !== ''
@@ -2698,64 +3142,70 @@ window.__ModuleLoader__.load({
             : bind(t, credits.state === 'none' ? 'creditsNone' : 'creditsUnreadable')
         var modelCount = isFiniteNumber(entry.modelCount) ? entry.modelCount : safeArray(entry.models).length
         var metaParts = [String(modelCount) + ' ' + bind(t, 'models')]
-        if (isFiniteNumber(today.requests) && today.requests > 0) metaParts.push(compactNumber(today.totalTokens || 0) + ' tok')
-        var activeRow = safeArray(entry.accounts).filter(function (row) { return row.active })[0]
-        if (activeRow !== undefined) metaParts.push(activeRow.label)
+        if (isFiniteNumber(today.requests) && today.requests > 0) metaParts.push(formatNumber(today.requests) + ' ' + bind(t, 'usageCalls'))
+        var ratio
+        if (credits.state === 'ok' && credits.unlimited !== true && isFiniteNumber(credits.total) && credits.total > 0 && isFiniteNumber(credits.remain)) {
+          ratio = Math.max(0, Math.min(1, credits.remain / credits.total))
+        }
+        var healthTone = signed ? healthColor(health.state) : DOT_OFF
         return h(
           'button',
           {
             key: entry.provider,
+            id: 'dsh-rpc-tab-' + entry.provider,
             type: 'button',
-            'aria-pressed': selected,
-            onClick: function () { setActiveTab(entry.provider) },
+            role: 'tab',
+            'aria-selected': selected,
+            'aria-controls': 'dsh-rpc-detail',
+            // 标准 tabs 模式：只有当前 tab 进 Tab 键序列，方向键在 tab 间移动。
+            tabIndex: selected ? 0 : -1,
+            className: 'rpc-provider',
             style: {
-              font: 'inherit',
-              textAlign: 'left',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 3,
-              padding: '8px 10px',
-              borderRadius: 10,
-              cursor: 'pointer',
-              border: '0.5px solid ' + (selected ? 'var(--dsw-alias-state-business-primary, #2f6fed)' : 'var(--dsw-alias-border-l2)'),
-              background: selected
-                ? 'var(--dsh-rpc-fill, rgba(127,127,127,.10))'
-                : 'var(--dsw-alias-bg-layer-1, transparent)',
-              color: 'var(--dsw-alias-label-primary)',
-              minWidth: 0,
-              opacity: entry.enabled === false ? 0.55 : 1,
+              '--rpc-provider-accent': accent,
+              opacity: entry.enabled === false ? 0.62 : 1,
             },
+            title: entry.displayName + ' · ' + valueTitle,
+            onClick: function () { selectProvider(entry.provider) },
           },
-          h('span', { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
-            h('span', { title: bind(t, healthTextKey(health.state)), style: Object.assign({}, dot(signed ? healthColor(health.state) : DOT_OFF)) }),
-            h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, entry.displayName),
-            h('span', { style: S.grow }),
+          h('span', { className: 'rpc-provider-top' },
             h('span', {
-              style: {
-                fontSize: TEXT.tiny,
-                color: healthColor(health.state),
-                whiteSpace: 'nowrap',
-              },
+              className: 'rpc-provider-dot',
+              style: { background: healthTone },
+              title: bind(t, healthTextKey(health.state)),
+            }),
+            h('span', { className: 'rpc-provider-name' }, entry.displayName),
+            h('span', {
+              className: 'rpc-provider-health',
+              style: { color: healthColor(health.state) },
             }, bind(t, healthTextKey(health.state)))),
-          h('span', {
-            // 读不到额度时不要用 provider 强调色画「—」：中性色 + 悬停原因，
-            // 避免把「未读取/读取失败」看成某种品牌状态。字号/行高不变，6 张卡高度一致。
-            title: valueTitle,
-            'aria-label': valueTitle,
-            style: {
-              fontSize: 20,
-              lineHeight: '24px',
-              fontWeight: 600,
-              fontVariantNumeric: 'tabular-nums',
-              whiteSpace: 'nowrap',
-              color: credits.state !== 'ok'
-                ? 'var(--dsw-alias-label-tertiary, #81858c)'
-                : low ? 'var(--dsh-rpc-warn, #9d5c00)' : accent,
-            },
-          }, valueText),
-          h('span', {
-            style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-          }, metaParts.join(' · ')),
+          h('span', { className: 'rpc-provider-value' },
+            h('span', {
+              // 读不到额度时不要用品牌色画「—」：中性色 + 悬停原因。
+              // 字号 20 是设计基准（测试也用它识别汇总值），保持不换行。
+              title: valueTitle,
+              'aria-label': valueTitle,
+              style: {
+                fontSize: 20,
+                lineHeight: '24px',
+                fontWeight: 650,
+                letterSpacing: '-.01em',
+                fontVariantNumeric: 'tabular-nums',
+                whiteSpace: 'nowrap',
+                color: credits.state !== 'ok'
+                  ? 'var(--dsw-alias-label-tertiary, #81858c)'
+                  : low ? 'var(--dsh-rpc-warn, #9d5c00)' : accent,
+              },
+            }, valueText)),
+          h('span', { className: 'rpc-provider-meta' }, metaParts.join(' · ')),
+          ratio === undefined
+            ? null
+            : h('span', { className: 'rpc-provider-bar' },
+                h('i', {
+                  style: {
+                    width: Math.round(ratio * 100) + '%',
+                    background: low ? 'var(--rpc-warn)' : accent,
+                  },
+                })),
         )
       })
 
@@ -2779,75 +3229,95 @@ window.__ModuleLoader__.load({
         : h('div', {
             key: 'alert',
             role: 'status',
-            style: {
-              display: 'flex',
-              alignItems: 'flex-start',
-              gap: 7,
-              padding: '7px 10px',
-              borderRadius: 8,
-              border: '0.5px solid var(--dsh-rpc-warn, #9d5c00)',
-              background: 'color-mix(in srgb, var(--dsh-rpc-warn, #9d5c00) 9%, transparent)',
-              color: 'var(--dsh-rpc-warn, #9d5c00)',
-              fontSize: TEXT.body,
-              lineHeight: '19px',
-            },
+            className: 'rpc-banner rpc-banner-warn',
           },
-          h('span', { style: { fontWeight: 700, flex: '0 0 auto' } }, '!'),
+          rpcIcon('alert', 15),
           h('span', { style: { minWidth: 0 } }, alertLines.join(' ')))
 
-      var sections = [
-        h('div', { key: 'head', style: S.header },
-          h('h3', { style: S.title }, bind(t, 'title')),
-          // 版本号：排查问题时第一件要问的就是「你装的是哪一版」。
-          h('span', { style: S.version }, 'v' + (status.plugin && status.plugin.version ? status.plugin.version : '?')),
-          h('span', {
-            style: S.badgeSoft,
-            title: status.host && status.host.images === true ? bind(t, 'imagesOn') : bind(t, 'imagesOff'),
-          }, status.host && status.host.images === true ? bind(t, 'imagesShort') : bind(t, 'imagesShortOff'))),
-        h('p', { key: 'intro', style: S.intro }, bind(t, 'intro')),
-        h('div', { key: 'toolbar', style: S.row },
-          h('button', { type: 'button', style: S.buttonPrimary, onClick: refresh, disabled: isBusy('refresh') },
-            isBusy('refresh') ? bind(t, 'refreshing') : bind(t, 'refresh')),
-          h('span', { style: S.grow }),
+      var hero = h('header', { className: 'rpc-hero' },
+        h('div', { className: 'rpc-hero-icon' }, rpcIcon('logo', 20)),
+        h('div', { className: 'rpc-hero-main' },
+          h('div', { className: 'rpc-hero-title' },
+            h('h3', {}, bind(t, 'title')),
+            h('span', { className: 'rpc-chip' }, 'v' + (status.plugin && status.plugin.version ? status.plugin.version : '?')),
+            h('span', {
+              className: 'rpc-chip ' + (status.host && status.host.images === true ? 'rpc-chip-ok' : 'rpc-chip-warn'),
+              title: status.host && status.host.images === true ? bind(t, 'imagesOn') : bind(t, 'imagesOff'),
+            }, rpcIcon('image', 12), status.host && status.host.images === true ? bind(t, 'imagesShort') : bind(t, 'imagesShortOff'))),
+          h('p', { className: 'rpc-hero-sub' }, bind(t, 'intro')),
+          h('div', { className: 'rpc-hero-meta' },
+            h('span', { className: 'rpc-chip' }, rpcIcon('users', 12), bind(t, 'providersEnabled', { count: enabledCount, total: providers.length })),
+            h('span', { className: 'rpc-chip' }, rpcIcon('wallet', 12), bind(t, 'providersCredits', { count: readableCount })),
+            latestUpdate > 0
+              ? h('span', { className: 'rpc-chip', title: formatTime(latestUpdate) }, rpcIcon('clock', 12), bind(t, 'updatedAt', { time: formatShortTime(latestUpdate) }))
+              : null)),
+        h('div', { className: 'rpc-hero-actions' },
           h('button', {
             type: 'button',
-            style: S.buttonGhost,
+            className: 'rpc-btn rpc-btn-primary',
+            onClick: refresh,
+            disabled: isBusy('refresh'),
+          }, rpcIcon('refresh', 15), isBusy('refresh') ? bind(t, 'refreshing') : bind(t, 'refresh')),
+          h('button', {
+            type: 'button',
+            className: 'rpc-btn',
             'aria-expanded': showDiag,
-            // 折叠时诊断节点还没挂载，aria-controls 指向不存在的 id 会让读屏失效。
             'aria-controls': showDiag ? 'dsh-reverse-proxy-diagnostics' : undefined,
-            onClick: function () { setShowDiag(!showDiag) },
-          }, bind(t, 'diagnostics'))),
-        error === undefined ? null : h('p', { key: 'err', style: S.hintError }, bind(t, 'error') + ': ' + error),
-        settingsCorrupt,
-        versionMismatch,
-        alertBanner,
-        summaryCards.length === 0
+            onClick: function () {
+              setActivePage('activity')
+              setShowDiag(!showDiag)
+            },
+          }, rpcIcon('pulse', 15), bind(t, 'diagnostics'))))
+
+      var providerRail = providers.length === 0
+        ? null
+        : h('div', {
+            className: 'rpc-rail',
+            role: 'tablist',
+            'aria-label': bind(t, 'navProviders'),
+            onKeyDown: function (event) {
+              var key = event !== undefined ? event.key : undefined
+              if (key !== 'ArrowRight' && key !== 'ArrowLeft' && key !== 'Home' && key !== 'End') return
+              if (providers.length === 0) return
+              var current = providers.findIndex(function (entry) { return entry.provider === activeTab })
+              if (current === -1) current = 0
+              var next = current
+              if (key === 'ArrowRight') next = (current + 1) % providers.length
+              else if (key === 'ArrowLeft') next = (current - 1 + providers.length) % providers.length
+              else if (key === 'Home') next = 0
+              else next = providers.length - 1
+              if (event.preventDefault !== undefined) event.preventDefault()
+              selectProvider(providers[next].provider)
+            },
+          }, providerCards)
+
+      // 顶部横幅（错误 / 设置损坏 / 版本漂移 / 低额度）保持常驻，
+      // 不随详情页切换而消失。
+      var banners = h('div', { className: 'rpc-banners' },
+        error === undefined
           ? null
-          : h('div', { key: 'summary', style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 8 } }, summaryCards),
-        h('div', {
-          key: 'tabs',
-          role: 'tablist',
-          style: S.tabs,
-          onKeyDown: function (event) {
-            var key = event !== undefined ? event.key : undefined
-            if (key !== 'ArrowRight' && key !== 'ArrowLeft' && key !== 'Home' && key !== 'End') return
-            if (providers.length === 0) return
-            var current = providers.findIndex(function (entry) { return entry.provider === activeTab })
-            if (current === -1) current = 0
-            var next = current
-            if (key === 'ArrowRight') next = (current + 1) % providers.length
-            else if (key === 'ArrowLeft') next = (current - 1 + providers.length) % providers.length
-            else if (key === 'Home') next = 0
-            else next = providers.length - 1
-            if (event.preventDefault !== undefined) event.preventDefault()
-            setActiveTab(providers[next].provider)
-          },
-        }, tabs),
-      ]
+          : h('div', { key: 'err', className: 'rpc-banner rpc-banner-error', role: 'status' },
+              rpcIcon('alert', 15),
+              h('span', {}, bind(t, 'error') + ': ' + error)),
+        settingsCorrupt === null
+          ? null
+          : h('div', { key: 'settings-corrupt', className: 'rpc-banner rpc-banner-warn' }, rpcIcon('alert', 15), settingsCorrupt),
+        versionMismatch === null
+          ? null
+          : h('div', { key: 'version-mismatch', className: 'rpc-banner rpc-banner-warn' }, rpcIcon('alert', 15), versionMismatch),
+        alertBanner)
+
+      var sections = []
 
       if (active === undefined) {
-        sections.push(h('p', { key: 'empty', style: S.hint }, bind(t, 'noModels')))
-        return h('div', { style: S.card }, sections)
+        return h('div', { className: 'dsh-rpc' },
+          hero,
+          providerRail,
+          banners,
+          h('div', { className: 'rpc-page' },
+            h('div', { className: 'rpc-empty' },
+              h('span', { className: 'rpc-empty-icon' }, rpcIcon('cube', 18)),
+              h('span', {}, bind(t, 'noModels')))))
       }
 
       // ── 状态 ────────────────────────────────────────────────────
@@ -2882,58 +3352,90 @@ window.__ModuleLoader__.load({
         return entry.provider === active.provider && (entry.kind === 'error' || entry.kind === 'incomplete')
       })[0]
 
+      var kindLabel = active.kind === 'desktop'
+        ? bind(t, 'kindDesktop')
+        : active.kind === 'desktop-auth' ? bind(t, 'kindDesktopAuth') : bind(t, 'kindPat')
+      var credentialTone = credential.status === 'signed-in'
+        ? 'ok'
+        : credential.status === 'disabled' ? 'muted' : 'warn'
+      var credentialLabel = credential.status === 'signed-in'
+        ? bind(t, 'signedIn')
+        : credential.status === 'disabled' ? bind(t, 'disabled') : bind(t, 'signedOut')
+      var activeAccountLabel = safeArray(active.accounts).filter(function (row) { return row.active })[0]
+      var modelTotal = isFiniteNumber(active.modelCount) ? active.modelCount : safeArray(active.models).length
+
+      // 详情页头：只放「这家是谁、现在能不能用」，操作按钮留给各自分区，
+      // 避免同一个动作在页头和分区里出现两次。
+      var detailHeader = h('div', { className: 'rpc-detail-head' },
+        h('div', { className: 'rpc-detail-main' },
+          h('div', { className: 'rpc-detail-title' },
+            h('h4', {}, active.displayName),
+            h('span', { className: 'rpc-chip' }, kindLabel),
+            h('span', { className: rpcChipClass(credentialTone) }, credentialLabel),
+            h('span', {
+              className: rpcChipClass(rpcHealthTone(activeHealth.state)),
+              title: isFiniteNumber(activeHealth.consecutiveFailures) && activeHealth.consecutiveFailures > 0
+                ? bind(t, 'consecutiveFailures', { count: activeHealth.consecutiveFailures })
+                : '',
+            }, bind(t, healthTextKey(activeHealth.state)))),
+          h('div', { className: 'rpc-detail-meta' },
+            h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 } }, rpcIcon('clock', 12), catalogText),
+            credential.status === 'signed-in' && credential.email
+              ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 } }, rpcIcon('key', 12), credential.email)
+              : null,
+            activeAccountLabel !== undefined
+              ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 } }, rpcIcon('users', 12), bind(t, 'creditsCurrent', { label: activeAccountLabel.label || bind(t, 'accountFallback') }))
+              : null,
+            h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } }, rpcIcon('cube', 12), String(modelTotal) + ' ' + bind(t, 'models')))),
+        h('div', { className: 'rpc-detail-actions' },
+          h('label', { className: 'rpc-check-label' },
+            h('input', {
+              type: 'checkbox',
+              className: 'rpc-check',
+              checked: active.enabled !== false,
+              onChange: function () { toggleProvider(active) },
+            }),
+            bind(t, 'enabled'))))
+
       sections.push(
         h('div', {
           key: 'status',
           id: 'dsh-rpc-status-panel',
-          role: 'tabpanel',
-          'aria-labelledby': 'dsh-rpc-tab-' + active.provider,
           style: S.section,
         },
           h('div', { key: 'h', style: S.sectionHead },
-            h('span', { style: S.sectionTitle }, bind(t, 'secStatus'))),
-          h('div', { key: 'r', style: S.row },
-            h('label', { style: Object.assign({}, S.row, { cursor: 'pointer', marginRight: 2 }) },
-              h('input', {
-                type: 'checkbox',
-                checked: active.enabled !== false,
-                onChange: function () { toggleProvider(active) },
-              }),
-              h('span', { style: S.label }, bind(t, 'enabled'))),
-            h('span', { style: S.badgeSoft }, active.kind === 'desktop'
-              ? bind(t, 'kindDesktop')
-              : active.kind === 'desktop-auth' ? bind(t, 'kindDesktopAuth') : bind(t, 'kindPat')),
+            h('span', { style: S.sectionTitle }, rpcIcon('shield', 14), bind(t, 'secStatus')),
             h('span', {
-              style: credential.status === 'signed-in'
-                ? S.badge
-                : credential.status === 'disabled' ? S.badgeSoft : S.badgeWarn,
-            }, credential.status === 'signed-in'
-              ? bind(t, 'signedIn')
-              : credential.status === 'disabled' ? bind(t, 'disabled') : bind(t, 'signedOut')),
-            h('span', {
+              className: rpcChipClass(rpcHealthTone(activeHealth.state)),
               title: isFiniteNumber(activeHealth.consecutiveFailures) && activeHealth.consecutiveFailures > 0
                 ? bind(t, 'consecutiveFailures', { count: activeHealth.consecutiveFailures })
                 : '',
-              style: Object.assign({}, S.badgeSoft, { color: healthColor(activeHealth.state) }),
             }, bind(t, healthTextKey(activeHealth.state))),
-            h('span', {
-              style: active.images === true ? S.badgeSoft : S.badgeWarn,
-              title: active.images === true ? bind(t, 'imagesOn') : bind(t, 'imagesOff'),
-            }, active.images === true ? bind(t, 'imagesShort') : bind(t, 'imagesShortOff'))),
-          h('p', { key: 'cat', style: S.hintTiny }, catalogText),
-          credential.status === 'signed-in' && credential.email
-            ? h('p', { key: 'who', style: S.hintTiny }, credential.email)
-            : null,
+            h('span', { style: S.grow }),
+            h('span', { className: 'rpc-chip' }, active.images === true ? bind(t, 'imagesShort') : bind(t, 'imagesShortOff'))),
+          h('dl', { className: 'rpc-kv' },
+            h('dt', {}, bind(t, 'statusAccount')),
+            h('dd', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+              h('span', { className: 'rpc-chip' }, kindLabel),
+              h('span', { className: rpcChipClass(credentialTone) }, credentialLabel)),
+            h('dt', {}, bind(t, 'catalogSource')),
+            h('dd', {}, catalogText),
+            credential.status === 'signed-in' && credential.email
+              ? h('dt', {}, bind(t, 'emailLabel'))
+              : null,
+            credential.status === 'signed-in' && credential.email
+              ? h('dd', {}, credential.email)
+              : null),
           credentialMessage !== undefined
-            ? h('p', { key: 'why', style: S.hintWarn }, credentialMessage)
+            ? h('p', { key: 'why', className: 'rpc-warn-text' }, credentialMessage)
             : null,
-          isFiniteNumber(activeHealth.lastErrorAt) && activeHealth.lastErrorAt > 0 && activeHealth.state !== 'ok'
-            ? h('p', { key: 'last', style: S.hintWarn }, bind(t, 'lastErrorAt', { time: formatTime(activeHealth.lastErrorAt) }))
+          lastFailure === undefined && isFiniteNumber(activeHealth.lastErrorAt) && activeHealth.lastErrorAt > 0 && activeHealth.state !== 'ok'
+            ? h('p', { key: 'last', className: 'rpc-warn-text' }, bind(t, 'lastErrorAt', { time: formatTime(activeHealth.lastErrorAt) }))
             : null,
           lastFailure !== undefined
             ? h('p', {
                 key: 'lastfail',
-                style: S.hintWarn,
+                className: 'rpc-warn-text',
                 title: typeof lastFailure.message === 'string' ? lastFailure.message : '',
               }, bind(t, 'lastFailure', {
                 code: lastFailure.code || 'ERROR',
@@ -2941,7 +3443,7 @@ window.__ModuleLoader__.load({
                 model: lastFailure.model || '—',
               }))
             : null,
-          extraMessage !== undefined ? h('p', { key: 'msg', style: S.hintWarn }, extraMessage) : null),
+          extraMessage !== undefined ? h('p', { key: 'msg', className: 'rpc-warn-text' }, extraMessage) : null),
       )
 
       // ── 账号 ────────────────────────────────────────────────────
@@ -3005,23 +3507,25 @@ window.__ModuleLoader__.load({
         var usage = account.usage !== null && typeof account.usage === 'object' ? account.usage : undefined
         var usageMeta = usage !== undefined && (usage.requests || 0) > 0
           ? formatNumber(usage.requests || 0) + ' ' + bind(t, 'usageCalls') + ' · '
-            + compactTokens(usage.totalTokens || 0) + ' ' + bind(t, 'usageTokenShort')
+            + compactTokens(usage.totalTokens || 0)
           : accountSourceText(account, t)
-        var accountCell = h('div', { key: 'who', role: 'cell', style: S.accountCell },
-          h('div', { key: 'name', style: S.accountNameRow },
+        var accountCell = h('div', { key: 'who', role: 'cell', className: 'rpc-cell', style: S.accountCell },
+          h('div', { key: 'name', className: 'rpc-account-name', style: S.accountNameRow },
             h('span', {
+              className: 'rpc-account-dot',
               style: dot(account.active ? DOT_OK : DOT_IDLE),
               title: account.active ? bind(t, 'currentAccount') : '',
             }),
             h('span', {
-              style: Object.assign({}, S.modelName, { fontWeight: account.active ? 600 : 400 }),
+              style: Object.assign({}, S.modelName, { fontWeight: account.active ? 600 : 500 }),
               title: accountLabel,
             }, accountLabel),
-            account.active ? h('span', { key: 'current', style: S.badgeSoft }, bind(t, 'currentAccount')) : null),
+            account.active ? h('span', { key: 'current', className: 'rpc-chip rpc-chip-accent' }, bind(t, 'currentAccount')) : null),
           usageMeta === ''
             ? null
             : h('span', {
                 key: 'usage',
+                className: 'rpc-tiny',
                 style: Object.assign({}, S.modelMeta, { overflow: 'hidden', textOverflow: 'ellipsis' }),
                 title: usage !== undefined && (usage.requests || 0) > 0
                   ? bind(t, 'usageTokenShort') + ' ' + formatNumber(usage.totalTokens || 0)
@@ -3031,6 +3535,7 @@ window.__ModuleLoader__.load({
         var creditsCell = h('div', {
           key: 'credits',
           role: 'cell',
+          className: 'rpc-cell',
           style: S.accountCell,
           title: freePlan ? bind(t, 'creditsFreeQueue') : formatCreditsText(snapshot, t),
         },
@@ -3065,6 +3570,7 @@ window.__ModuleLoader__.load({
         var statusCell = h('div', {
           key: 'status',
           role: 'cell',
+          className: 'rpc-cell',
           style: S.accountCell,
           title: status.title === '' ? undefined : status.title,
         },
@@ -3103,6 +3609,7 @@ window.__ModuleLoader__.load({
         var checkinCellNode = h('div', {
           key: 'checkin',
           role: 'cell',
+          className: 'rpc-cell',
           style: S.accountCell,
           title: checkinCell.title === undefined || checkinCell.title === '' ? undefined : checkinCell.title,
         },
@@ -3176,27 +3683,30 @@ window.__ModuleLoader__.load({
             },
           }, deleteConfirm === deleteConfirmKey ? bind(t, 'removeConfirm') : bind(t, 'removeAccount')))
         }
-        var actionsCell = h('div', { key: 'actions', role: 'cell', style: S.accountActions }, ...actionButtons)
+        var actionsCell = h('div', { key: 'actions', role: 'cell', className: 'rpc-cell-actions', style: S.accountActions }, ...actionButtons)
 
         return h('div', {
           key: account.id,
           role: 'row',
+          className: 'rpc-table-row',
+          'data-active': account.active === true ? 'true' : 'false',
           style: Object.assign({}, S.accountRow, index > 0 ? S.accountRowDivider : {}, account.active === true ? S.accountRowActive : {}),
         }, accountCell, creditsCell, statusCell, checkinCellNode, actionsCell)
       })
 
-      var accountTableHead = h('div', { key: 'head', role: 'row', style: S.accountTableHead },
+      var accountTableHead = h('div', { key: 'head', role: 'row', className: 'rpc-table-head', style: S.accountTableHead },
         h('span', { role: 'columnheader' }, bind(t, 'accountColAccount')),
         h('span', { role: 'columnheader' }, bind(t, 'accountColCredits')),
         h('span', { role: 'columnheader' }, bind(t, 'accountColStatus')),
         h('span', { role: 'columnheader' }, bind(t, 'accountColCheckin')),
         h('span', { role: 'columnheader', style: { textAlign: 'right' } }, bind(t, 'accountColActions')))
       var accountTable = accountRows.length === 0
-        ? h('p', { key: 'empty', style: S.hintTiny }, bind(t, 'accountsEmpty'))
-        : h('div', { key: 'scroll', style: S.accountTableScroll },
+        ? h('p', { key: 'empty', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'accountsEmpty'))
+        : h('div', { key: 'scroll', className: 'rpc-table-scroll', style: S.accountTableScroll },
             h('div', {
               role: 'table',
               'aria-label': bind(t, 'accountTableAria'),
+              className: 'rpc-table',
               style: S.accountTable,
             }, accountTableHead, ...accountItems))
 
@@ -3263,56 +3773,75 @@ window.__ModuleLoader__.load({
       // 凭证状态明确不是 signed-in（未登录 / 已禁用）时签到必然失败，先禁掉按钮；
       // credential 缺省（老宿主）按可用处理，避免误伤现有用户。
       var checkinBlocked = credential.status !== undefined && credential.status !== null && credential.status !== 'signed-in'
+      // 签到徽标的色调：成功/已签为绿，失败为橙，其余（未开始/无活动/未配置）保持中性。
+      var checkinPositive = false
+      if (checkin.enabled !== false) {
+        if (checkin.completedToday === true) checkinPositive = true
+        if (checkinResult !== undefined) {
+          var checkinKinds = safeArray(checkinResult.outcomes).map(function (item) { return item.kind })
+          if (checkinKinds.indexOf('already') !== -1) checkinPositive = true
+          if (isFiniteNumber(checkinResult.claimed) && checkinResult.claimed > 0) checkinPositive = true
+        }
+      }
+      var overviewCheckinTone = checkinTone === 'hintWarn'
+        ? 'warn'
+        : checkinPositive ? 'ok' : 'muted'
 
       sections.push(
         h('div', { key: 'accounts', style: S.section },
           h('div', { key: 'h', style: S.sectionHead },
-            h('span', { style: S.sectionTitle }, bind(t, 'secAccounts')),
+            h('span', { style: S.sectionTitle }, rpcIcon('users', 14), bind(t, 'secAccounts')),
             h('span', { style: S.sectionCount }, String(accountRows.length)),
             h('span', { style: S.grow }),
-            h('label', { style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+            h('label', { className: 'rpc-check-label' },
               h('input', {
                 type: 'checkbox',
+                className: 'rpc-check',
                 checked: active.autoSwitch !== false,
                 onChange: function () { mutate({ autoSwitch: { enabled: active.autoSwitch === false } }) },
               }),
-              h('span', { style: S.hintTiny }, bind(t, 'autoSwitch')))),
-          h('div', { key: 'checkin', style: S.row },
+              bind(t, 'autoSwitch'))),
+          h('div', { key: 'checkin', className: 'rpc-checkin' },
             h('button', {
               type: 'button',
-              style: S.buttonGhost,
+              className: 'rpc-btn rpc-btn-sm',
               disabled: isBusy('checkin') || checkinBlocked,
               title: checkinBlocked ? bind(t, 'checkinNeedLogin') : undefined,
               onClick: function () {
                 if (checkinBlocked) return
                 runCheckin(active.provider)
               },
-            }, isBusy('checkin') ? bind(t, 'checkinRunning') : bind(t, 'checkinNow')),
-            h('label', { style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+            }, rpcIcon('check', 13), isBusy('checkin') ? bind(t, 'checkinRunning') : bind(t, 'checkinNow')),
+            h('label', { className: 'rpc-check-label' },
               h('input', {
                 type: 'checkbox',
+                className: 'rpc-check',
                 checked: checkin.enabled !== false,
                 onChange: function () { mutate({ checkin: { enabled: checkin.enabled === false } }) },
               }),
-              h('span', { style: S.hintTiny }, bind(t, 'checkinAuto'))),
+              bind(t, 'checkinAuto')),
             h('span', { style: S[checkinTone], title: checkinFailureRaw !== '' ? checkinFailureRaw : '' }, checkinLabel),
             checkinFailed ? h('span', { style: S.hintTiny }, bind(t, 'checkinRetryHint')) : null,
+            h('span', { style: S.grow }),
             isFiniteNumber(checkin.lastRunAt) && checkin.lastRunAt > 0
               ? h('span', { style: S.modelMeta }, bind(t, 'checkinLastAt', { time: formatTime(checkin.lastRunAt) }))
               : null),
-          h('p', { key: 'checkinhint', style: S.hintTiny }, bind(t, 'checkinAutoHint')),
+          h('p', { key: 'checkinhint', className: 'rpc-inline-note' }, rpcIcon('clock', 13), bind(t, 'checkinAutoHint')),
           accountTable,
-          h('p', { key: 'hint', style: S.hintTiny }, bind(t, isPatProvider ? 'accountsHintPat' : 'accountsHintDesktop')),
+          h('p', { key: 'hint', className: 'rpc-inline-note' }, rpcIcon('shield', 13), bind(t, isPatProvider ? 'accountsHintPat' : 'accountsHintDesktop')),
           // 桌面 provider：一键打开 App 登录，登录成功后自动导入账号。
           isPatProvider
             ? null
-            : h('div', { key: 'login', style: S.row },
-                h('button', {
-                  type: 'button',
-                  style: S.button,
-                  disabled: loginBusy,
-                  onClick: function () { startLogin(active.provider) },
-                }, loginBusy ? bind(t, 'loginOpening') : bind(t, 'loginAdd')),
+            : h('div', { key: 'login', className: 'rpc-subcard' },
+                h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
+                  h('span', { className: 'rpc-label' }, bind(t, 'loginAddTitle')),
+                  h('span', { style: S.grow }),
+                  h('button', {
+                    type: 'button',
+                    className: 'rpc-btn rpc-btn-sm',
+                    disabled: loginBusy,
+                    onClick: function () { startLogin(active.provider) },
+                  }, rpcIcon('external', 13), loginBusy ? bind(t, 'loginOpening') : bind(t, 'loginAdd'))),
                 loginJob === undefined
                   ? null
                   : h('span', {
@@ -3323,13 +3852,13 @@ window.__ModuleLoader__.load({
                       href: loginJob.authUrl,
                       target: '_blank',
                       rel: 'noreferrer',
-                      style: { fontSize: 11.5, color: 'var(--dsw-alias-link, var(--dsw-alias-state-business-primary, #2f6fed))' },
+                      className: 'rpc-btn-link',
                     }, bind(t, 'loginOpenManually'))
                   : null,
                 loginJob !== undefined && (loginJob.phase === 'waiting' || loginJob.phase === 'starting')
                   ? h('button', {
                       type: 'button',
-                      style: S.buttonGhost,
+                      className: 'rpc-btn rpc-btn-sm',
                       onClick: function () { cancelLogin(active.provider) },
                     }, bind(t, 'loginCancel'))
                   : null),
@@ -3337,10 +3866,12 @@ window.__ModuleLoader__.load({
           // 路径既容易和本机自动发现重复，也会让用户以为需要自己找文件。
           // Qoder 没有浏览器登录，仍然保留「名称 + PAT」的手动添加。
           isPatProvider
-            ? h('div', { key: 'add', style: S.stack },
+            ? h('div', { key: 'add', className: 'rpc-subcard' },
+                h('span', { className: 'rpc-label' }, bind(t, 'addAccount')),
                 h('div', { key: 'row', style: S.row },
                   h('input', {
-                    style: Object.assign({}, S.input, { flex: '1 1 140px', width: 'auto' }),
+                    className: 'rpc-input',
+                    style: Object.assign({}, S.input, { flex: '1 1 160px', width: 'auto' }),
                     type: 'text',
                     'aria-label': bind(t, 'accountLabel'),
                     value: accLabel,
@@ -3349,12 +3880,13 @@ window.__ModuleLoader__.load({
                   }),
                   h('button', {
                     type: 'button',
-                    style: S.button,
+                    className: 'rpc-btn rpc-btn-primary rpc-btn-sm',
                     disabled: isBusy('save') || accSecret.trim() === '',
                     onClick: addAccount,
-                  }, bind(t, 'addAccount'))),
+                  }, rpcIcon('plus', 13), bind(t, 'addAccount'))),
                 h('input', {
                   key: 'secret',
+                  className: 'rpc-input',
                   style: S.input,
                   type: 'password',
                   'aria-label': bind(t, 'accountPat'),
@@ -3362,25 +3894,61 @@ window.__ModuleLoader__.load({
                   placeholder: bind(t, 'accountPat'),
                   onChange: function (event) { setAccSecret(event.target.value) },
                 }),
-                h('span', { key: 'sec', style: S.hintTiny }, bind(t, 'accountSecretHint')))
+                h('span', { key: 'sec', className: 'rpc-inline-note' }, rpcIcon('key', 13), bind(t, 'accountSecretHint')))
             : null,
         ),
       )
+
+      // 概览右栏的账号摘要：只读，点「管理账号」进入账号页。
+      // 它回答的是「现在是哪个账号、今天签到了没有」，不重复表格里的操作。
+      if (accountRows.length > 0) {
+        var overviewRow = activeRow
+        sections.push(
+          h('div', { key: 'overview-accounts', style: S.section },
+            h('div', { key: 'h', style: S.sectionHead },
+              h('span', { style: S.sectionTitle }, rpcIcon('users', 14), bind(t, 'secAccounts')),
+              h('span', { style: S.sectionCount }, String(accountRows.length)),
+              h('span', { style: S.grow }),
+              h('button', {
+                type: 'button',
+                className: 'rpc-btn rpc-btn-sm',
+                onClick: function () { setActivePage('accounts') },
+              }, bind(t, 'manageAccounts'), rpcIcon('chevron', 12))),
+            h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 } },
+              h('span', { style: dot(DOT_OK) }),
+              h('span', { style: Object.assign({}, S.modelName, { fontWeight: 600 }), title: overviewRow !== undefined ? overviewRow.label : '' },
+                overviewRow !== undefined && overviewRow.label !== undefined && overviewRow.label !== '' ? overviewRow.label : bind(t, 'accountFallback')),
+              overviewRow !== undefined ? h('span', { className: 'rpc-chip rpc-chip-accent' }, bind(t, 'currentAccount')) : null,
+              h('span', { style: S.grow }),
+              h('span', { className: rpcChipClass(overviewCheckinTone), title: checkinFailureRaw !== '' ? checkinFailureRaw : '' }, checkinLabel)),
+            isFiniteNumber(checkin.lastRunAt) && checkin.lastRunAt > 0
+              ? h('p', { className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'checkinLastAt', { time: formatTime(checkin.lastRunAt) }))
+              : null,
+            h('label', { className: 'rpc-check-label', style: { cursor: 'pointer' } },
+              h('input', {
+                type: 'checkbox',
+                className: 'rpc-check',
+                checked: checkin.enabled !== false,
+                onChange: function () { mutate({ checkin: { enabled: checkin.enabled === false } }) },
+              }),
+              bind(t, 'checkinAuto'))),
+        )
+      }
 
       // ── 积分 ────────────────────────────────────────────────────
       var credits = active.credits || { state: 'none' }
       var creditsLow = creditsWarning(credits, active.provider, alertRatio, alertsEnabled)
       var qoderFreePlan = isQoderFreePlan(active.provider, credits)
       var creditsHead = h('div', { key: 'h', style: S.sectionHead },
-        h('span', { style: S.sectionTitle }, bind(t, 'credits')),
+        h('span', { style: S.sectionTitle }, rpcIcon('wallet', 14), bind(t, 'credits')),
         h('span', { style: S.grow }),
         h('button', {
           key: 'b',
           type: 'button',
-          style: S.buttonGhost,
+          className: 'rpc-btn rpc-btn-sm',
           onClick: refreshCredits,
           disabled: isBusy('credits'),
-        }, isBusy('credits') ? bind(t, 'creditsRefreshing') : bind(t, 'creditsRefresh')))
+        }, rpcIcon('refresh', 13), isBusy('credits') ? bind(t, 'creditsRefreshing') : bind(t, 'creditsRefresh')))
 
       var creditsBody = []
       if (credits.state === 'ok') {
@@ -3389,106 +3957,98 @@ window.__ModuleLoader__.load({
           ? undefined
           : Math.max(0, Math.min(1, credits.remain / credits.total))
         creditsBody.push(
-          h('div', { key: 'stat', style: { display: 'flex', alignItems: 'baseline', gap: 10, flexWrap: 'wrap' } },
+          h('div', { key: 'stat', className: 'rpc-credit-line' },
             h('span', {
+              className: 'rpc-credit-value',
               style: {
-                fontSize: 23,
-                lineHeight: '28px',
-                fontWeight: 600,
-                letterSpacing: '-.01em',
-                fontVariantNumeric: 'tabular-nums',
-                color: creditsLow ? 'var(--dsh-rpc-warn, #9d5c00)' : 'var(--dsw-alias-label-primary)',
-                opacity: credits.stale === true ? 0.65 : 1,
+                fontSize: 38,
+                lineHeight: '40px',
+                color: creditsLow ? 'var(--dsh-rpc-warn, #9d5c00)' : 'var(--rpc-text)',
+                opacity: credits.stale === true ? 0.68 : 1,
               },
             }, credits.unlimited === true ? '∞' : formatNumber(credits.remain)),
             isFiniteNumber(credits.total) && credits.total > 0
-              ? h('span', { style: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-secondary)' } },
-                  '/ ' + formatNumber(credits.total) + ' ' + bind(t, 'creditsUnit'))
-              : h('span', { style: { fontSize: TEXT.body, color: 'var(--dsw-alias-label-secondary)' } }, bind(t, 'creditsUnit')),
-            credits.planName ? h('span', { style: S.badge }, credits.planName) : null,
-            credits.exceeded ? h('span', { style: S.badgeWarn }, bind(t, qoderFreePlan ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
-            credits.stale === true ? h('span', { style: S.badgeSoft }, bind(t, 'creditsStale')) : null),
+              ? h('span', { className: 'rpc-credit-unit' }, '/ ' + formatNumber(credits.total) + ' ' + bind(t, 'creditsUnit'))
+              : h('span', { className: 'rpc-credit-unit' }, bind(t, 'creditsUnit')),
+            credits.planName ? h('span', { className: 'rpc-chip' }, credits.planName) : null,
+            credits.exceeded ? h('span', { className: 'rpc-chip rpc-chip-warn' }, bind(t, qoderFreePlan ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
+            credits.stale === true ? h('span', { className: 'rpc-chip' }, bind(t, 'creditsStale')) : null),
         )
         if (creditsRatio !== undefined) {
           creditsBody.push(
             h('div', {
               key: 'bar',
-              style: {
-                height: 5,
-                borderRadius: 999,
-                background: 'var(--dsh-rpc-fill, rgba(127,127,127,.16))',
-                overflow: 'hidden',
-                maxWidth: 420,
-              },
+              className: 'rpc-progress',
             },
-            h('div', {
+            h('i', {
               style: {
                 width: Math.round(creditsRatio * 100) + '%',
-                height: '100%',
-                borderRadius: 999,
-                background: creditsLow
-                  ? 'var(--dsh-rpc-warn, #9d5c00)'
-                  : 'var(--dsw-alias-state-business-primary, #2f6fed)',
-                opacity: 0.9,
+                background: creditsLow ? 'var(--rpc-warn, #9d5c00)' : 'var(--rpc-accent)',
               },
             })),
           )
         }
         if (isFiniteNumber(credits.resetAtMs) && credits.resetAtMs > 0) {
-          creditsBody.push(h('p', { key: 'reset', style: S.hintTiny }, bind(t, 'creditsReset') + ' ' + formatTime(credits.resetAtMs)))
+          creditsBody.push(h('p', { key: 'reset', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'creditsReset') + ' ' + formatTime(credits.resetAtMs)))
         }
         if (qoderFreePlan) {
-          creditsBody.push(h('p', { key: 'freehint', style: S.hintTiny }, bind(t, 'freeModelHint')))
+          creditsBody.push(h('p', { key: 'freehint', className: 'rpc-inline-note' }, rpcIcon('spark', 13), bind(t, 'freeModelHint')))
         }
 
         // 额度趋势：今日/7 天花费、消耗速度与耗尽预估。
         var trend = credits.trend
         if (trend !== null && typeof trend === 'object' && (trend.sampleCount > 0 || safeArray(trend.points).length > 1)) {
           var trendChips = []
-          trendChips.push(h('span', { key: 'td', style: microChip() }, bind(t, 'trendToday', { value: formatNumber(trend.spentToday || 0) })))
+          trendChips.push(h('span', { key: 'td', className: 'rpc-chip' }, bind(t, 'trendToday', { value: formatNumber(trend.spentToday || 0) })))
           if (isFiniteNumber(trend.spent7d) && trend.spent7d > 0) {
-            trendChips.push(h('span', { key: 'tw', style: microChip() }, bind(t, 'trendWeek', { value: formatNumber(trend.spent7d) })))
+            trendChips.push(h('span', { key: 'tw', className: 'rpc-chip' }, bind(t, 'trendWeek', { value: formatNumber(trend.spent7d) })))
           }
           if (isFiniteNumber(trend.topupToday) && trend.topupToday > 0) {
-            trendChips.push(h('span', { key: 'tu', style: microChip() }, bind(t, 'trendTopup', { value: formatNumber(trend.topupToday) })))
+            trendChips.push(h('span', { key: 'tu', className: 'rpc-chip' }, bind(t, 'trendTopup', { value: formatNumber(trend.topupToday) })))
           }
           if (isFiniteNumber(trend.burnPerHour) && trend.burnPerHour > 0) {
-            trendChips.push(h('span', { key: 'tr', style: microChip() }, bind(t, 'trendRate', { value: formatNumber(trend.burnPerHour) })))
+            trendChips.push(h('span', { key: 'tr', className: 'rpc-chip' }, bind(t, 'trendRate', { value: formatNumber(trend.burnPerHour) })))
           }
           if (isFiniteNumber(trend.etaMs) && trend.etaMs > 0) {
-            trendChips.push(h('span', { key: 'te', style: microChip(creditsLow ? 'var(--dsh-rpc-warn, #9d5c00)' : undefined) }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) })))
+            trendChips.push(h('span', { key: 'te', className: 'rpc-chip rpc-chip-warn' }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) })))
           }
           creditsBody.push(
-            h('div', { key: 'trend', style: { display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 7, borderTop: '0.5px solid var(--dsw-alias-border-l2)' } },
-              h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
-                h('span', { style: S.label }, bind(t, 'trend')),
+            h('div', { key: 'trend', className: 'rpc-trend' },
+              h('div', { className: 'rpc-trend-head' },
+                h('span', { className: 'rpc-label' }, bind(t, 'trend')),
                 h('span', { style: S.grow }),
                 ...trendChips),
-              sparkline(trend.points, creditsLow ? 'var(--dsh-rpc-warn, #9d5c00)' : (PROVIDER_ACCENT[active.provider] || 'currentColor')),
+              h('div', { className: 'rpc-spark' },
+                sparkline(trend.points, creditsLow ? 'var(--dsh-rpc-warn, #9d5c00)' : (PROVIDER_ACCENT[active.provider] || 'currentColor'))),
               typeof trend.etaMs !== 'number'
-                ? h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-secondary)' } }, bind(t, 'trendEtaUnknown'))
+                ? h('span', { className: 'rpc-tiny' }, bind(t, 'trendEtaUnknown'))
                 : null),
           )
         }
       } else if (credits.state === 'error') {
-        creditsBody.push(h('p', { key: 'flat', style: S.hintError }, creditsText(credits)))
+        creditsBody.push(h('div', { key: 'flat', className: 'rpc-empty' },
+          h('span', { className: 'rpc-empty-icon' }, rpcIcon('alert', 18)),
+          h('span', { style: { color: 'var(--rpc-danger)' } }, creditsText(credits))))
         // 原因字段可能是 `message`（上游原始响应）或 `error`（runtime 折过的那份）。
         var creditError = typeof credits.message === 'string' && credits.message !== ''
           ? credits.message
           : typeof credits.error === 'string' && credits.error !== '' ? credits.error : undefined
         if (creditError !== undefined) {
-          creditsBody.push(h('p', { key: 'err', style: S.hintWarn }, bind(t, 'creditsFailed', { message: creditError })))
+          creditsBody.push(h('p', { key: 'err', className: 'rpc-warn-text', style: S.hintWarn }, bind(t, 'creditsFailed', { message: creditError })))
         }
       } else {
         // `state: 'none'` 是「没有可读的额度端点 / 还没配凭证」：正文只写「未读取」，
         // 原因放在第二行（超长就截断），完整文案进悬停提示 —— 与侧栏面板同一套规则。
-        creditsBody.push(h('p', { key: 'flat', style: S.hint }, creditsText(credits)))
+        creditsBody.push(h('div', { key: 'flat', className: 'rpc-empty' },
+          h('span', { className: 'rpc-empty-icon' }, rpcIcon('wallet', 18)),
+          h('span', {}, creditsText(credits))))
         var creditNoneReason = typeof credits.error === 'string' && credits.error !== ''
           ? credits.error
           : typeof credits.message === 'string' && credits.message !== '' ? credits.message : undefined
         if (creditNoneReason !== undefined) {
           creditsBody.push(h('p', {
             key: 'why',
+            className: 'rpc-tiny',
             style: S.hintTiny,
             title: creditNoneReason,
           }, creditNoneReason.length > 60 ? creditNoneReason.slice(0, 60) + '…' : creditNoneReason))
@@ -3499,27 +4059,29 @@ window.__ModuleLoader__.load({
       if (creditItems.length > 0) {
         creditsBody.push(
           h('details', { key: 'pkgs' },
-            h('summary', { style: Object.assign({}, S.hintTiny, { cursor: 'pointer' }) },
+            h('summary', { className: 'rpc-label', style: Object.assign({}, S.hintTiny, { cursor: 'pointer' }) },
               bind(t, 'creditsPackages', { count: creditItems.length })),
             h('ul', {
+              className: 'rpc-list',
               style: Object.assign({}, S.modelList, { marginTop: 6 }),
             },
             creditItems.map(function (item, index) {
               return h('li', {
                 key: 'pkg' + index,
+                className: 'rpc-list-row',
                 style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
               },
               h('span', { style: S.modelName }, typeof item.name === 'string' && item.name !== '' ? item.name : bind(t, 'creditsPackageFallback')),
-              item.expired ? h('span', { style: S.badge }, bind(t, 'creditsExhausted')) : null,
+              item.expired ? h('span', { className: 'rpc-chip rpc-chip-warn' }, bind(t, 'creditsExhausted')) : null,
               h('span', { style: S.grow }),
-              h('span', { style: S.modelMeta }, formatNumber(item.remain) + ' / ' + formatNumber(item.total)),
+              h('span', { className: 'rpc-model-meta' }, formatNumber(item.remain) + ' / ' + formatNumber(item.total)),
               h('span', { style: S.modelId }, isFiniteNumber(item.endAtMs) && item.endAtMs > 0 ? formatTime(item.endAtMs) : ''))
             })),
           ),
         )
       }
       if (isFiniteNumber(credits.fetchedAt) && credits.fetchedAt > 0) {
-        creditsBody.push(h('p', { key: 'at', style: S.hintTiny }, bind(t, 'creditsFetchedAt', { time: formatTime(credits.fetchedAt) })))
+        creditsBody.push(h('p', { key: 'at', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'creditsFetchedAt', { time: formatTime(credits.fetchedAt) })))
       }
 
       sections.push(h('div', { key: 'credits', style: S.section }, creditsHead, ...creditsBody))
@@ -3604,7 +4166,7 @@ window.__ModuleLoader__.load({
             h('span', {
               key: key + '-l',
               style: {
-                color: 'var(--dsw-alias-label-secondary)',
+                color: 'var(--rpc-muted)',
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -3614,9 +4176,10 @@ window.__ModuleLoader__.load({
               key: key + '-v',
               title: title === undefined ? '' : title,
               style: {
-                color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))',
+                color: 'var(--rpc-text)',
                 textAlign: 'right',
                 fontVariantNumeric: 'tabular-nums',
+                fontWeight: 600,
                 whiteSpace: 'nowrap',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -3628,47 +4191,40 @@ window.__ModuleLoader__.load({
           var data = counters !== null && typeof counters === 'object' ? counters : {}
           return h('div', {
             key: key,
-            style: {
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
-              minWidth: 0,
-              padding: '9px 11px 8px',
-              borderRadius: 10,
-              border: '0.5px solid ' + usageBorder,
-              background: 'var(--dsh-rpc-fill, rgba(127,127,127,.06))',
-              boxSizing: 'border-box',
-            },
+            className: 'rpc-kpi',
           },
           h('span', {
-            style: { fontSize: TEXT.tiny, fontWeight: 600, letterSpacing: '.06em', color: 'var(--dsw-alias-label-secondary)' },
+            className: 'rpc-kpi-label',
+            style: { fontSize: 10.5, fontWeight: 650, letterSpacing: '.05em', color: 'var(--rpc-muted)' },
           }, label),
           h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 5, minWidth: 0 } },
             h('span', {
+              className: 'rpc-kpi-value',
               style: {
-                fontSize: 22,
-                lineHeight: '27px',
+                fontSize: 26,
+                lineHeight: '32px',
                 fontWeight: 650,
-                letterSpacing: '-.015em',
+                letterSpacing: '-.02em',
                 fontVariantNumeric: 'tabular-nums',
-                color: 'var(--dsw-alias-label-primary)',
+                color: 'var(--rpc-text)',
               },
             }, present === false ? '—' : formatNumber(data.requests || 0)),
             present === false
               ? null
-              : h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-secondary)' } }, bind(t, 'usageCalls'))),
+              : h('span', { style: { fontSize: 11, color: 'var(--rpc-muted)' } }, bind(t, 'usageCalls'))),
           h('div', {
+            className: 'rpc-kpi-metrics',
             style: {
               display: 'grid',
               gridTemplateColumns: 'auto minmax(0, 1fr)',
               columnGap: 10,
               rowGap: 1,
-              marginTop: 5,
-              paddingTop: 6,
-              borderTop: '0.5px solid var(--dsw-alias-border-l2)',
+              marginTop: 6,
+              paddingTop: 7,
+              borderTop: '1px solid var(--rpc-border)',
               minWidth: 0,
-              fontSize: TEXT.tiny,
-              lineHeight: LINE.dense,
+              fontSize: 11,
+              lineHeight: '16px',
             },
           },
           ...usageMetric('rate', bind(t, 'usageRate'), present === false ? '—' : rateOf(data)),
@@ -3684,37 +4240,28 @@ window.__ModuleLoader__.load({
         usageBody.push(
           h('div', {
             key: 'summary',
-            style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(168px, 1fr))', gap: 8 },
+            className: 'rpc-usage-grid',
+            style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(172px, 1fr))', gap: 10 },
           },
           usageCard('today', bind(t, 'usageToday'), usageToday, true),
           usageCard('all', bind(t, 'usageTotal'), providerUsage, true),
           usageCard('session', bind(t, 'usageSession'), providerSession, sessionPresent)),
         )
         if (active.provider.indexOf('qoder') === 0 && (usageToday.requests || 0) > 0 && (usageToday.totalTokens || 0) === 0) {
-          usageBody.push(h('p', { key: 'noUsage', style: S.hintTiny }, bind(t, 'usageNoUsage')))
+          usageBody.push(h('p', { key: 'noUsage', className: 'rpc-inline-note', style: S.hintTiny }, rpcIcon('alert', 13), bind(t, 'usageNoUsage')))
         }
         usageBody.push(
           h('div', { key: 'resetrow', style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
-            h('label', { style: Object.assign({}, S.row, { cursor: 'pointer' }) },
-              h('input', {
-                type: 'checkbox',
-                checked: !(status.settings && status.settings.showUsageInSidebar === false),
-                onChange: function () {
-                  var on = !(status.settings && status.settings.showUsageInSidebar === false)
-                  mutate({ display: { showUsageInSidebar: !on } })
-                },
-              }),
-              h('span', { style: S.hintTiny }, bind(t, 'usageShowInSidebar'))),
             h('span', { style: S.grow }),
             h('button', {
               type: 'button',
-              style: S.buttonGhost,
+              className: 'rpc-btn rpc-btn-sm',
               onClick: resetStats,
               disabled: isBusy('stats'),
-            }, isBusy('stats') ? bind(t, 'usageResetting') : bind(t, 'usageReset'))),
+            }, rpcIcon('refresh', 13), isBusy('stats') ? bind(t, 'usageResetting') : bind(t, 'usageReset'))),
         )
         if (isFiniteNumber(statsDoc.since) && statsDoc.since > 0) {
-          usageBody.push(h('p', { key: 'since', style: S.hintTiny }, bind(t, 'usageSince', { time: formatTime(statsDoc.since) })))
+          usageBody.push(h('p', { key: 'since', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'usageSince', { time: formatTime(statsDoc.since) })))
         }
 
         // 最近 14 天用量：固定 14 个槽位，缺的日期补 0。
@@ -3754,44 +4301,32 @@ window.__ModuleLoader__.load({
             if (isFiniteNumber(day.totalTokens) && day.totalTokens > maxDailyTokens) maxDailyTokens = day.totalTokens
           })
           usageBody.push(
-            h('div', { key: 'heat', style: { display: 'flex', flexDirection: 'column', gap: 5, paddingTop: 2 } },
+            h('div', { key: 'heat', className: 'rpc-subsection' },
               h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
-                h('span', { style: S.sectionTitle }, bind(t, 'usageHeatmap')),
+                h('span', { style: S.sectionTitle }, rpcIcon('chart', 13), bind(t, 'usageHeatmap')),
                 h('span', { style: S.grow }),
-                h('span', { style: S.hintTiny }, '14d')),
-              h('div', { style: { display: 'flex', alignItems: 'flex-end', gap: 3, height: 34, paddingTop: 2 } },
+                h('span', { className: 'rpc-chip' }, '14d')),
+              h('div', { className: 'rpc-heat' },
                 buckets.map(function (day) {
                   var tokens = isFiniteNumber(day.totalTokens) ? day.totalTokens : 0
-                  var height = tokens > 0 ? Math.max(4, Math.round((tokens / maxDailyTokens) * 28)) : 3
+                  var height = tokens > 0 ? Math.max(4, Math.round((tokens / maxDailyTokens) * 34)) : 3
                   return h('div', {
                     key: 'd' + day.date,
+                    className: 'rpc-heat-cell',
                     title: bind(t, 'usageHeatCell', { date: day.date, requests: formatNumber(day.requests || 0), tokens: formatNumber(tokens) }),
-                    style: {
-                      flex: '1 1 0',
-                      minWidth: 3,
-                      maxWidth: 44,
-                      height: 32,
-                      display: 'flex',
-                      alignItems: 'flex-end',
-                      borderRadius: 3,
-                      background: 'var(--dsh-rpc-fill, rgba(127,127,127,.05))',
-                      overflow: 'hidden',
-                    },
                   },
                   h('div', {
+                    className: 'rpc-heat-fill',
                     style: {
-                      width: '100%',
                       height: height,
-                      borderRadius: 3,
                       background: tokens > 0
-                        ? (PROVIDER_ACCENT[active.provider] || 'var(--dsw-alias-state-business-primary, #2f6fed)')
-                        : 'var(--dsw-alias-border-l2)',
+                        ? (PROVIDER_ACCENT[active.provider] || 'var(--rpc-accent)')
+                        : 'var(--rpc-border)',
                       opacity: tokens > 0 ? 0.55 + Math.min(0.45, tokens / maxDailyTokens / 2) : 0.35,
-                      transition: 'height .2s ease',
                     },
                   }))
                 })),
-              h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--dsw-alias-label-secondary)' } },
+              h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--rpc-muted)' } },
                 h('span', {}, buckets[0].date.slice(5)),
                 h('span', {}, buckets[buckets.length - 1].date.slice(5)))),
           )
@@ -3812,10 +4347,10 @@ window.__ModuleLoader__.load({
         if (modelStats.length > 0) {
           var modelColumns = 'minmax(110px, 1.6fr) minmax(46px, .7fr) minmax(68px, .9fr) minmax(56px, .8fr)'
           usageBody.push(
-            h('div', { key: 'topmodels', style: { display: 'flex', flexDirection: 'column', gap: 4 } },
-              h('span', { style: S.sectionTitle }, bind(t, 'usageTopModels')),
-              h('div', { style: usageTableFrame },
-                h('div', { style: { display: 'grid', gridTemplateColumns: modelColumns, minWidth: 360 } },
+            h('div', { key: 'topmodels', className: 'rpc-subsection' },
+              h('span', { style: S.sectionTitle }, rpcIcon('cube', 13), bind(t, 'usageTopModels')),
+              h('div', { className: 'rpc-table-frame', style: usageTableFrame },
+                h('div', { style: { display: 'grid', gridTemplateColumns: modelColumns, minWidth: 360, background: 'var(--rpc-surface-2)' } },
                   usageHead('m0', bind(t, 'usageModel')),
                   usageHead('m1', bind(t, 'usageModelCalls'), true),
                   usageHead('m2', bind(t, 'usageModelTokens'), true),
@@ -3825,10 +4360,10 @@ window.__ModuleLoader__.load({
                     key: 'm' + index,
                     style: Object.assign({ display: 'grid', gridTemplateColumns: modelColumns, alignItems: 'center' }, index > 0 ? usageRowLine : {}),
                   },
-                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-primary)' }), title: entry.model }, entry.model || '—'),
+                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--rpc-text)', fontWeight: 500 }), title: entry.model }, entry.model || '—'),
                   h('span', { style: usageNumberCell }, formatNumber(entry.counters.requests || 0)),
                   h('span', { style: usageNumberCell }, formatNumber(entry.counters.totalTokens || 0)),
-                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-secondary)' }) }, formatDuration(entry.counters.avgDurationMs)))
+                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--rpc-muted)' }) }, formatDuration(entry.counters.avgDurationMs)))
                 }))),
           )
         }
@@ -3945,29 +4480,29 @@ window.__ModuleLoader__.load({
             if (test !== undefined && typeof test === 'object') {
               if (test.ok === true) {
                 badge = h('span', {
-                  style: S.badgeSoft,
+                  className: 'rpc-chip rpc-chip-ok',
                   title: bind(t, 'testOk', { ms: formatLatency(test.latencyMs) }),
                 }, bind(t, 'modelTestOk'))
               } else if (limitCodes[test.code] === true) {
                 badge = h('span', {
-                  style: S.badgeWarn,
+                  className: 'rpc-chip rpc-chip-warn',
                   title: [
                     bind(t, 'limitUntil', { time: test.resetHint === undefined ? '—' : test.resetHint }),
                     test.error,
                   ].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
                 }, bind(t, 'limitBadge'))
               } else if (test.code === 'AUTH') {
-                badge = h('span', { style: S.badgeWarn, title: test.error ?? '' }, bind(t, 'authBadge'))
+                badge = h('span', { className: 'rpc-chip rpc-chip-warn', title: test.error ?? '' }, bind(t, 'authBadge'))
               } else {
                 badge = h('span', {
-                  style: S.badgeWarn,
+                  className: 'rpc-chip rpc-chip-warn',
                   title: [test.code, test.error].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
                 }, bind(t, 'modelTestFailed'))
               }
             } else if (recent !== undefined) {
               // 没手动测过，但最近一次真实请求已经被上游限额：同样打徽章。
               badge = h('span', {
-                style: S.badgeWarn,
+                className: 'rpc-chip rpc-chip-warn',
                 title: [
                   bind(t, 'recentLimitHint', { code: recent.code }),
                   formatTime(recent.at),
@@ -3982,7 +4517,7 @@ window.__ModuleLoader__.load({
             badge,
             h('button', {
               type: 'button',
-              style: S.buttonGhost,
+              className: 'rpc-btn rpc-btn-sm',
               disabled: isBusy(busyKey),
               title: bind(t, 'modelTest'),
               onClick: function () { testAccountModel(active.provider, entry.accountId, entry.model) },
@@ -3995,58 +4530,35 @@ window.__ModuleLoader__.load({
             return h('button', {
               key: 'r' + key,
               type: 'button',
+              className: 'rpc-filter',
+              'aria-pressed': effectiveAccountModelRange === value,
               onClick: function () { setAccountModelRange(value) },
-              style: {
-                font: 'inherit',
-                fontSize: TEXT.tiny,
-                lineHeight: '16px',
-                padding: '0 7px',
-                borderRadius: 999,
-                cursor: 'pointer',
-                border: '0.5px solid ' + (effectiveAccountModelRange === value
-                  ? 'var(--dsw-alias-state-business-primary, #2f6fed)'
-                  : 'var(--dsw-alias-border-l2)'),
-                background: effectiveAccountModelRange === value
-                  ? 'var(--dsh-rpc-fill, rgba(127,127,127,.10))'
-                  : 'transparent',
-                color: effectiveAccountModelRange === value
-                  ? 'var(--dsw-alias-label-primary)'
-                  : 'var(--dsw-alias-label-secondary)',
-                whiteSpace: 'nowrap',
-                flex: '0 0 auto',
-              },
             }, label)
           }
           usageBody.push(
-            h('div', { key: 'accountmodels', style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+            h('div', { key: 'accountmodels', className: 'rpc-subsection' },
               h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
-                h('span', { style: S.sectionTitle }, bind(t, 'usageAccountModels')),
+                h('span', { style: S.sectionTitle }, rpcIcon('users', 13), bind(t, 'usageAccountModels')),
                 showRangeToggle ? rangeButton('today', bind(t, 'usageToday'), 'today') : null,
                 showRangeToggle ? rangeButton('all', bind(t, 'usageTotal'), 'all') : null,
                 showRangeToggle
                   ? null
-                  : h('span', { style: S.badgeSoft }, bind(t, effectiveAccountModelRange === 'all' ? 'usageTotal' : 'usageToday')),
+                  : h('span', { className: 'rpc-chip' }, bind(t, effectiveAccountModelRange === 'all' ? 'usageTotal' : 'usageToday')),
                 // 覆盖率：这批数字只覆盖升级之后的请求，缺口要写明。
                 // 不写的话，用户拿它和上方的「今日 N 次」对比只会觉得坏了。
                 accountModelCoverage === undefined
                   ? null
                   : h('span', {
                       title: bind(t, 'usageAccountModelsHint'),
-                      style: {
-                        fontSize: TEXT.tiny,
-                        lineHeight: '16px',
-                        color: 'var(--dsh-rpc-warn, #9d5c00)',
-                        whiteSpace: 'nowrap',
-                        flex: '0 0 auto',
-                      },
+                      className: 'rpc-chip rpc-chip-warn',
                     }, accountModelCoverage),
                 h('span', { style: S.grow }),
-                h('span', { style: { fontSize: TEXT.tiny, color: 'var(--dsw-alias-label-secondary)' }, title: bind(t, 'usageAccountModelsHint') }, bind(t, 'usageAccountModelsHint'))),
+                h('span', { className: 'rpc-tiny', title: bind(t, 'usageAccountModelsHint') }, bind(t, 'usageAccountModelsHint'))),
               accountModelFallback
-                ? h('p', { key: 'fallback', style: S.hintTiny }, bind(t, 'usageAccountModelTodayEmpty'))
+                ? h('p', { key: 'fallback', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'usageAccountModelTodayEmpty'))
                 : null,
-              h('div', { style: usageTableFrame },
-                h('div', { style: { display: 'grid', gridTemplateColumns: accountModelColumns, minWidth: 540 } },
+              h('div', { className: 'rpc-table-frame', style: usageTableFrame },
+                h('div', { style: { display: 'grid', gridTemplateColumns: accountModelColumns, minWidth: 540, background: 'var(--rpc-surface-2)' } },
                   usageHead('a0', bind(t, 'usageAccountCol')),
                   usageHead('a1', bind(t, 'usageModel')),
                   usageHead('a2', bind(t, 'usageModelCalls'), true),
@@ -4058,11 +4570,11 @@ window.__ModuleLoader__.load({
                     key: 'am' + index,
                     style: Object.assign({ display: 'grid', gridTemplateColumns: accountModelColumns, alignItems: 'center' }, index > 0 ? usageRowLine : {}),
                   },
-                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-primary))' }), title: entry.label }, entry.label || '—'),
-                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-primary)' }), title: entry.model }, entry.model || '—'),
+                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--rpc-muted)' }), title: entry.label }, entry.label || '—'),
+                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--rpc-text)', fontWeight: 500 }), title: entry.model }, entry.model || '—'),
                   h('span', { style: usageNumberCell }, formatNumber(entry.counters.requests || 0)),
                   h('span', { style: usageNumberCell }, formatNumber(entry.counters.totalTokens || 0)),
-                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-secondary)' }) }, formatDuration(entry.counters.avgDurationMs)),
+                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--rpc-muted)' }) }, formatDuration(entry.counters.avgDurationMs)),
                   modelTestCell(entry))
                 }))),
           )
@@ -4073,11 +4585,11 @@ window.__ModuleLoader__.load({
           h('details', { key: 'recentbox', style: { marginTop: 2 } },
             h('summary', {
               style: Object.assign({}, S.sectionTitle, { cursor: 'pointer', userSelect: 'none' }),
-            }, bind(t, 'usageRecent') + ' · ' + String(recentRequests.length)),
+            }, rpcIcon('clock', 13), bind(t, 'usageRecent') + ' · ' + String(recentRequests.length)),
             recentRequests.length === 0
-              ? h('p', { key: 'empty', style: Object.assign({}, S.hintTiny, { marginTop: 6 }) }, bind(t, 'usageEmpty'))
-              : h('div', { key: 'recent', style: Object.assign({}, usageTableFrame, { marginTop: 6 }) },
-                  h('div', { style: { display: 'grid', gridTemplateColumns: recentColumns, minWidth: 380 } },
+              ? h('p', { key: 'empty', className: 'rpc-tiny', style: Object.assign({}, S.hintTiny, { marginTop: 6 }) }, bind(t, 'usageEmpty'))
+              : h('div', { key: 'recent', className: 'rpc-table-frame', style: Object.assign({}, usageTableFrame, { marginTop: 6 }) },
+                  h('div', { style: { display: 'grid', gridTemplateColumns: recentColumns, minWidth: 380, background: 'var(--rpc-surface-2)' } },
                     usageHead('r0', bind(t, 'usageTime')),
                     usageHead('r1', bind(t, 'usageModel')),
                     usageHead('r2', bind(t, 'usageOutcome'), true),
@@ -4091,15 +4603,15 @@ window.__ModuleLoader__.load({
                         key: 'req' + index,
                         style: Object.assign({ display: 'grid', gridTemplateColumns: recentColumns, alignItems: 'center' }, index > 0 ? usageRowLine : {}),
                       },
-                      h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-secondary)', fontVariantNumeric: 'tabular-nums' }), title: formatTime(entry.at) }, formatShortTime(entry.at)),
-                      h('span', { style: Object.assign({}, usageCell, { color: 'var(--dsw-alias-label-primary)' }), title: entry.model || '' }, entry.model || '—'),
+                      h('span', { style: Object.assign({}, usageCell, { color: 'var(--rpc-muted)', fontVariantNumeric: 'tabular-nums' }), title: formatTime(entry.at) }, formatShortTime(entry.at)),
+                      h('span', { style: Object.assign({}, usageCell, { color: 'var(--rpc-text)' }), title: entry.model || '' }, entry.model || '—'),
                       h('span', { style: Object.assign({}, usageCell, { textAlign: 'right' }) },
                         h('span', {
-                          style: failed || entry.kind === 'incomplete' ? S.badgeWarn : S.badgeSoft,
+                          className: failed || entry.kind === 'incomplete' ? 'rpc-chip rpc-chip-warn' : 'rpc-chip',
                           title: [entry.code, entry.message].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
                         }, bind(t, kindTextKey(entry.kind)))),
-                      h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-secondary)' }) }, formatDuration(entry.durationMs)),
-                      h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--dsw-alias-label-secondary)' }) }, formatNumber(entry.totalTokens || 0)),
+                      h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--rpc-muted)' }) }, formatDuration(entry.durationMs)),
+                      h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--rpc-muted)' }) }, formatNumber(entry.totalTokens || 0)),
                     )
                   }))),
         )
@@ -4107,7 +4619,7 @@ window.__ModuleLoader__.load({
       sections.push(
         h('div', { key: 'usage', style: S.section },
           h('div', { key: 'h', style: S.sectionHead },
-            h('span', { style: S.sectionTitle }, bind(t, 'usage')),
+            h('span', { style: S.sectionTitle }, rpcIcon('chart', 14), bind(t, 'usage')),
             h('span', { style: S.sectionCount }, formatNumber(usageToday.requests || 0))),
           ...usageBody),
       )
@@ -4118,8 +4630,9 @@ window.__ModuleLoader__.load({
         var configured = status.settings && status.settings.qoder && status.settings.qoder[active.provider] && status.settings.qoder[active.provider].configured
         connectionBody.push(
           h('div', { key: 'f', style: S.field },
-            h('span', { style: S.label }, bind(t, 'pat')),
+            h('span', { className: 'rpc-label', style: S.label }, bind(t, 'pat')),
             h('input', {
+              className: 'rpc-input',
               style: S.input,
               type: 'password',
               'aria-label': bind(t, 'pat'),
@@ -4127,19 +4640,20 @@ window.__ModuleLoader__.load({
               placeholder: configured ? bind(t, 'patConfigured', { tail: (credential.patTail || '…') }) : bind(t, 'patPlaceholder'),
               onChange: function (event) { setPatDraft(event.target.value) },
             })),
-          h('p', { key: 'h', style: S.hintTiny }, bind(t, 'patHint')),
-          h('p', { key: 'link', style: S.hintTiny },
+          h('p', { key: 'h', className: 'rpc-inline-note', style: S.hintTiny }, rpcIcon('shield', 13), bind(t, 'patHint')),
+          h('p', { key: 'link', className: 'rpc-inline-note', style: S.hintTiny },
+            rpcIcon('external', 13),
             bind(t, 'patLinkHint') + ' ',
             h('a', {
               href: PAT_PAGE[active.provider] || PAT_PAGE.qoder,
               target: '_blank',
               rel: 'noreferrer',
-              style: { color: 'var(--dsw-alias-link, var(--dsw-alias-state-business-primary, #2f6fed))' },
+              className: 'rpc-btn-link',
             }, bind(t, 'patOpen'))),
           h('div', { key: 'btns', style: S.row },
-            h('button', { type: 'button', style: S.buttonPrimary, onClick: savePat, disabled: isBusy('save') || patDraft.trim() === '' },
-              isBusy('save') ? bind(t, 'saving') : bind(t, 'save')),
-            h('button', { type: 'button', style: S.button, onClick: clearPat, disabled: isBusy('save') || !configured },
+            h('button', { type: 'button', className: 'rpc-btn rpc-btn-primary', style: S.buttonPrimary, onClick: savePat, disabled: isBusy('save') || patDraft.trim() === '' },
+              rpcIcon('check', 14), isBusy('save') ? bind(t, 'saving') : bind(t, 'save')),
+            h('button', { type: 'button', className: 'rpc-btn', style: S.button, onClick: clearPat, disabled: isBusy('save') || !configured },
               bind(t, 'clear'))),
         )
       } else if (active.kind === 'desktop-auth') {
@@ -4148,8 +4662,9 @@ window.__ModuleLoader__.load({
         var traeConfigured = status.settings && status.settings.trae && status.settings.trae[active.provider] && status.settings.trae[active.provider].configured
         connectionBody.push(
           h('div', { key: 'st', style: S.field },
-            h('span', { style: S.label }, bind(t, 'traeStorageFile')),
+            h('span', { className: 'rpc-label', style: S.label }, bind(t, 'traeStorageFile')),
             h('input', {
+              className: 'rpc-input',
               style: S.input,
               type: 'text',
               'aria-label': bind(t, 'traeStorageFile'),
@@ -4157,18 +4672,20 @@ window.__ModuleLoader__.load({
               placeholder: credential.file || '%APPDATA%\\Trae CN\\User\\globalStorage\\storage.json',
               onChange: function (event) { setAuthFileDraft(event.target.value) },
             }),
-            h('span', { style: S.hintTiny }, bind(t, 'traeStorageFileHint'))),
-          h('p', { key: 'h', style: S.hintTiny },
+            h('span', { className: 'rpc-inline-note', style: S.hintTiny }, rpcIcon('key', 13), bind(t, 'traeStorageFileHint'))),
+          h('p', { key: 'h', className: 'rpc-inline-note', style: S.hintTiny },
+            rpcIcon(traeConfigured ? 'check' : 'alert', 13),
             traeConfigured ? bind(t, 'traeSignedIn', { name: credential.name || credential.userId || '—' }) : bind(t, 'traeSignInHint')),
           h('div', { key: 'btns', style: S.row },
-            h('button', { type: 'button', style: S.buttonPrimary, onClick: saveTrae, disabled: isBusy('save') },
-              isBusy('save') ? bind(t, 'saving') : bind(t, 'save'))),
+            h('button', { type: 'button', className: 'rpc-btn rpc-btn-primary', style: S.buttonPrimary, onClick: saveTrae, disabled: isBusy('save') },
+              rpcIcon('check', 14), isBusy('save') ? bind(t, 'saving') : bind(t, 'save'))),
         )
       } else {
         connectionBody.push(
           h('div', { key: 'appf', style: S.field },
-            h('span', { style: S.label }, bind(t, 'appPath')),
+            h('span', { className: 'rpc-label', style: S.label }, bind(t, 'appPath')),
             h('input', {
+              className: 'rpc-input',
               style: S.input,
               type: 'text',
               'aria-label': bind(t, 'appPath'),
@@ -4176,10 +4693,11 @@ window.__ModuleLoader__.load({
               placeholder: 'D:\\WorkBuddy\\WorkBuddy.exe',
               onChange: function (event) { setAppPathDraft(event.target.value) },
             }),
-            h('span', { style: S.hintTiny }, bind(t, 'appPathHint'))),
+            h('span', { className: 'rpc-inline-note', style: S.hintTiny }, rpcIcon('external', 13), bind(t, 'appPathHint'))),
           h('div', { key: 'authf', style: S.field },
-            h('span', { style: S.label }, bind(t, 'authFile')),
+            h('span', { className: 'rpc-label', style: S.label }, bind(t, 'authFile')),
             h('input', {
+              className: 'rpc-input',
               style: S.input,
               type: 'text',
               'aria-label': bind(t, 'authFile'),
@@ -4187,18 +4705,48 @@ window.__ModuleLoader__.load({
               placeholder: credential.file || '%LOCALAPPDATA%\\CodeBuddyExtension\\Data\\Public\\auth',
               onChange: function (event) { setAuthFileDraft(event.target.value) },
             }),
-            h('span', { style: S.hintTiny }, bind(t, 'authFileHint'))),
+            h('span', { className: 'rpc-inline-note', style: S.hintTiny }, rpcIcon('key', 13), bind(t, 'authFileHint'))),
           h('div', { key: 'btns', style: S.row },
-            h('button', { type: 'button', style: S.buttonPrimary, onClick: saveDesktop, disabled: isBusy('save') },
-              isBusy('save') ? bind(t, 'saving') : bind(t, 'save'))),
+            h('button', { type: 'button', className: 'rpc-btn rpc-btn-primary', style: S.buttonPrimary, onClick: saveDesktop, disabled: isBusy('save') },
+              rpcIcon('check', 14), isBusy('save') ? bind(t, 'saving') : bind(t, 'save'))),
         )
       }
 
       sections.push(
         h('div', { key: 'connection', style: S.section },
           h('div', { key: 'h', style: S.sectionHead },
-            h('span', { style: S.sectionTitle }, bind(t, 'secConnection'))),
+            h('span', { style: S.sectionTitle }, rpcIcon('key', 14), bind(t, 'secConnection'))),
           ...connectionBody),
+      )
+
+      // ── 显示偏好 ────────────────────────────────────────────────
+      sections.push(
+        h('div', { key: 'display', style: S.section },
+          h('div', { key: 'h', style: S.sectionHead },
+            h('span', { style: S.sectionTitle }, rpcIcon('display', 14), bind(t, 'displaySettings'))),
+          h('p', { className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'displaySettingsHint')),
+          h('label', { className: 'rpc-check-label', style: { cursor: 'pointer' } },
+            h('input', {
+              type: 'checkbox',
+              className: 'rpc-check',
+              checked: status.settings && status.settings.showRateInModelName !== false,
+              onChange: function () {
+                mutate({ display: { showRateInModelName: !(status.settings && status.settings.showRateInModelName !== false) } })
+              },
+            }),
+            h('span', { style: S.label }, bind(t, 'modelRateToggle'))),
+          h('p', { className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'modelRateHint')),
+          h('label', { className: 'rpc-check-label', style: { cursor: 'pointer' } },
+            h('input', {
+              type: 'checkbox',
+              className: 'rpc-check',
+              checked: !(status.settings && status.settings.showUsageInSidebar === false),
+              onChange: function () {
+                var on = !(status.settings && status.settings.showUsageInSidebar === false)
+                mutate({ display: { showUsageInSidebar: !on } })
+              },
+            }),
+            h('span', { style: S.label }, bind(t, 'usageShowInSidebar')))),
       )
 
       // ── 高级 ────────────────────────────────────────────────────
@@ -4212,11 +4760,12 @@ window.__ModuleLoader__.load({
       }
       sections.push(
         h('div', { key: 'advanced', style: S.section },
-          h('details', {},
+          h('details', { className: 'rpc-details' },
             h('summary', {
-              style: { cursor: 'pointer', fontSize: TEXT.tiny, fontWeight: 600, letterSpacing: '.08em', color: 'var(--dsw-alias-label-secondary)' },
-            }, bind(t, 'advanced')),
-            h('p', { style: Object.assign({}, S.hintTiny, { marginTop: 8 }) }, bind(t, 'advancedHint')),
+              className: 'rpc-section-title',
+              style: { cursor: 'pointer', fontSize: 12, fontWeight: 650, letterSpacing: '.02em', color: 'var(--rpc-muted)' },
+            }, rpcIcon('sliders', 14), bind(t, 'advanced')),
+            h('p', { className: 'rpc-inline-note', style: Object.assign({}, S.hintTiny, { marginTop: 8 }) }, rpcIcon('alert', 13), bind(t, 'advancedHint')),
             h('div', { key: 'idle', style: S.field },
               h('span', { style: S.label }, bind(t, 'advancedIdle')),
               h('input', {
@@ -4313,30 +4862,34 @@ window.__ModuleLoader__.load({
               advErrors.queue !== ''
                 ? h('span', { key: 'queue-err', role: 'alert', style: S.hintWarn }, advErrorText('queue'))
                 : null),
-            h('label', { key: 'stats', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+            h('label', { key: 'stats', className: 'rpc-check-label', style: { cursor: 'pointer' } },
               h('input', {
                 type: 'checkbox',
+                className: 'rpc-check',
                 checked: advStats !== false,
                 onChange: function () { setAdvStats(!(advStats !== false)) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedStats'))),
-            h('label', { key: 'cache', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+            h('label', { key: 'cache', className: 'rpc-check-label', style: { cursor: 'pointer' } },
               h('input', {
                 type: 'checkbox',
+                className: 'rpc-check',
                 checked: advCache !== false,
                 onChange: function () { setAdvCache(!(advCache !== false)) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedCache'))),
-            h('label', { key: 'alerts', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+            h('label', { key: 'alerts', className: 'rpc-check-label', style: { cursor: 'pointer' } },
               h('input', {
                 type: 'checkbox',
+                className: 'rpc-check',
                 checked: advAlertsEnabled !== false,
                 onChange: function () { setAdvAlertsEnabled(!(advAlertsEnabled !== false)) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedAlertsEnabled'))),
-            h('label', { key: 'probe', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
+            h('label', { key: 'probe', className: 'rpc-check-label', style: { cursor: 'pointer' } },
               h('input', {
                 type: 'checkbox',
+                className: 'rpc-check',
                 checked: advProbeEnabled !== false,
                 onChange: function () { setAdvProbeEnabled(!(advProbeEnabled !== false)) },
               }),
@@ -4344,13 +4897,14 @@ window.__ModuleLoader__.load({
             h('div', { key: 'btn', style: S.row },
               h('button', {
                 type: 'button',
+                className: 'rpc-btn rpc-btn-primary',
                 style: S.button,
                 // 有非法字段时直接禁用保存：宁可让用户先改对，也不要静默回退旧值。
                 disabled: isBusy('advanced') || advancedSaveBlocked(),
                 onClick: saveAdvanced,
-              }, isBusy('advanced') ? bind(t, 'saving') : bind(t, 'advancedSave')),
-              advSaved ? h('span', { style: S.hintTiny }, bind(t, 'advancedSaved')) : null,
-              advNotice !== '' ? h('span', { role: 'status', style: S.hintWarn }, advNotice) : null)),
+              }, rpcIcon('check', 14), isBusy('advanced') ? bind(t, 'saving') : bind(t, 'advancedSave')),
+              advSaved ? h('span', { className: 'rpc-chip rpc-chip-ok' }, bind(t, 'advancedSaved')) : null,
+              advNotice !== '' ? h('span', { role: 'status', className: 'rpc-chip rpc-chip-warn' }, advNotice) : null)),
         ),
       )
 
@@ -4389,17 +4943,18 @@ window.__ModuleLoader__.load({
       sections.push(
         h('div', { key: 'models', style: S.section },
           h('div', { key: 'h', style: S.sectionHead },
-            h('span', { style: S.sectionTitle }, bind(t, 'models')),
+            h('span', { style: S.sectionTitle }, rpcIcon('cube', 14), bind(t, 'models')),
             h('span', { style: S.sectionCount }, String(models.length)),
             h('span', { style: S.grow }),
             models.length === 0
               ? null
-              : h('button', { type: 'button', style: S.buttonGhost, onClick: function () { setAllModels(active, false) }, disabled: isBusy('save') }, bind(t, 'showAll')),
+              : h('button', { type: 'button', className: 'rpc-btn rpc-btn-sm', onClick: function () { setAllModels(active, false) }, disabled: isBusy('save') }, rpcIcon('check', 13), bind(t, 'showAll')),
             models.length === 0
               ? null
-              : h('button', { type: 'button', style: S.buttonGhost, onClick: function () { setAllModels(active, true) }, disabled: isBusy('save') }, bind(t, 'hideAll'))),
+              : h('button', { type: 'button', className: 'rpc-btn rpc-btn-sm', onClick: function () { setAllModels(active, true) }, disabled: isBusy('save') }, bind(t, 'hideAll'))),
           models.length > 6
             ? h('input', {
+                className: 'rpc-input',
                 style: S.input,
                 type: 'search',
                 'aria-label': bind(t, 'searchPlaceholder'),
@@ -4409,27 +4964,31 @@ window.__ModuleLoader__.load({
               })
             : null,
           h('div', { key: 'probe', style: S.row },
-            h('button', { type: 'button', style: S.button, onClick: runProbeNow, disabled: isBusy('probe') || models.length === 0 },
-              isBusy('probe') ? bind(t, 'probing') : bind(t, 'probe')),
-            h('span', { style: S.modelMeta },
+            h('button', { type: 'button', className: 'rpc-btn rpc-btn-sm', onClick: runProbeNow, disabled: isBusy('probe') || models.length === 0 },
+              rpcIcon('pulse', 13), isBusy('probe') ? bind(t, 'probing') : bind(t, 'probe')),
+            h('span', { className: 'rpc-tiny', style: S.modelMeta },
               isFiniteNumber(probe.lastRunAt) && probe.lastRunAt > 0
                 ? bind(t, 'probeLast', { time: formatTime(probe.lastRunAt) })
                 : bind(t, 'probeNever'))),
-          h('p', { key: 'probehint', style: S.hintTiny }, bind(t, 'probeHint')),
+          h('p', { key: 'probehint', className: 'rpc-inline-note', style: S.hintTiny }, rpcIcon('shield', 13), bind(t, 'probeHint')),
           models.length === 0
-            ? h('p', { key: 'nomodels', style: S.hint }, bind(t, 'noModels'))
+            ? h('div', { key: 'nomodels', className: 'rpc-empty' },
+                h('span', { className: 'rpc-empty-icon' }, rpcIcon('cube', 18)),
+                h('span', {}, bind(t, 'noModels')))
             : shown.length === 0
               ? (unavailableMatches.length > 0
-                  ? h('p', { key: 'nomatch-unavailable', style: S.hintWarn }, bind(t, 'searchOnlyUnavailable', { count: unavailableMatches.length }))
-                  : h('p', { key: 'nomatch', style: S.hint }, bind(t, 'searchEmpty')))
-              : h('ul', { key: 'list', style: S.modelList },
+                  ? h('p', { key: 'nomatch-unavailable', className: 'rpc-warn-text', style: S.hintWarn }, bind(t, 'searchOnlyUnavailable', { count: unavailableMatches.length }))
+                  : h('p', { key: 'nomatch', className: 'rpc-tiny', style: S.hint }, bind(t, 'searchEmpty')))
+              : h('ul', { key: 'list', className: 'rpc-list rpc-model-list', style: S.modelList },
                 shown.map(function (model, index) {
                   return h('li', {
                     key: model.id,
+                    className: 'rpc-list-row rpc-model-row',
                     style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
                   },
                   h('input', {
                     type: 'checkbox',
+                    className: 'rpc-check',
                     // 勾选态要带上「还没落盘的本地改动」，否则连点时界面会闪回旧值。
                     checked: pendingModelToggles.current[active.provider + '::disabled'] !== undefined
                       && pendingModelToggles.current[active.provider + '::disabled'][model.id] !== undefined
@@ -4438,45 +4997,38 @@ window.__ModuleLoader__.load({
                     'aria-label': model.name,
                     onChange: function () { toggleModel(active, model) },
                   }),
-                  h('span', { style: S.modelName, title: model.name }, model.name),
-                  h('span', { style: S.modelMeta }, modelMetaText(model)),
+                  h('span', { className: 'rpc-model-name', style: S.modelName, title: model.name }, model.name),
+                  h('span', { className: 'rpc-model-meta', style: S.modelMeta }, modelMetaText(model)),
                   h('span', { style: S.grow }),
-                  h('span', { style: S.modelId }, model.id))
+                  h('span', { className: 'rpc-model-id', style: S.modelId }, model.id))
                 })),
-          h('label', { key: 'rate', style: Object.assign({}, S.row, { cursor: 'pointer' }) },
-            h('input', {
-              type: 'checkbox',
-              checked: status.settings && status.settings.showRateInModelName !== false,
-              onChange: function () {
-                mutate({ display: { showRateInModelName: !(status.settings && status.settings.showRateInModelName !== false) } })
-              },
-            }),
-            h('span', { style: S.label }, bind(t, 'modelRateToggle'))),
-          h('p', { key: 'ratehint', style: S.hintTiny }, bind(t, 'modelRateHint'))),
+        ),
       )
 
       if (unavailable.length > 0) {
         sections.push(
-          h('details', { key: 'unavail' },
-            h('summary', { style: Object.assign({}, S.hintWarn, { cursor: 'pointer' }) },
-              bind(t, 'unavailableCount', { count: unavailable.length })),
-            h('p', { style: S.hintTiny }, bind(t, 'unavailableHint')),
-            h('ul', { style: Object.assign({}, S.modelList, { marginTop: 6 }) },
+          h('details', { key: 'unavail', className: 'rpc-details' },
+            h('summary', { className: 'rpc-label', style: Object.assign({}, S.hintWarn, { cursor: 'pointer', color: 'var(--rpc-warn)' }) },
+              rpcIcon('alert', 13), bind(t, 'unavailableCount', { count: unavailable.length })),
+            h('p', { className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'unavailableHint')),
+            h('ul', { className: 'rpc-list', style: Object.assign({}, S.modelList, { marginTop: 6 }) },
               unavailable.map(function (model, index) {
                 return h('li', {
                   key: model.id,
+                  className: 'rpc-list-row',
                   style: Object.assign({}, S.modelRow, index > 0 ? S.modelRowDivider : {}),
                 },
                 h('input', {
                   type: 'checkbox',
+                  className: 'rpc-check',
                   checked: model.forced === true,
                   'aria-label': model.name,
                   title: bind(t, 'forceShow'),
                   onChange: function () { toggleModel(active, model) },
                 }),
                 h('span', { style: S.modelMeta }, model.name),
-                h('span', { style: S.badge }, bind(t, 'unavailable')),
-                model.forced === true ? h('span', { style: S.badgeSoft }, bind(t, 'forced')) : null,
+                h('span', { className: 'rpc-chip rpc-chip-warn' }, bind(t, 'unavailable')),
+                model.forced === true ? h('span', { className: 'rpc-chip' }, bind(t, 'forced')) : null,
                 h('span', { style: S.grow }),
                 h('span', { style: S.modelId }, model.id))
               })),
@@ -4485,7 +5037,7 @@ window.__ModuleLoader__.load({
       }
 
       if (forcedCount(active) > 0) {
-        sections.push(h('p', { key: 'forced', style: S.hintTiny }, bind(t, 'forced') + ': ' + forcedCount(active)))
+        sections.push(h('p', { key: 'forced', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'forced') + ': ' + forcedCount(active)))
       }
 
       // ── 最近事件 ────────────────────────────────────────────────
@@ -4557,25 +5109,11 @@ window.__ModuleLoader__.load({
           return h('button', {
             key: 'ef' + filter.id,
             type: 'button',
+            className: 'rpc-filter',
             'aria-pressed': selected,
             onClick: function () {
               setEventFilter(filter.id)
               setEventsExpanded(false)
-            },
-            style: {
-              font: 'inherit',
-              fontSize: TEXT.tiny,
-              lineHeight: '16px',
-              padding: '0 7px',
-              borderRadius: 999,
-              cursor: 'pointer',
-              border: '0.5px solid ' + (selected
-                ? 'var(--dsw-alias-state-business-primary, #2f6fed)'
-                : 'var(--dsw-alias-border-l2)'),
-              background: selected ? 'var(--dsh-rpc-fill, rgba(127,127,127,.10))' : 'transparent',
-              color: selected ? 'var(--dsw-alias-label-primary)' : 'var(--dsw-alias-label-secondary)',
-              whiteSpace: 'nowrap',
-              flex: '0 0 auto',
             },
           }, bind(t, filter.label) + (filter.count > 0 ? ' ' + String(filter.count) : ''))
         }
@@ -4594,32 +5132,23 @@ window.__ModuleLoader__.load({
             : ''
           return h('li', {
             key: typeof event.id === 'string' ? event.id : 'ev' + String(index),
-            style: Object.assign({}, S.modelRow, {
-              flexWrap: 'wrap',
-              alignItems: 'baseline',
-              gap: 6,
-            }, index > 0 ? S.modelRowDivider : {}),
+            className: 'rpc-event',
           },
-          h('span', { style: Object.assign({}, dot(eventColor(event.level)), { alignSelf: 'center' }) }),
+          h('span', { className: 'rpc-event-dot', style: { background: eventColor(event.level) } }),
           h('span', {
-            style: Object.assign({}, S.modelMeta, { fontVariantNumeric: 'tabular-nums' }),
+            className: 'rpc-event-time',
             title: formatTime(event.at),
           }, formatShortTime(group.lastAt)),
-          h('span', { style: S.badgeSoft }, typeLabel),
-          scope === '' ? null : h('span', { style: S.modelId }, scope),
+          h('span', { className: 'rpc-chip' }, typeLabel),
+          scope === '' ? null : h('span', { className: 'rpc-model-id' }, scope),
           h('span', {
-            style: Object.assign({}, S.modelName, {
-              flex: '1 1 200px',
-              whiteSpace: 'normal',
-              overflow: 'visible',
-              textOverflow: 'clip',
-            }),
+            className: 'rpc-event-msg',
             title: rawMessage,
           }, message),
           group.count > 1
             ? h('span', {
                 key: 'repeat',
-                style: S.badgeSoft,
+                className: 'rpc-chip',
                 title: repeatHint,
                 'aria-label': repeatHint,
               }, bind(t, 'eventRepeat', { count: formatNumber(group.count) }))
@@ -4629,39 +5158,43 @@ window.__ModuleLoader__.load({
           ? h('button', {
               key: 'more',
               type: 'button',
-              style: S.buttonGhost,
+              className: 'rpc-btn rpc-btn-sm',
               'aria-expanded': eventsExpanded === true,
               onClick: function () { setEventsExpanded(!eventsExpanded) },
-            }, eventsExpanded === true
+            }, rpcIcon(eventsExpanded === true ? 'chevron' : 'chevron', 13), eventsExpanded === true
               ? bind(t, 'eventLess')
               : bind(t, 'eventMore', { count: groupedEvents.length }))
           : null
         sections.push(
           h('div', { key: 'events', style: S.section },
             h('div', { key: 'h', style: S.sectionHead },
-              h('span', { style: S.sectionTitle }, bind(t, 'eventTitle')),
+              h('span', { style: S.sectionTitle }, rpcIcon('pulse', 14), bind(t, 'eventTitle')),
               h('span', { style: S.sectionCount }, String(allEvents.length)),
               h('span', { style: S.grow }),
               allEvents.length === 0
                 ? null
                 : h('button', {
                     type: 'button',
-                    style: S.buttonGhost,
+                    className: 'rpc-btn rpc-btn-sm',
                     disabled: isBusy('events'),
                     onClick: clearEvents,
-                  }, bind(t, 'eventClear'))),
-            h('p', { key: 'hint', style: S.hintTiny }, bind(t, 'eventHint')),
+                  }, rpcIcon('trash', 13), bind(t, 'eventClear'))),
+            h('p', { key: 'hint', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'eventHint')),
             // count 是历史总数、items 是宿主真实保留的条数：两者不同时明确告诉用户，
             // 避免「标题写 63、列表只有 50」看起来像丢事件。
             isFiniteNumber(eventDoc.count) && eventDoc.count > allEvents.length
-              ? h('p', { key: 'retained', style: S.hintTiny }, bind(t, 'eventRetained', { count: allEvents.length }))
+              ? h('p', { key: 'retained', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'eventRetained', { count: allEvents.length }))
               : null,
-            h('div', { key: 'filters', style: Object.assign({}, S.row, { flexWrap: 'wrap' }) }, eventFilters.map(eventFilterButton)),
+            h('div', { key: 'filters', className: 'rpc-filters', style: Object.assign({}, S.row, { flexWrap: 'wrap' }) }, eventFilters.map(eventFilterButton)),
             allEvents.length === 0
-              ? h('p', { key: 'empty', style: S.hint }, bind(t, 'eventEmpty'))
+              ? h('div', { key: 'empty', className: 'rpc-empty' },
+                  h('span', { className: 'rpc-empty-icon' }, rpcIcon('pulse', 18)),
+                  h('span', {}, bind(t, 'eventEmpty')))
               : filteredEvents.length === 0
-                ? h('p', { key: 'nomatch', style: S.hint }, bind(t, 'eventNoMatch'))
-                : h('ul', { key: 'list', style: S.modelList }, eventRows),
+                ? h('div', { key: 'nomatch', className: 'rpc-empty' },
+                    h('span', { className: 'rpc-empty-icon' }, rpcIcon('search', 18)),
+                    h('span', {}, bind(t, 'eventNoMatch')))
+                : h('ul', { key: 'list', className: 'rpc-event-list' }, eventRows),
             eventsFooter),
         )
       }
@@ -4670,21 +5203,23 @@ window.__ModuleLoader__.load({
       sections.push(
         h('div', { key: 'diag', style: S.section },
           h('div', { key: 'h', style: S.sectionHead },
-            h('span', { style: S.sectionTitle }, bind(t, 'diagnostics')),
+            h('span', { style: S.sectionTitle }, rpcIcon('pulse', 14), bind(t, 'diagnostics')),
             h('span', { style: S.grow }),
-            h('button', { type: 'button', style: S.buttonGhost, 'aria-expanded': showDiag, 'aria-controls': showDiag ? 'dsh-reverse-proxy-diagnostics' : undefined, onClick: function () { setShowDiag(!showDiag) } },
+            h('button', { type: 'button', className: 'rpc-btn rpc-btn-sm', 'aria-expanded': showDiag, 'aria-controls': showDiag ? 'dsh-reverse-proxy-diagnostics' : undefined, onClick: function () { setShowDiag(!showDiag) } },
               showDiag ? bind(t, 'hide') : bind(t, 'show')),
             h('button', {
               type: 'button',
-              style: Object.assign({}, S.buttonGhost, copyFailed ? { color: 'var(--dsw-alias-state-error-primary)' } : {}),
+              className: 'rpc-btn rpc-btn-sm',
+              style: copyFailed ? { color: 'var(--rpc-danger)' } : undefined,
               title: copyFailed ? bind(t, 'copyFallbackHint') : undefined,
               onClick: copyDiagnostics,
-            },
+            }, rpcIcon('copy', 13),
               copied ? bind(t, 'copied') : copyFailed ? bind(t, 'copyFailed') : bind(t, 'copyDiagnostics'))),
           copyFallback !== ''
             ? h('div', { key: 'copy-fallback', role: 'status', style: S.field },
-                h('span', { style: S.hintTiny }, bind(t, 'copyFallbackHint')),
+                h('span', { className: 'rpc-inline-note', style: S.hintTiny }, bind(t, 'copyFallbackHint')),
                 h('textarea', {
+                  className: 'rpc-pre',
                   style: Object.assign({}, S.pre, { width: '100%', boxSizing: 'border-box', minHeight: 72, resize: 'vertical' }),
                   readOnly: true,
                   value: copyFallback,
@@ -4693,10 +5228,97 @@ window.__ModuleLoader__.load({
                   },
                 }))
             : null,
-          showDiag ? h('pre', { key: 'pre', id: 'dsh-reverse-proxy-diagnostics', style: S.pre }, diagnosticsJson) : null),
+          showDiag ? h('pre', { key: 'pre', id: 'dsh-reverse-proxy-diagnostics', className: 'rpc-pre', style: S.pre }, diagnosticsJson) : null),
       )
 
-      return h('div', { style: S.card }, sections)
+      // React 会把 `key` 从 props 里摘掉，挂到 element.key 上；测试/预览的
+      // 迷你 createElement 则保留在 props.key。两处都读，分区才不会在真实
+      // React 里全部落到默认页。
+      var sectionKeyOf = function (node) {
+        if (node === null || node === undefined) return undefined
+        if (node.key !== undefined && node.key !== null) return node.key
+        return node.props !== undefined ? node.props.key : undefined
+      }
+
+      // ── 把各分区装进详情页 ──────────────────────────────────────
+      var pages = { overview: [], accounts: [], usage: [], models: [], settings: [], activity: [] }
+      sections.forEach(function (node) {
+        var key = sectionKeyOf(node)
+        var pageId = RPC_SECTION_PAGE[key] || 'overview'
+        if (pages[pageId] === undefined) return
+        pages[pageId].push(node)
+      })
+      // 概览：额度在左、状态在右，符合「还剩多少 → 能不能用」的阅读顺序。
+      var overviewRank = { credits: 0, status: 1, 'overview-accounts': 2 }
+      pages.overview.sort(function (a, b) {
+        return (overviewRank[sectionKeyOf(a)] ?? 9) - (overviewRank[sectionKeyOf(b)] ?? 9)
+      })
+
+      var pageCountFor = function (pageId) {
+        if (pageId === 'accounts') return accountRows.length
+        if (pageId === 'models') return modelTotal
+        if (pageId === 'activity' && status.events !== null && typeof status.events === 'object' && Array.isArray(status.events.items)) return status.events.items.length
+        return undefined
+      }
+
+      var pageNav = h('div', {
+        className: 'rpc-pagenav',
+        role: 'navigation',
+        'aria-label': bind(t, 'navSections'),
+      }, RPC_PAGES.map(function (page) {
+        var selected = activePage === page.id
+        var count = pageCountFor(page.id)
+        return h('button', {
+          key: page.id,
+          type: 'button',
+          className: 'rpc-pagetab',
+          'aria-current': selected ? 'page' : undefined,
+          onClick: function () { setActivePage(page.id) },
+        },
+        rpcIcon(page.icon, 14),
+        bind(t, page.label),
+        count === undefined ? null : h('span', { className: 'rpc-pagetab-count' }, formatNumber(count)))
+      }))
+
+      var pagePanels = RPC_PAGES.map(function (page) {
+        var content = pages[page.id]
+        return h('div', {
+          key: page.id,
+          id: 'dsh-rpc-page-' + page.id,
+          role: 'tabpanel',
+          'aria-labelledby': 'dsh-rpc-tab-' + active.provider,
+          className: 'rpc-page',
+          style: { display: activePage === page.id ? 'flex' : 'none' },
+        }, page.id === 'overview'
+          ? h('div', { className: 'rpc-overview' },
+              h('div', { className: 'rpc-overview-main' }, content.filter(function (node) { return sectionKeyOf(node) === 'credits' })),
+              h('div', { className: 'rpc-overview-side' }, content.filter(function (node) { return sectionKeyOf(node) !== 'credits' })))
+          : content)
+      })
+
+      var providerAccent = PROVIDER_ACCENT[active.provider] || '#2154ce'
+
+      return h('div', {
+        className: 'dsh-rpc',
+        style: { '--rpc-accent': providerAccent },
+      },
+      hero,
+      providerRail,
+      banners,
+      h('div', {
+        id: 'dsh-rpc-detail',
+        className: 'rpc-detail',
+      },
+        detailHeader,
+        pageNav,
+        ...pagePanels),
+      h('div', { className: 'rpc-footer' },
+        h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
+          rpcIcon('refresh', 11), bind(t, 'autoRefreshHint')),
+        h('span', { style: { flex: 1 } }),
+        h('span', {}, 'v' + (status.plugin && status.plugin.version ? status.plugin.version : '?')),
+        h('span', { 'aria-hidden': 'true' }, '·'),
+        h('span', {}, bind(t, 'footerHint'))))
     }
 
 

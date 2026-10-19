@@ -75,7 +75,9 @@ test('临时文件清理：maxAgeMs 可调，0 表示连刚写完的也清', () 
     const temp = join(dir, '.events.json.1.deadbeef.tmp')
     writeFileSync(temp, 'x')
     assert.deepEqual(sweepTempFiles(dir, { maxAgeMs: 60_000 }), { removed: 0, bytes: 0 })
-    assert.deepEqual(sweepTempFiles(dir, { maxAgeMs: 0 }), { removed: 1, bytes: 1 })
+    // 文件系统 mtime 只精确到秒级时，「刚写完」可能比 Date.now() 略晚；
+    // 显式把 now 推到之后，避免 maxAgeMs:0 在并发跑测试时被时间抖动干扰。
+    assert.deepEqual(sweepTempFiles(dir, { maxAgeMs: 0, now: Date.now() + 5000 }), { removed: 1, bytes: 1 })
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

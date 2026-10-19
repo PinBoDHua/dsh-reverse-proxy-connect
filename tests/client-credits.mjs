@@ -63,7 +63,13 @@ function useState(initial) {
 
 function createElement(type, props, ...children) {
   if (type === undefined || type === null) throw new Error('createElement 收到空组件')
-  return { type, props: props ?? {}, children: children.flat(Infinity) }
+  const raw = props ?? {}
+  // 真实 React 会把 key 从 props 里摘走，放到 element.key 上。测试也照做，
+  // 否则「按 props.key 给分区归页」这类真实环境才会犯的错测不出来。
+  const key = raw.key
+  const cleaned = { ...raw }
+  delete cleaned.key
+  return { type, key, props: cleaned, children: children.flat(Infinity) }
 }
 
 // useRef 必须**跨渲染保留**（按 hook 序号），否则 pending 集合之类的东西
@@ -383,9 +389,16 @@ function find(tree, predicate) {
   return found
 }
 
-/** 按可见文字找按钮。 */
+/** 按可见文字找按钮（provider 卡是 role=tab 的按钮，文字前缀是服务商名）。 */
 function findButton(tree, label) {
-  return find(tree, (node) => node.type === 'button' && textOf(node) === label)
+  return find(tree, (node) => {
+    if (node.type !== 'button') return false
+    const text = textOf(node)
+    if (text === label) return true
+    // 3.0 起概览卡与 provider tab 合并：按钮文字是「名称 | 状态 | 余额 | …」。
+    if (node.props?.role === 'tab') return text.split(' | ')[0] === label
+    return false
+  })
 }
 
 /** 收集所有符合条件的节点。 */
@@ -448,6 +461,44 @@ if (find(cardTree, (node) => node.type === 'input' && node.props.placeholder ===
   throw new Error('桌面 provider 不应再有手动添加账号输入框')
 }
 console.log('✓ 卡片分组、总览与模型列表都渲染出来了')
+
+// 1a. 信息架构：六个分区只显示当前页，且不是所有内容都堆进概览。
+//     这里同时验证「真实 React 会把 key 从 props 摘到 element.key」——
+//     如果按 props.key 归页，所有分区都会落到概览。
+{
+  const panels = findAll(cardTree, (node) => node.props?.role === 'tabpanel'
+    && typeof node.props?.id === 'string' && node.props.id.startsWith('dsh-rpc-page-'))
+  if (panels.length !== 6) throw new Error(`应有 6 个详情分区，实际 ${panels.length}`)
+  const visible = panels.filter((node) => node.props.style?.display !== 'none')
+  if (visible.length !== 1) throw new Error(`同一时间应只有 1 个分区可见，实际 ${visible.length}`)
+  if (visible[0].props.id !== 'dsh-rpc-page-overview') throw new Error('默认分区不是概览')
+  const overviewText = textOf(visible[0])
+  for (const needle of ['credits', 'secStatus', 'secAccounts']) {
+    if (!overviewText.includes(needle)) throw new Error(`概览分区缺少 ${needle}`)
+  }
+  for (const hidden of ['usageHeatmap', 'eventTitle', 'secConnection', 'modelRateToggle']) {
+    if (overviewText.includes(hidden)) throw new Error(`不属于概览的内容被堆进了概览：${hidden}`)
+  }
+  // 点击「账号」页：只切换可见性，不丢失其它分区。
+  const accountsTab = find(cardTree, (node) => node.type === 'button'
+    && node.props?.className === 'rpc-pagetab'
+    && textOf(node).startsWith('navAccounts'))
+  if (accountsTab === undefined) throw new Error('找不到「账号」分区按钮')
+  accountsTab.props.onClick()
+  cardTree = await render(card, { t: (key) => key })
+  const accountsPanel = find(cardTree, (node) => node.props?.id === 'dsh-rpc-page-accounts')
+  if (accountsPanel.props.style?.display !== 'flex') throw new Error('点「账号」后账号分区仍不可见')
+  // 切换服务商应回到概览，避免停在上一家的设置页。
+  const nextProvider = find(cardTree, (node) => node.props?.role === 'tab' && node.type === 'button'
+    && textOf(node).startsWith('WorkBuddy AI'))
+  nextProvider.props.onClick()
+  cardTree = await render(card, { t: (key) => key })
+  const resetPanel = find(cardTree, (node) => node.props?.id === 'dsh-rpc-page-overview')
+  if (resetPanel.props.style?.display !== 'flex') throw new Error('切换服务商后没有回到概览')
+  console.log('✓ 六个详情分区按页切换，切换服务商回到概览')
+  cardTree = await mount(card, { t: (key) => key })
+}
+
 
 // 账号区：能列出两个账号，并且「使用」会发 activeAccount 补丁
 if (!cardText.includes('secAccounts')) throw new Error('卡片缺少账号分组')
@@ -1645,7 +1696,7 @@ if (tablist === undefined) throw new Error('缺少 tablist')
 let prevented = false
 tablist.props.onKeyDown({ key: 'ArrowRight', preventDefault() { prevented = true } })
 cardTree = await render(card, { t: (key) => key })
-const aiTab = find(cardTree, (node) => node.type === 'button' && textOf(node) === 'WorkBuddy AI')
+const aiTab = findButton(cardTree, 'WorkBuddy AI')
 if (aiTab === undefined || aiTab.props['aria-selected'] !== true) throw new Error('ArrowRight 应切到下一个 provider')
 if (!prevented) throw new Error('方向键应 preventDefault，避免滚动页面')
 console.log('✓ provider 标签支持方向键切换')
