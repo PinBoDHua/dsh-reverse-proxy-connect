@@ -627,6 +627,59 @@ console.log('✓ 签到按钮会发 action=checkin')
   }
 }
 
+// ---------- 1b2. 可用性测试：账号 + 模型都由用户选，模型真正传给 /action ----------
+{
+  const provider = STATUS.providers[0]
+  const modelsSnapshot = provider.models
+  const accountsSnapshot = provider.accounts
+  const modelCountSnapshot = provider.modelCount
+  try {
+    provider.models = modelsSnapshot.concat({
+      id: 'hy3', name: 'Hy3', contextWindow: 192000, maxTokens: 64000,
+      supportsImages: true, reasoningEfforts: [], disabled: false, unavailable: false,
+    })
+    provider.modelCount = provider.models.length
+    provider.accounts = accountsSnapshot.map((account, index) => index === 0
+      ? {
+          ...account,
+          modelTests: {
+            hy3: { at: Date.now() - 60_000, ok: false, latencyMs: 320, code: 'RATE_LIMIT', model: 'hy3', error: 'HTTP 429', resetHint: '2026-10-19 20:00' },
+          },
+        }
+      : account)
+    cardTree = await mount(card, { t: (key) => key })
+    const accountSelect = find(cardTree, (node) => node.type === 'select' && node.props?.['aria-label'] === 'testModelAccount')
+    const modelSelect = find(cardTree, (node) => node.type === 'select' && node.props?.['aria-label'] === 'testModelModel')
+    if (accountSelect === undefined || modelSelect === undefined) throw new Error('可用性测试缺少账号/模型选择器')
+    const modelOptions = findAll(modelSelect, (node) => node.type === 'option').map(textOf)
+    if (!modelOptions.includes('Hy3')) throw new Error(`模型选择器没有列出 Hy3：${modelOptions.join(' / ')}`)
+    modelSelect.props.onChange({ target: { value: 'hy3' } })
+    cardTree = await render(card, { t: (key) => key })
+    const availability = find(cardTree, (node) => node.key === 'availability-test')
+    if (availability === undefined) throw new Error('找不到可用性测试区块')
+    const availabilityText = textOf(availability)
+    if (!availabilityText.includes('Hy3')) throw new Error('切换模型后没有保留所选模型')
+    if (!availabilityText.includes('limitBadge')) throw new Error('限额的测试结果没有显示「限额」徽标')
+    if (!availabilityText.includes('limitUntil')) throw new Error('限额的测试结果没有显示重置时间')
+    const runButton = findButton(cardTree, 'testModelStart')
+    if (runButton === undefined) throw new Error('找不到「开始测试」按钮')
+    const beforeTestModel = calls.length
+    runButton.props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    const testModelCall = calls[calls.length - 1]
+    const body = String(testModelCall?.body)
+    if (calls.length === beforeTestModel || !body.includes('test-model') || !body.includes('hy3') || !body.includes('"accountId":"default"')) {
+      throw new Error(`可用性测试请求不对：${body.slice(0, 200)}`)
+    }
+    console.log('✓ 可用性测试可选择账号/模型，并把模型传给 test-model')
+  } finally {
+    provider.models = modelsSnapshot
+    provider.accounts = accountsSnapshot
+    provider.modelCount = modelCountSnapshot
+    cardTree = await mount(card, { t: (key) => key })
+  }
+}
+
 // ---------- 1c. 状态列：过期测试与凭证失效都不能显示成「可用」 ----------
 {
   const provider = STATUS.providers[0]

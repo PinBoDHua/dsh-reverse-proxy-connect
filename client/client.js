@@ -300,6 +300,15 @@ window.__ModuleLoader__.load({
           'border:1px solid var(--rpc-border);background:var(--rpc-surface-2);font-size:12px;line-height:18px;min-width:0}',
           '.rpc-subcard{display:flex;flex-direction:column;gap:8px;padding:12px;border-radius:12px;',
           'border:1px dashed var(--rpc-border-strong);background:var(--rpc-surface);min-width:0}',
+          '.rpc-testgrid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.5fr) auto;gap:8px;align-items:end;min-width:0}',
+          '.rpc-testfield{display:flex;flex-direction:column;gap:4px;min-width:0}',
+          '.rpc-testfield>span{font-size:11px;line-height:16px;font-weight:600;color:var(--rpc-muted)}',
+          '.rpc-select{font:inherit;font-size:12.5px;height:32px;padding:0 8px;border-radius:8px;box-sizing:border-box;width:100%;min-width:0;',
+          'border:1px solid var(--rpc-border);background:var(--rpc-surface-2);color:var(--rpc-text);cursor:pointer;transition:border-color .12s,box-shadow .12s}',
+          '.rpc-select:hover{border-color:var(--rpc-border-strong)}',
+          '.rpc-select:focus{outline:none;border-color:var(--rpc-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--rpc-accent) 14%,transparent)}',
+          '.rpc-select:disabled{opacity:.55;cursor:not-allowed}',
+          '.rpc-testresult{display:flex;align-items:center;gap:7px;flex-wrap:wrap;min-width:0;font-size:11.5px;line-height:17px;color:var(--rpc-muted)}',
           '.rpc-inline-note{display:flex;align-items:flex-start;gap:6px;font-size:11.5px;line-height:17px;color:var(--rpc-muted);margin:0}',
           '.rpc-kpi{position:relative;display:flex;flex-direction:column;gap:2px;min-width:0;padding:13px 14px 11px;',
           'border:1px solid var(--rpc-border);border-radius:13px;overflow:hidden;',
@@ -329,6 +338,7 @@ window.__ModuleLoader__.load({
           '@container (max-width:760px){.rpc-overview{grid-template-columns:1fr}.rpc-detail-head{padding-top:14px}.rpc-provider-health{display:none}}',
           '@container (max-width:820px){.rpc-rail{grid-template-columns:repeat(3,minmax(0,1fr))}}',
           '@container (max-width:480px){.rpc-rail{grid-template-columns:repeat(2,minmax(0,1fr))}}',
+          '@container (max-width:620px){.rpc-testgrid{grid-template-columns:1fr 1fr}.rpc-testgrid>.rpc-btn{grid-column:1/-1;justify-self:start}}',
           '@container (max-width:560px){.rpc-hero{flex-wrap:wrap;padding:15px 16px 13px}.rpc-hero-actions{width:100%;justify-content:flex-start;padding-left:0}',
           '.rpc-rail{padding:10px 14px 11px}',
           '.rpc-pagenav{margin:12px 14px 0;max-width:calc(100% - 28px)}',
@@ -542,7 +552,7 @@ window.__ModuleLoader__.load({
       healthDown: '连续失败',
       healthStale: '待验证',
       healthUnknown: '无记录',
-      healthStaleHint: '最后一次请求失败已超过 30 分钟，之后没有成功记录；发一次消息会自动更新，或到「账号」页点测试确认当前可用性。',
+      healthStaleHint: '最后一次请求失败已超过 30 分钟，之后没有成功记录；在下方「可用性测试」里选模型验证，或发一次消息自动更新。',
       lastFailureAt: '最近失败',
       lastSuccessAtLabel: '最近成功',
       neverSucceeded: '还没有成功记录',
@@ -640,6 +650,15 @@ window.__ModuleLoader__.load({
       authBadge: '失效',
       limitUntil: '限额至 {time}',
       recentLimitHint: '最近一次请求被上游限额（{code}）',
+      availabilityTest: '可用性测试',
+      availabilityTestHint: '选一个账号和模型，发一次 1 token 请求，确认当前是否可用、是否被限额；不消耗对话额度。',
+      testModelAccount: '账号',
+      testModelModel: '模型',
+      testModelStart: '开始测试',
+      testModelNever: '这个模型还没有测试记录',
+      testModelResultAt: '测试于 {time}',
+      testModelNoAccounts: '还没有可测试的账号',
+      testModelNoModels: '没有可测试的模型',
       usageAccountCol: '账号',
       usageAllAccounts: '全部账号',
       usageModelCalls: '请求',
@@ -884,7 +903,7 @@ window.__ModuleLoader__.load({
       healthDown: 'Failing',
       healthStale: 'Needs check',
       healthUnknown: 'No data',
-      healthStaleHint: 'The last request failed more than 30 minutes ago and no success has been recorded since. Send a message to refresh this status, or test the account on the Accounts page to confirm current availability.',
+      healthStaleHint: 'The last request failed more than 30 minutes ago and no success has been recorded since. Verify with a model in Availability test below, or send a message to refresh.',
       lastFailureAt: 'Last failure',
       lastSuccessAtLabel: 'Last success',
       neverSucceeded: 'No success recorded yet',
@@ -982,6 +1001,15 @@ window.__ModuleLoader__.load({
       authBadge: 'Auth',
       limitUntil: 'Limited until {time}',
       recentLimitHint: 'The latest request was limited upstream ({code})',
+      availabilityTest: 'Availability test',
+      availabilityTestHint: 'Pick an account and a model, then send one 1-token request to check availability or rate limiting. It does not consume chat credits.',
+      testModelAccount: 'Account',
+      testModelModel: 'Model',
+      testModelStart: 'Run test',
+      testModelNever: 'No test recorded for this model yet',
+      testModelResultAt: 'Tested {time}',
+      testModelNoAccounts: 'No account to test yet',
+      testModelNoModels: 'No model to test',
       usageAccountCol: 'Account',
       usageAllAccounts: 'All accounts',
       usageModelCalls: 'Requests',
@@ -2229,6 +2257,7 @@ window.__ModuleLoader__.load({
     var RPC_SECTION_PAGE = {
       status: 'overview',
       'overview-accounts': 'overview',
+      'availability-test': 'overview',
       credits: 'overview',
       accounts: 'accounts',
       usage: 'usage',
@@ -2322,6 +2351,10 @@ window.__ModuleLoader__.load({
       var accountModelRangeState = useState('today')
       var accountModelRange = accountModelRangeState[0]
       var setAccountModelRange = accountModelRangeState[1]
+      // 可用性测试的账号 / 模型选择，按 provider 记住，切服务商不丢。
+      var testPickState = useState({})
+      var testPicks = testPickState[0]
+      var setTestPicks = testPickState[1]
       // 2.0.0：最近事件的时间线筛选与展开。
       var eventFilterState = useState('all')
       var eventFilter = eventFilterState[0]
@@ -2466,6 +2499,15 @@ window.__ModuleLoader__.load({
       var selectProvider = function (provider) {
         setActiveTab(provider)
         setActivePage('overview')
+      }
+
+      var currentTestPick = active === undefined ? {} : (testPicks[active.provider] || {})
+      var setTestPick = function (field, value) {
+        if (active === undefined) return
+        var next = Object.assign({}, testPicks)
+        next[active.provider] = Object.assign({}, next[active.provider] || {})
+        next[active.provider][field] = value
+        setTestPicks(next)
       }
 
       // 页头摘要：接入数量 / 可读额度数量 / 最近更新时间。
@@ -3947,6 +3989,126 @@ window.__ModuleLoader__.load({
         ),
       )
 
+      // 可用性测试：账号 + 模型都由用户选，发一次 1 token 请求确认
+      // 「当前能不能用 / 有没有被限额」。结果同时写进 account.modelTests，
+      // 所以账号 × 模型表和这里看到的是同一份证据。
+      var testModelOptions = safeArray(active.models).filter(function (model) {
+        return typeof model.id === 'string' && model.id !== ''
+      }).slice()
+      var testAccountOptions = accountRows.filter(function (account) {
+        return typeof account.id === 'string' && account.id !== ''
+      })
+      testModelOptions.sort(function (a, b) {
+        if (a.id === 'auto') return -1
+        if (b.id === 'auto') return 1
+        if ((a.unavailable === true) !== (b.unavailable === true)) return a.unavailable === true ? 1 : -1
+        return 0
+      })
+      var defaultTestModel = testModelOptions.filter(function (model) { return model.id === 'auto' })[0]
+        || testModelOptions.filter(function (model) { return model.unavailable !== true })[0]
+        || testModelOptions[0]
+      var chosenTestModel = testModelOptions.filter(function (model) { return model.id === currentTestPick.model })[0] || defaultTestModel
+      var chosenTestAccount = testAccountOptions.filter(function (account) { return account.id === currentTestPick.account })[0]
+        || testAccountOptions.filter(function (account) { return account.active === true })[0]
+        || testAccountOptions[0]
+      var testModelResult = chosenTestAccount !== undefined && chosenTestModel !== undefined
+        && chosenTestAccount.modelTests !== null && typeof chosenTestAccount.modelTests === 'object'
+        ? chosenTestAccount.modelTests[chosenTestModel.id]
+        : undefined
+      var testModelBusyKey = chosenTestAccount !== undefined && chosenTestModel !== undefined
+        ? 'model-test:' + chosenTestAccount.id + ':' + chosenTestModel.id
+        : undefined
+      var testModelResultNode = null
+      if (chosenTestAccount === undefined) {
+        testModelResultNode = h('span', { key: 'no-acc', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'testModelNoAccounts'))
+      } else if (chosenTestModel === undefined) {
+        testModelResultNode = h('span', { key: 'no-model', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'testModelNoModels'))
+      } else if (testModelResult === null || typeof testModelResult !== 'object') {
+        testModelResultNode = h('div', { key: 'never', className: 'rpc-testresult' },
+          h('span', { className: 'rpc-chip' }, bind(t, 'testModelNever')),
+          h('span', { style: S.grow }),
+          h('span', { style: S.modelMeta }, chosenTestModel.name || chosenTestModel.id))
+      } else {
+        var testLimitCodes = { RATE_LIMIT: true, QUOTA: true }
+        var testOk = testModelResult.ok === true
+        var testLimit = testLimitCodes[testModelResult.code] === true
+        var testAuth = testModelResult.code === 'AUTH'
+        var testAgo = isFiniteNumber(testModelResult.at) && testModelResult.at > 0
+          ? bind(t, 'testModelResultAt', { time: formatAgo(testModelResult.at, t) })
+          : ''
+        var testDetail
+        if (testOk) {
+          testDetail = bind(t, 'testOk', { ms: formatLatency(testModelResult.latencyMs) }) + (testAgo === '' ? '' : ' · ' + testAgo)
+        } else if (testLimit) {
+          testDetail = (typeof testModelResult.resetHint === 'string' && testModelResult.resetHint !== ''
+            ? bind(t, 'limitUntil', { time: testModelResult.resetHint })
+            : shortErrorMessage(testModelResult.error, t)) + (testAgo === '' ? '' : ' · ' + testAgo)
+        } else {
+          testDetail = shortErrorMessage(testModelResult.error, t) + (testAgo === '' ? '' : ' · ' + testAgo)
+        }
+        testModelResultNode = h('div', {
+          key: 'result',
+          className: 'rpc-testresult',
+          title: typeof testModelResult.error === 'string' ? testModelResult.error : '',
+        },
+        h('span', {
+          className: testOk ? 'rpc-chip rpc-chip-ok' : 'rpc-chip rpc-chip-warn',
+        }, testOk ? bind(t, 'modelTestOk') : testLimit ? bind(t, 'limitBadge') : testAuth ? bind(t, 'authBadge') : bind(t, 'modelTestFailed')),
+        h('span', { style: { minWidth: 0 } }, testDetail),
+        h('span', { style: S.grow }),
+        h('span', { style: S.modelMeta }, chosenTestModel.name || chosenTestModel.id))
+      }
+
+      sections.push(
+        h('div', { key: 'availability-test', className: 'rpc-section rpc-testcard', style: S.section },
+          h('div', { key: 'h', style: S.sectionHead },
+            h('span', { style: S.sectionTitle }, rpcIcon('pulse', 14), bind(t, 'availabilityTest'))),
+          h('p', { key: 'hint', className: 'rpc-inline-note', style: S.hintTiny }, rpcIcon('shield', 13), bind(t, 'availabilityTestHint')),
+          chosenTestAccount === undefined || chosenTestModel === undefined
+            ? null
+            : h('div', { key: 'controls', className: 'rpc-testgrid' },
+                h('label', { className: 'rpc-testfield' },
+                  h('span', {}, bind(t, 'testModelAccount')),
+                  h('select', {
+                    className: 'rpc-select',
+                    'aria-label': bind(t, 'testModelAccount'),
+                    value: chosenTestAccount.id,
+                    onChange: function (event) { setTestPick('account', event.target.value) },
+                  },
+                  testAccountOptions.map(function (account, index) {
+                    return h('option', {
+                      key: 'a' + index,
+                      value: account.id,
+                    }, (typeof account.label === 'string' && account.label !== '' ? account.label : bind(t, 'accountFallback'))
+                      + (account.active === true ? ' · ' + bind(t, 'currentAccount') : ''))
+                  }))),
+                h('label', { className: 'rpc-testfield' },
+                  h('span', {}, bind(t, 'testModelModel')),
+                  h('select', {
+                    className: 'rpc-select',
+                    'aria-label': bind(t, 'testModelModel'),
+                    value: chosenTestModel.id,
+                    onChange: function (event) { setTestPick('model', event.target.value) },
+                  },
+                  testModelOptions.map(function (model, index) {
+                    return h('option', {
+                      key: 'm' + index,
+                      value: model.id,
+                    }, (model.name || model.id) + (model.unavailable === true ? ' · ' + bind(t, 'unavailable') : ''))
+                  }))),
+                h('button', {
+                  type: 'button',
+                  className: 'rpc-btn rpc-btn-primary',
+                  style: { height: 32 },
+                  disabled: isBusy(testModelBusyKey),
+                  onClick: function () {
+                    testAccountModel(active.provider, chosenTestAccount.id, chosenTestModel.id)
+                  },
+                }, rpcIcon('pulse', 14),
+                  isBusy(testModelBusyKey) ? bind(t, 'modelTesting') : bind(t, 'testModelStart'))),
+          testModelResultNode),
+      )
+
       // 概览右栏的账号摘要：只读，点「管理账号」进入账号页。
       // 它回答的是「现在是哪个账号、今天签到了没有」，不重复表格里的操作。
       if (accountRows.length > 0) {
@@ -5297,7 +5459,7 @@ window.__ModuleLoader__.load({
         pages[pageId].push(node)
       })
       // 概览：额度在左、状态在右，符合「还剩多少 → 能不能用」的阅读顺序。
-      var overviewRank = { credits: 0, status: 1, 'overview-accounts': 2 }
+      var overviewRank = { credits: 0, status: 1, 'overview-accounts': 2, 'availability-test': 3 }
       pages.overview.sort(function (a, b) {
         return (overviewRank[sectionKeyOf(a)] ?? 9) - (overviewRank[sectionKeyOf(b)] ?? 9)
       })
@@ -5338,9 +5500,16 @@ window.__ModuleLoader__.load({
           className: 'rpc-page',
           style: { display: activePage === page.id ? 'flex' : 'none' },
         }, page.id === 'overview'
-          ? h('div', { className: 'rpc-overview' },
-              h('div', { className: 'rpc-overview-main' }, content.filter(function (node) { return sectionKeyOf(node) === 'credits' })),
-              h('div', { className: 'rpc-overview-side' }, content.filter(function (node) { return sectionKeyOf(node) !== 'credits' })))
+          ? (function () {
+              var grid = content.filter(function (node) { return sectionKeyOf(node) !== 'availability-test' })
+              var below = content.filter(function (node) { return sectionKeyOf(node) === 'availability-test' })
+              return [
+                h('div', { className: 'rpc-overview' },
+                  h('div', { className: 'rpc-overview-main' }, grid.filter(function (node) { return sectionKeyOf(node) === 'credits' })),
+                  h('div', { className: 'rpc-overview-side' }, grid.filter(function (node) { return sectionKeyOf(node) !== 'credits' }))),
+                ...below,
+              ]
+            })()
           : content)
       })
 
