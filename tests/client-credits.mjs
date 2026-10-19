@@ -2623,4 +2623,153 @@ function extractFn(header) {
   }
 }
 
+
+// ── 0.4.1 审计回归 ────────────────────────────────────────────────
+// 0.4.1 前后端审计确认的前端缺陷：每条都对应一个可复现的用户可见问题。
+
+// 40) 签到汇总：任一账号失败时必须显性说出来，不能被「今天已签到」盖住。
+{
+  const snapshot = STATUS.providers[0].checkin
+  try {
+    STATUS.providers[0].checkin = {
+      enabled: true,
+      completedToday: true,
+      result: {
+        provider: 'workbuddy',
+        claimed: 0,
+        credit: 0,
+        outcomes: [
+          { accountId: 'default', label: '本机登录', kind: 'already', streakDays: 3 },
+          { accountId: 'acc-2', label: '备用账号', kind: 'failed', message: 'HTTP 500' },
+        ],
+      },
+    }
+    const tree = await mount(card, { t: realT })
+    const text = textOf(tree)
+    if (!text.includes('签到失败')) throw new Error('多账号里有失败时，汇总仍只显示「今天已签到」')
+    if (!text.includes(realT('checkinRetryHint'))) throw new Error('签到失败没有给出重试说明')
+    console.log('✓ 签到汇总：任一账号失败时显示失败与重试提示，不被「已签到」吞掉')
+  } finally {
+    STATUS.providers[0].checkin = snapshot
+  }
+}
+
+// 41) 可用性测试的模型下拉不得包含「账号不支持」的模型。
+{
+  const snapshot = STATUS.providers[0].models
+  try {
+    STATUS.providers[0].models = [
+      { id: 'auto', name: 'Auto', contextWindow: 256000, maxTokens: 32000, supportsImages: true, reasoningEfforts: [], disabled: false, unavailable: false, forced: false },
+      { id: 'ghost-model', name: 'Ghost', contextWindow: 1000, maxTokens: 100, supportsImages: false, reasoningEfforts: [], disabled: false, unavailable: true, forced: false },
+    ]
+    STATUS.providers[0].modelCount = STATUS.providers[0].models.length
+    const tree = await mount(card, { t: realT })
+    const select = find(tree, (node) => node.type === 'select' && node.props?.['aria-label'] === realT('testModelModel'))
+    if (select === undefined) throw new Error('找不到可用性测试的模型下拉')
+    const values = findAll(select, (node) => node.type === 'option').map((node) => node.props.value)
+    if (values.includes('ghost-model')) throw new Error('「账号不支持」的模型出现在可用性测试下拉里，可被选中并发请求')
+    if (!values.includes('auto')) throw new Error('可用模型反而不在下拉里')
+    console.log('✓ 可用性测试下拉与「可用模型」列表口径一致，不列账号不支持的模型')
+  } finally {
+    STATUS.providers[0].models = snapshot
+    STATUS.providers[0].modelCount = snapshot.length
+  }
+}
+
+// 42) 所有模型都「账号不支持」时，空状态不能说成「没有匹配的模型」。
+{
+  const snapshot = STATUS.providers[0].models
+  try {
+    STATUS.providers[0].models = [
+      { id: 'paid-a', name: 'Paid A', contextWindow: 128000, maxTokens: 32000, supportsImages: false, reasoningEfforts: [], disabled: false, unavailable: true, forced: false },
+      { id: 'paid-b', name: 'Paid B', contextWindow: 128000, maxTokens: 32000, supportsImages: false, reasoningEfforts: [], disabled: false, unavailable: true, forced: false },
+    ]
+    STATUS.providers[0].modelCount = 2
+    const tree = await mount(card, { t: realT })
+    const text = textOf(tree)
+    const searchInput = find(tree, (node) => node.type === 'input' && node.props?.type === 'search')
+    if (searchInput !== undefined) throw new Error('前提不成立：两个模型时不该渲染搜索框')
+    if (text.includes(realT('searchEmpty'))) throw new Error('没有搜索框却说「没有匹配的模型」，用户无处可清')
+    if (!text.includes(realT('searchAllUnavailable', { count: 2 }))) throw new Error('全部不可用时没有给出正确解释')
+    console.log('✓ 全部模型「账号不支持」时给出专门文案，不再误报「搜索无匹配」')
+  } finally {
+    STATUS.providers[0].models = snapshot
+    STATUS.providers[0].modelCount = snapshot.length
+  }
+}
+
+// 43) 所有 provider 都被关闭时，侧栏胶囊说「全部已关闭」，而不是「未读取」。
+{
+  const snapshot = STATUS.providers.map((entry) => entry.enabled)
+  try {
+    for (const entry of STATUS.providers) entry.enabled = false
+    // 胶囊内部用自己的 `t`（测试里是 key 回显），断言按 key 做。
+    await mount(pill, { t: (key) => key, wide: true })
+    // 首帧只拿到「读取中」；等一次 /status 回来再断言。
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    const tree = await render(pill, { t: (key) => key, wide: true })
+    const text = textOf(tree)
+    if (text.includes('creditsNone')) throw new Error('provider 全关时仍显示「未读取」')
+    if (!text.includes('providersAllDisabled')) throw new Error('provider 全关时没有说明原因：' + JSON.stringify(text.slice(0, 160)))
+    console.log('✓ provider 全关时胶囊显示「全部已关闭」并带解释')
+  } finally {
+    STATUS.providers.forEach((entry, index) => { entry.enabled = snapshot[index] })
+  }
+}
+
+// 44) 未保存的 PAT / 登录文件草稿按 provider 记忆，切走再切回不丢。
+{
+  const snapshot = STATUS.providers[0].accounts
+  try {
+    STATUS.providers[0].accounts = [
+      { id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: true, source: 'desktop', credits: { state: 'ok', remain: 675, total: 1200, unit: 'credits', items: [] } },
+    ]
+    let tree = await mount(card, { t: realT })
+    const authInput = () => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === realT('authFile'))
+    if (authInput() === undefined) throw new Error('找不到登录文件输入框')
+    authInput().props.onChange({ target: { value: 'D:\\unsaved\\wb.info' } })
+    tree = await render(card, { t: realT })
+    if (authInput().props.value !== 'D:\\unsaved\\wb.info') throw new Error('输入后值没写进 state')
+
+    findButton(tree, 'WorkBuddy AI').props.onClick()
+    tree = await render(card, { t: realT })
+    findButton(tree, 'WorkBuddy').props.onClick()
+    tree = await render(card, { t: realT })
+    if (authInput().props.value !== 'D:\\unsaved\\wb.info') {
+      throw new Error('切走再切回后，未保存的登录文件路径被清空')
+    }
+    console.log('✓ 未保存的路径草稿按 provider 记忆，切走再切回仍在')
+  } finally {
+    STATUS.providers[0].accounts = snapshot
+  }
+}
+
+// 45) 删除确认态随 provider 切换重置（避免「几十秒前的确认」在切回后复活）。
+{
+  const snapshot = STATUS.providers[1].accounts
+  try {
+    STATUS.providers[1].accounts = [
+      { id: 'default', label: 'AI 默认', active: true, kind: 'desktop', configured: true, source: 'desktop', credits: { state: 'ok', remain: 10, total: 100, unit: 'credits', items: [] } },
+    ]
+    let tree = await mount(card, { t: realT })
+    const removeButtons = findAll(tree, (node) => node.type === 'button' && textOf(node) === realT('removeAccount'))
+    if (removeButtons.length === 0) throw new Error('找不到删除按钮')
+    removeButtons[0].props.onClick()
+    tree = await render(card, { t: realT })
+    if (findAll(tree, (node) => node.type === 'button' && textOf(node) === realT('removeConfirm')).length === 0) {
+      throw new Error('第一次点击没有进入确认态')
+    }
+    findButton(tree, 'WorkBuddy AI').props.onClick()
+    tree = await render(card, { t: realT })
+    findButton(tree, 'WorkBuddy').props.onClick()
+    tree = await render(card, { t: realT })
+    if (findAll(tree, (node) => node.type === 'button' && textOf(node) === realT('removeConfirm')).length > 0) {
+      throw new Error('切走再切回后，删除确认态仍然挂着')
+    }
+    console.log('✓ 删除确认态随 provider 切换重置')
+  } finally {
+    STATUS.providers[1].accounts = snapshot
+  }
+}
+
 console.log('client-credits: OK')

@@ -467,6 +467,8 @@ window.__ModuleLoader__.load({
       creditsResetShort: '到期 {date}',
       catalogBuiltin: '内置兜底列表（上游不可达且没有存档）',
       summary: '账号总览',
+      providersAllDisabled: '全部已关闭',
+      providersAllDisabledHint: '所有 provider 都在设置里关闭了，插件不会出现在模型选择器里；重新启用任意一家即可恢复。',
       navProviders: '服务商',
       navSections: '详情分区',
       navOverview: '概览',
@@ -750,6 +752,7 @@ window.__ModuleLoader__.load({
       eventRepeat: '×{count}',
       eventRepeatHint: '同一事件共 {count} 次；最早 {first}，最新 {last}',
       searchOnlyUnavailable: '没有可用的匹配模型；{count} 个「账号不支持」的模型匹配，可在下方勾选强制显示。',
+      searchAllUnavailable: '全部 {count} 个模型都被判定为「账号不支持」；可在下方勾选强制显示，或点「检测」重新探测。',
       advancedInvalid: '超出允许范围：{min}–{max}。',
       advancedClamped: '已按宿主安全范围保存：{fields}。',
       removeConfirm: '再次点击确认删除',
@@ -857,6 +860,8 @@ window.__ModuleLoader__.load({
       creditsResetShort: 'Expires {date}',
       catalogBuiltin: 'Built-in fallback list (upstream unreachable, no saved catalog)',
       summary: 'Accounts',
+      providersAllDisabled: 'All disabled',
+      providersAllDisabledHint: 'Every provider is turned off, so the plugin does not appear in the model picker. Re-enable any provider to restore it.',
       navProviders: 'Providers',
       navSections: 'Sections',
       navOverview: 'Overview',
@@ -1139,6 +1144,7 @@ window.__ModuleLoader__.load({
       eventRepeat: '×{count}',
       eventRepeatHint: 'Same event {count} times; first {first}, latest {last}',
       searchOnlyUnavailable: 'No available model matches; {count} model(s) not in this plan match — expand the list below to force-show one.',
+      searchAllUnavailable: 'All {count} models are flagged as not supported by this account. Force-show one below, or run Probe again to re-check.',
       advancedInvalid: 'Out of range: {min}–{max}.',
       advancedClamped: 'Saved with host-safe values: {fields}.',
       removeConfirm: 'Click again to confirm',
@@ -2657,6 +2663,33 @@ window.__ModuleLoader__.load({
         setStatus(document)
       }
 
+      /**
+       * 组件内的一次性反馈定时器（「已复制 / 已保存 / 复制失败」这类几秒后
+       * 自动消失的提示）。
+       *
+       * 为什么需要集中管理：这些 `setTimeout` 以前散落在事件处理里，组件卸载
+       * （切侧栏、切会话、关设置弹窗）后仍会到点执行 `setState` —— React 会对
+       * 已卸载组件报警，反复挂载/卸载时还会累积。这里统一记句柄，卸载时清空。
+       *
+       * 只用于「fire-and-forget」的 UI 反馈；轮询与登录轮询有自己的生命周期，
+       * 不要混进来。
+       */
+      var feedbackTimers = useRef([])
+      var later = function (fn, ms) {
+        var handle = setTimeout(function () {
+          feedbackTimers.current = feedbackTimers.current.filter(function (item) { return item !== handle })
+          fn()
+        }, ms)
+        feedbackTimers.current.push(handle)
+        return handle
+      }
+      useEffect(function () {
+        return function () {
+          feedbackTimers.current.forEach(function (handle) { clearTimeout(handle) })
+          feedbackTimers.current = []
+        }
+      }, [])
+
       var load = useCallback(
         function () {
           // 卡片打开时定时器与「窗口重新可见」可能同时触发；重复请求既浪费
@@ -2741,6 +2774,16 @@ window.__ModuleLoader__.load({
         setActiveTab(provider)
         setActivePage('overview')
         setSearchDraft('')
+        // 删除确认态只对「当前正在看的这一屏」有意义：确认键里带了 provider，
+        // 切走再切回来时旧确认态会原样复活 —— 用户看到一个自己几十秒前点开、
+        // 早已忘掉的「再次点击确认删除」，下一次点击就直接删账号了。这里同步
+        // 清掉（放在 selectProvider 而不是 effect 里，是因为它必须跟着「用户
+        // 真的切了服务商」，而且要在同一次事件里就生效）。
+        if (deleteConfirmTimer.current !== undefined) {
+          clearTimeout(deleteConfirmTimer.current)
+          deleteConfirmTimer.current = undefined
+        }
+        setDeleteConfirm(undefined)
       }
 
       var currentTestPick = active === undefined ? {} : (testPicks[active.provider] || {})
@@ -2766,6 +2809,25 @@ window.__ModuleLoader__.load({
 
       // 切换标签只重置「这个 provider 的路径草稿」；高级设置是全局的，
       // 不能因为切标签就把用户还没保存的输入清掉。
+      //
+      // 但「重置」不等于「丢弃」：用户可能已经粘贴了 PAT 或填了登录文件路径，
+      // 只是先去另一家看一眼状态。旧实现每次切 provider 都把草稿清空，切回来
+      // 就得回上游页面重新复制一遍令牌。这里按 provider 记住草稿，切回来时原样
+      // 恢复；只有保存成功才清掉（见 savePat / addAccount 的 onSuccess）。
+      var providerDrafts = useRef({})
+      /** 把当前 provider 的某个草稿字段记进 per-provider 草稿表。 */
+      var rememberDraft = function (field, value) {
+        if (active === undefined) return
+        var bucket = providerDrafts.current[active.provider]
+        if (bucket === undefined) bucket = providerDrafts.current[active.provider] = {}
+        bucket[field] = value
+      }
+      /** 忘掉当前 provider 的某个草稿字段（保存成功后调用）。 */
+      var forgetDraft = function (field) {
+        if (active === undefined) return
+        var bucket = providerDrafts.current[active.provider]
+        if (bucket !== undefined) delete bucket[field]
+      }
       useEffect(function () {
         var desktop = active === undefined
           ? undefined
@@ -2778,22 +2840,35 @@ window.__ModuleLoader__.load({
           : status && status.settings && status.settings.trae
             ? status.settings.trae[active.provider]
             : undefined
-        // 必须无条件写回：旧代码只在 settings 存在时才 set，缺字段时会保留
-        // 上一个 provider 的草稿，保存时把别人的路径写到当前 provider 上。
-        setAppPathDraft(desktop !== undefined && desktop !== null ? desktop.electronPath || '' : '')
-        setAuthFileDraft(
-          desktop !== undefined && desktop !== null && (desktop.authFile || '') !== ''
-            ? desktop.authFile
-            : trae !== undefined && trae !== null ? trae.storageFile || '' : '',
-        )
-        setPatDraft('')
-        setAccLabel('')
-        setAccSecret('')
+        var saved = providerDrafts.current[activeTab] || {}
+        // 服务端值是「没有草稿」时的默认显示；有草稿就优先显示草稿，否则用户
+        // 切走再切回来会看到自己刚粘贴的内容被服务端旧值覆盖掉。
+        var serverAuthFile = desktop !== undefined && desktop !== null && (desktop.authFile || '') !== ''
+          ? desktop.authFile
+          : trae !== undefined && trae !== null ? trae.storageFile || '' : ''
+        setAppPathDraft(saved.appPath !== undefined
+          ? saved.appPath
+          : (desktop !== undefined && desktop !== null ? desktop.electronPath || '' : ''))
+        setAuthFileDraft(saved.authFile !== undefined ? saved.authFile : serverAuthFile)
+        setPatDraft(saved.pat !== undefined ? saved.pat : '')
+        setAccLabel(saved.accLabel !== undefined ? saved.accLabel : '')
+        setAccSecret(saved.accSecret !== undefined ? saved.accSecret : '')
       }, [activeTab, active === undefined])
 
-      // 高级设置只在第一次拿到状态时灌入草稿（依赖是布尔值，不随每次轮询重跑）。
+      /**
+       * 高级设置是否被用户改过但还没保存。
+       *
+       * 有它才能兼顾两件互相冲突的事：
+       * - 用户在输入框里改了一半，下一次 /status 轮询不能把草稿冲掉；
+       * - 用户在**另一个窗口 / CLI**改了高级设置，本卡片要能同步过来，
+       *   而不是停在旧值直到整页刷新。
+       */
+      var advDirty = useRef(false)
+
+      // 高级设置：只要用户没在编辑，就跟随宿主每次下发的值（含外部修改）。
       useEffect(function () {
         if (status === undefined || !status.settings) return
+        if (advDirty.current === true) return
         var advanced = status.settings.advanced || {}
         // 非有限值不能进输入框：`NaN / 1000` 会显示字面「NaN」，`Infinity * 100`
         // 会显示「Infinity」。统一走 secondsInputOf / percentInputOf 回落默认值。
@@ -2812,7 +2887,7 @@ window.__ModuleLoader__.load({
           : 0
         setAdvSwitch(percentInputOf(switchRatio, '0'))
         setAdvQueue(secondsInputOf(advanced.qoderQueueWaitMs, '60'))
-      }, [status === undefined])
+      }, [status])
 
       /**
        * 本地已生效、但服务端还没回来的模型开关。
@@ -3072,7 +3147,10 @@ window.__ModuleLoader__.load({
       /** 真发一次 1-token 请求，验证某个账号现在能不能用。 */
       var testAccount = function (provider, accountId) {
         if (status === undefined) return
-        var key = 'test:' + accountId
+        // busy 键必须带 provider：不同 provider 的默认账号 id 都叫 `default`，
+        // 只用 accountId 会让 A 家正在测试时 B 家同 id 账号也显示「测试中…」
+        // 并被禁用（用户从没在 B 家点过测试）。
+        var key = 'test:' + provider + ':' + accountId
         if (busyNow(key)) return
         beginBusy(key)
         postJson(ACTION_PATH, { action: 'test-account', provider: provider, accountId: accountId }, status.key)
@@ -3090,7 +3168,8 @@ window.__ModuleLoader__.load({
       /** 真发一次 1-token 请求，验证某个账号 × 模型当前能不能用 / 是否被限额。 */
       var testAccountModel = function (provider, accountId, modelId) {
         if (status === undefined) return
-        var key = 'model-test:' + accountId + ':' + modelId
+        // 与 testAccount 同一套规则：busy 键必须带 provider。
+        var key = 'model-test:' + provider + ':' + accountId + ':' + modelId
         if (busyNow(key)) return
         beginBusy(key)
         postJson(ACTION_PATH, {
@@ -3113,7 +3192,8 @@ window.__ModuleLoader__.load({
       /** 清除一个账号的失败冷却。 */
       var resetCooldown = function (provider, accountId) {
         if (status === undefined) return
-        var key = 'reset:' + accountId
+        // 与测试按钮同一套规则：busy 键必须带 provider。
+        var key = 'reset:' + provider + ':' + accountId
         if (busyNow(key)) return
         beginBusy(key)
         postJson(ACTION_PATH, { action: 'reset-account', provider: provider, accountId: accountId }, status.key)
@@ -3215,6 +3295,8 @@ window.__ModuleLoader__.load({
           },
         }, status.key)
           .then(function (document) {
+            // 保存成功：草稿已经落到服务端，从此重新跟随宿主下发值。
+            advDirty.current = false
             applyStatus(document)
             endBusy('advanced')
             setError(undefined)
@@ -3235,7 +3317,7 @@ window.__ModuleLoader__.load({
             if (savedAutoForClamp && isFiniteNumber(savedAutoForClamp.thresholdRatio) && Math.abs(savedAutoForClamp.thresholdRatio - sent.thresholdRatio) > 1e-9) clampLabels.push(bind(t, 'advancedSwitch'))
             if (clampLabels.length > 0) {
               setAdvNotice(bind(t, 'advancedClamped', { fields: clampLabels.join(bind(t, 'listSeparator')) }))
-              setTimeout(function () { setAdvNotice('') }, 6000)
+              later(function () { setAdvNotice('') }, 6000)
             }
             setAdvIdle(secondsInputOf(savedAdvanced.idleTimeoutMs, advIdle))
             setAdvCatalog(secondsInputOf(savedAdvanced.catalogRefreshMs, advCatalog))
@@ -3249,7 +3331,7 @@ window.__ModuleLoader__.load({
             if (savedAuto) setAdvSwitch(percentInputOf(savedAuto.thresholdRatio, advSwitch))
             setAdvStats(savedAdvanced.stats !== false)
             setAdvCache(savedAdvanced.catalogCache !== false)
-            setTimeout(function () { setAdvSaved(false) }, 1600)
+            later(function () { setAdvSaved(false) }, 1600)
           })
           .catch(function (failure) {
             endBusy('advanced')
@@ -3336,12 +3418,12 @@ window.__ModuleLoader__.load({
         // 账号池存在时必须写进「当前账号」，否则写的是被忽略的旧字段，
         // 用户会看到「保存成功但状态没变」。
         if (accountRows.length > 0 && activeRow !== undefined) {
-          mutate(activeAccountPatch({ pat: pat }), { clearPatDraft: true })
+          mutate(activeAccountPatch({ pat: pat }), { clearPatDraft: true, onSuccess: function () { forgetDraft('pat') } })
           return
         }
         var patch = { qoder: {} }
         patch.qoder[active.provider] = { pat: pat }
-        mutate(patch, { clearPatDraft: true })
+        mutate(patch, { clearPatDraft: true, onSuccess: function () { forgetDraft('pat') } })
       }
 
       var clearPat = function () {
@@ -3352,14 +3434,14 @@ window.__ModuleLoader__.load({
         }
         var patch = { qoder: {} }
         patch.qoder[active.provider] = { pat: '' }
-        mutate(patch, { clearPatDraft: true })
+        mutate(patch, { clearPatDraft: true, onSuccess: function () { forgetDraft('pat') } })
       }
 
       var saveDesktop = function () {
         if (active === undefined) return
         var patch = { workbuddy: {} }
         patch.workbuddy[active.provider] = { electronPath: appPathDraft.trim(), authFile: authFileDraft.trim() }
-        mutate(patch)
+        mutate(patch, { onSuccess: function () { forgetDraft('authFile'); forgetDraft('appPath') } })
       }
 
       /** Trae 只保存 storage.json 的路径覆盖（凭证本身由客户端维护）。 */
@@ -3367,7 +3449,7 @@ window.__ModuleLoader__.load({
         if (active === undefined) return
         var patch = { trae: {} }
         patch.trae[active.provider] = { storageFile: authFileDraft.trim() }
-        mutate(patch)
+        mutate(patch, { onSuccess: function () { forgetDraft('authFile') } })
       }
 
       var copyDiagnostics = function () {
@@ -3376,13 +3458,13 @@ window.__ModuleLoader__.load({
         var showFallback = function (text) {
           setCopyFallback(String(text === undefined || text === null ? '' : text))
           setCopyFailed(true)
-          setTimeout(function () { setCopyFailed(false) }, 6000)
+          later(function () { setCopyFailed(false) }, 6000)
         }
         var write = function (text) {
           if (typeof navigator !== 'undefined' && navigator !== null && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
             navigator.clipboard.writeText(text).then(function () {
               setCopied(true)
-              setTimeout(function () { setCopied(false) }, 1500)
+              later(function () { setCopied(false) }, 1500)
             }, function () { showFallback(text) })
             return
           }
@@ -3634,6 +3716,17 @@ window.__ModuleLoader__.load({
               else next = providers.length - 1
               if (event.preventDefault !== undefined) event.preventDefault()
               selectProvider(providers[next].provider)
+              // WAI-ARIA tabs 要求方向键移动后**焦点跟着走**：只改 aria-selected
+              // 会把焦点留在旧 tab 上，而旧 tab 的 tabIndex 已变成 -1，键盘/读屏
+              // 用户再也回不来。等 React 提交 DOM 后再聚焦新 tab。
+              var targetId = 'dsh-rpc-tab-' + providers[next].provider
+              var focusNext = function () {
+                if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return
+                var element = document.getElementById(targetId)
+                if (element !== null && element !== undefined && typeof element.focus === 'function') element.focus()
+              }
+              if (typeof requestAnimationFrame === 'function') requestAnimationFrame(focusNext)
+              else setTimeout(focusNext, 0)
             },
           }, providerCards)
 
@@ -3866,13 +3959,30 @@ window.__ModuleLoader__.load({
       var armDeleteConfirm = function (accountId) {
         clearDeleteConfirm()
         setDeleteConfirm(accountId)
-        deleteConfirmTimer.current = setTimeout(function () { clearDeleteConfirm() }, 3000)
+        // 走 later()：这个 3 秒复位定时器也必须在组件卸载时清掉，否则会向
+        // 已卸载组件 setState（切侧栏 / 关设置弹窗时反复发生）。
+        deleteConfirmTimer.current = later(function () {
+          deleteConfirmTimer.current = undefined
+          setDeleteConfirm(undefined)
+        }, 3000)
       }
+      // 切换服务商时清掉删除确认态：确认键里带了 provider，切走再切回来时
+      // 旧确认态会原样复活 —— 用户看到一个自己 30 秒前点开、早已忘掉的
+      // 「再次点击确认删除」，下一次点击就直接删账号了。
+      useEffect(function () {
+        return function () {
+          if (deleteConfirmTimer.current !== undefined) {
+            clearTimeout(deleteConfirmTimer.current)
+            deleteConfirmTimer.current = undefined
+          }
+          setDeleteConfirm(undefined)
+        }
+      }, [activeTab])
       var accountItems = accountRows.map(function (account, index) {
         var snapshot = account.credits || { state: 'none' }
         var cooling = isFiniteNumber(account.cooldownUntil) && account.cooldownUntil > Date.now()
-        var testKey = 'test:' + account.id
-        var resetKey = 'reset:' + account.id
+        var testKey = 'test:' + active.provider + ':' + account.id
+        var resetKey = 'reset:' + active.provider + ':' + account.id
         var status = accountStatusOf(account, active, t)
         var checkinCell = accountCheckinOf(account, active, t)
         var parts = creditsValueParts(snapshot, t)
@@ -4130,6 +4240,8 @@ window.__ModuleLoader__.load({
           onSuccess: function () {
             setAccLabel('')
             setAccSecret('')
+            forgetDraft('accLabel')
+            forgetDraft('accSecret')
           },
         })
       }
@@ -4148,16 +4260,23 @@ window.__ModuleLoader__.load({
         var claimedCount = isFiniteNumber(checkinResult.claimed) ? checkinResult.claimed : 0
         var claimedCredit = isFiniteNumber(checkinResult.credit) ? checkinResult.credit : 0
         var kinds = safeArray(checkinResult.outcomes).map(function (item) { return item.kind })
-        if (claimedCount > 0) {
+        // 失败优先于「已签到 / 无活动」。
+        //
+        // 多账号时很常见：default 今天已签、acc-2 签到失败（HTTP 500）。旧实现
+        // 先判 `already`，于是整个 provider 显示绿色的「今天已签到」，失败被完全
+        // 吞掉 —— 用户既看不到失败原因，也没有「10 分钟后重试」的提示，那一个
+        // 账号的每日奖励就静默丢了。签到汇总是给人看「今天到底签成了没有」的，
+        // 只要有账号失败就必须显性说出来。
+        if (kinds.indexOf('failed') !== -1) {
+          checkinFailureRaw = (safeArray(checkinResult.outcomes).find(function (item) { return item.kind === 'failed' }) || {}).message || '—'
+          checkinLabel = bind(t, 'checkinFailed', { reason: shortErrorMessage(checkinFailureRaw, t) })
+          checkinTone = 'hintWarn'
+        } else if (claimedCount > 0) {
           checkinLabel = bind(t, 'checkinClaimed', { count: claimedCount, credit: claimedCredit })
         } else if (kinds.indexOf('already') !== -1) {
           checkinLabel = bind(t, 'checkinAlready')
         } else if (kinds.indexOf('inactive') !== -1) {
           checkinLabel = bind(t, 'checkinInactive')
-        } else if (kinds.indexOf('failed') !== -1) {
-          checkinFailureRaw = (safeArray(checkinResult.outcomes).find(function (item) { return item.kind === 'failed' }) || {}).message || '—'
-          checkinLabel = bind(t, 'checkinFailed', { reason: shortErrorMessage(checkinFailureRaw, t) })
-          checkinTone = 'hintWarn'
         } else if (kinds.indexOf('unconfigured') !== -1) {
           // 后端 2.4.0 新增：没有配置登录的账号会被跳过。这里必须单独识别，
           // 否则会落进默认分支显示成「今日已签」，把跳过说成成功。
@@ -4273,7 +4392,7 @@ window.__ModuleLoader__.load({
                     'aria-label': bind(t, 'accountLabel'),
                     value: accLabel,
                     placeholder: bind(t, 'accountLabel'),
-                    onChange: function (event) { setAccLabel(event.target.value) },
+                    onChange: function (event) { setAccLabel(event.target.value); rememberDraft('accLabel', event.target.value) },
                   }),
                   h('button', {
                     type: 'button',
@@ -4289,7 +4408,7 @@ window.__ModuleLoader__.load({
                   'aria-label': bind(t, 'accountPat'),
                   value: accSecret,
                   placeholder: bind(t, 'accountPat'),
-                  onChange: function (event) { setAccSecret(event.target.value) },
+                  onChange: function (event) { setAccSecret(event.target.value); rememberDraft('accSecret', event.target.value) },
                 }),
                 h('span', { key: 'sec', className: 'rpc-inline-note' }, rpcIcon('key', 13), bind(t, 'accountSecretHint')))
             : null,
@@ -4299,8 +4418,13 @@ window.__ModuleLoader__.load({
       // 可用性测试：账号 + 模型都由用户选，发一次 1 token 请求确认
       // 「当前能不能用 / 有没有被限额」。结果同时写进 account.modelTests，
       // 所以账号 × 模型表和这里看到的是同一份证据。
+      //
+      // 与上方「可用模型」列表同一套过滤：探测判定「账号不支持」的模型不列进来。
+      // 否则用户能选中一个已知用不了的模型并发起测试，既浪费一次上游请求，也让
+      // 下面「账号不支持」折叠区的徽章自相矛盾（列表说不支持、下拉框却可选）。
       var testModelOptions = safeArray(active.models).filter(function (model) {
-        return typeof model.id === 'string' && model.id !== ''
+        if (typeof model.id !== 'string' || model.id === '') return false
+        return model.unavailable !== true || model.forced === true
       }).slice()
       var testAccountOptions = accountRows.filter(function (account) {
         return typeof account.id === 'string' && account.id !== ''
@@ -4330,7 +4454,7 @@ window.__ModuleLoader__.load({
         ? chosenTestAccount.modelTests[chosenTestModel.id]
         : undefined
       var testModelBusyKey = chosenTestAccount !== undefined && chosenTestModel !== undefined
-        ? 'model-test:' + chosenTestAccount.id + ':' + chosenTestModel.id
+        ? 'model-test:' + active.provider + ':' + chosenTestAccount.id + ':' + chosenTestModel.id
         : undefined
       var testModelResultNode = null
       if (chosenTestAccount === undefined) {
@@ -4966,7 +5090,14 @@ window.__ModuleLoader__.load({
             })
           })
           accountModelRows.sort(function (a, b) {
-            return (Number(b.counters.totalTokens) || 0) - (Number(a.counters.totalTokens) || 0)
+            // token 相同（很常见：两条都只有 1-2 次请求）时按「账号 + 模型」再排一次，
+            // 避免行序依赖 Object.keys 的插入顺序 —— 否则同一份数据在不同窗口里
+            // 可能排出不同顺序，看起来像刷新出了不同结果。
+            var byTokens = (Number(b.counters.totalTokens) || 0) - (Number(a.counters.totalTokens) || 0)
+            if (byTokens !== 0) return byTokens
+            var byAccount = String(a.label).localeCompare(String(b.label))
+            if (byAccount !== 0) return byAccount
+            return String(a.model).localeCompare(String(b.model))
           })
         }
         // 上方那张汇总表用的是同一个口径（今日 / 累计），直接拿来当分母。
@@ -5174,7 +5305,7 @@ window.__ModuleLoader__.load({
               'aria-label': bind(t, 'pat'),
               value: patDraft,
               placeholder: configured ? bind(t, 'patConfigured', { tail: (credential.patTail || '…') }) : bind(t, 'patPlaceholder'),
-              onChange: function (event) { setPatDraft(event.target.value) },
+              onChange: function (event) { setPatDraft(event.target.value); rememberDraft('pat', event.target.value) },
             })),
           h('p', { key: 'h', className: 'rpc-inline-note', style: S.hintTiny }, rpcIcon('shield', 13), bind(t, 'patHint')),
           h('p', { key: 'link', className: 'rpc-inline-note', style: S.hintTiny },
@@ -5206,7 +5337,7 @@ window.__ModuleLoader__.load({
               'aria-label': bind(t, 'traeStorageFile'),
               value: authFileDraft,
               placeholder: credential.file || '%APPDATA%\\Trae CN\\User\\globalStorage\\storage.json',
-              onChange: function (event) { setAuthFileDraft(event.target.value) },
+              onChange: function (event) { setAuthFileDraft(event.target.value); rememberDraft('authFile', event.target.value) },
             }),
             h('span', { className: 'rpc-inline-note', style: S.hintTiny }, rpcIcon('key', 13), bind(t, 'traeStorageFileHint'))),
           h('p', { key: 'h', className: 'rpc-inline-note', style: S.hintTiny },
@@ -5227,7 +5358,7 @@ window.__ModuleLoader__.load({
               'aria-label': bind(t, 'appPath'),
               value: appPathDraft,
               placeholder: 'D:\\WorkBuddy\\WorkBuddy.exe',
-              onChange: function (event) { setAppPathDraft(event.target.value) },
+              onChange: function (event) { setAppPathDraft(event.target.value); rememberDraft('appPath', event.target.value) },
             }),
             h('span', { className: 'rpc-inline-note', style: S.hintTiny }, rpcIcon('external', 13), bind(t, 'appPathHint'))),
           h('div', { key: 'authf', style: S.field },
@@ -5239,7 +5370,7 @@ window.__ModuleLoader__.load({
               'aria-label': bind(t, 'authFile'),
               value: authFileDraft,
               placeholder: credential.file || '%LOCALAPPDATA%\\CodeBuddyExtension\\Data\\Public\\auth',
-              onChange: function (event) { setAuthFileDraft(event.target.value) },
+              onChange: function (event) { setAuthFileDraft(event.target.value); rememberDraft('authFile', event.target.value) },
             }),
             h('span', { className: 'rpc-inline-note', style: S.hintTiny }, rpcIcon('key', 13), bind(t, 'authFileHint'))),
           h('div', { key: 'btns', style: S.row },
@@ -5312,7 +5443,7 @@ window.__ModuleLoader__.load({
                 min: 15,
                 max: 900,
                 value: advIdle,
-                onChange: function (event) { setAdvIdle(event.target.value) },
+                onChange: function (event) { advDirty.current = true; setAdvIdle(event.target.value) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedIdleHint')),
               advErrors.idle !== ''
@@ -5329,7 +5460,7 @@ window.__ModuleLoader__.load({
                   min: 120,
                   max: 86400,
                   value: advCatalog,
-                  onChange: function (event) { setAdvCatalog(event.target.value) },
+                  onChange: function (event) { advDirty.current = true; setAdvCatalog(event.target.value) },
                 }),
                 advErrors.catalog !== ''
                   ? h('span', { key: 'catalog-err', role: 'alert', style: S.hintWarn }, advErrorText('catalog'))
@@ -5344,7 +5475,7 @@ window.__ModuleLoader__.load({
                   min: 30,
                   max: 21600,
                   value: advCredits,
-                  onChange: function (event) { setAdvCredits(event.target.value) },
+                  onChange: function (event) { advDirty.current = true; setAdvCredits(event.target.value) },
                 }),
                 advErrors.credits !== ''
                   ? h('span', { key: 'credits-err', role: 'alert', style: S.hintWarn }, advErrorText('credits'))
@@ -5360,7 +5491,7 @@ window.__ModuleLoader__.load({
                   min: 1,
                   max: 95,
                   value: advAlert,
-                  onChange: function (event) { setAdvAlert(event.target.value) },
+                  onChange: function (event) { advDirty.current = true; setAdvAlert(event.target.value) },
                 }),
                 h('span', { style: S.hintTiny }, bind(t, 'advancedAlertHint')),
                 advErrors.alert !== ''
@@ -5376,7 +5507,7 @@ window.__ModuleLoader__.load({
                   min: 0,
                   max: 50,
                   value: advSwitch,
-                  onChange: function (event) { setAdvSwitch(event.target.value) },
+                  onChange: function (event) { advDirty.current = true; setAdvSwitch(event.target.value) },
                 }),
                 h('span', { style: S.hintTiny }, bind(t, 'advancedSwitchHint')),
                 advErrors.switchRatio !== ''
@@ -5392,7 +5523,7 @@ window.__ModuleLoader__.load({
                 min: 15,
                 max: 180,
                 value: advQueue,
-                onChange: function (event) { setAdvQueue(event.target.value) },
+                onChange: function (event) { advDirty.current = true; setAdvQueue(event.target.value) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedQueueHint')),
               advErrors.queue !== ''
@@ -5514,7 +5645,13 @@ window.__ModuleLoader__.load({
             : shown.length === 0
               ? (unavailableMatches.length > 0
                   ? h('p', { key: 'nomatch-unavailable', className: 'rpc-warn-text', style: S.hintWarn }, bind(t, 'searchOnlyUnavailable', { count: unavailableMatches.length }))
-                  : h('p', { key: 'nomatch', className: 'rpc-tiny', style: S.hint }, bind(t, 'searchEmpty')))
+                  : (query === '' && available.length === 0 && unavailable.length > 0
+                    // 所有模型都被探测判定为「账号不支持」：这不是「搜索无匹配」。
+                    // 旧实现落进 searchEmpty，用户会以为自己搜错了，而搜索框根本
+                    // 没渲染（模型数 ≤ 6），无处可清。
+                    ? h('p', { key: 'nomatch-allunavailable', className: 'rpc-warn-text', style: S.hintWarn },
+                        bind(t, 'searchAllUnavailable', { count: unavailable.length }))
+                    : h('p', { key: 'nomatch', className: 'rpc-tiny', style: S.hint }, bind(t, 'searchEmpty'))))
               : h('ul', { key: 'list', className: 'rpc-list rpc-model-list', style: S.modelList },
                 shown.map(function (model, index) {
                   return h('li', {
@@ -5989,6 +6126,8 @@ window.__ModuleLoader__.load({
         // 失败提示的 5s 自动清除用序号防竞态：成功刷新要立刻清掉失败态，
         // 旧定时器也不能清掉之后新产生的失败。
         var failedSeq = useRef(0)
+        /** 那个 5s 定时器的句柄：卸载时要清掉，否则会在已卸载组件上 setState。 */
+        var failedTimer = useRef(undefined)
 
         useEffect(function () {
           var disposed = false
@@ -6064,6 +6203,12 @@ window.__ModuleLoader__.load({
               clearTimeout(handle)
               clearInterval(handle)
             })
+            // 刷新失败那条 5 秒提示的定时器：卸载时必须清掉，否则侧栏反复
+            // 挂载/卸载会累积一堆到点后 setState 的定时器。
+            if (failedTimer.current !== undefined) {
+              clearTimeout(failedTimer.current)
+              failedTimer.current = undefined
+            }
           }
         }, [])
 
@@ -6108,7 +6253,11 @@ window.__ModuleLoader__.load({
               var seq = failedSeq.current + 1
               failedSeq.current = seq
               setFailed(String(failure && failure.message ? failure.message : failure))
-              setTimeout(function () {
+              // 这个 5 秒提示定时器必须记句柄并在卸载时清掉：侧栏会随会话切换
+              // 反复挂载/卸载，旧实现每次都留一个到点后 setState 的定时器。
+              if (failedTimer.current !== undefined) clearTimeout(failedTimer.current)
+              failedTimer.current = setTimeout(function () {
+                failedTimer.current = undefined
                 if (failedSeq.current === seq) setFailed(false)
               }, 5000)
             })
@@ -6132,7 +6281,76 @@ window.__ModuleLoader__.load({
         if (rows.length === 0) {
           // 已经拿到状态、但没有任何可显示额度时，仍然留一个极淡的入口：
           // 完全消失会让用户以为插件没装，反而更困惑。
-          if (providers.length === 0) return null
+          if (providers.length === 0) {
+            // 状态还没回来（冷启动 / 宿主迟迟不就绪）时也要有东西可看：
+            // 旧实现直接 return null，侧栏底部整块空白，和卡片的「读取中…」
+            // 行为不一致，用户分不清「插件没装」还是「还没加载完」。
+            return h(
+              'div',
+              { style: { display: 'flex', width: '100%', minWidth: 0, boxSizing: 'border-box', margin: '0 0 4px' } },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  disabled: true,
+                  style: {
+                    font: 'inherit',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '4px 11px',
+                    lineHeight: '18px',
+                    cursor: 'default',
+                    borderRadius: 999,
+                    border: '0.5px solid var(--dsw-alias-border-l2)',
+                    background: 'transparent',
+                    color: 'var(--dsw-alias-label-secondary)',
+                    fontSize: 12,
+                  },
+                },
+                h('span', { role: 'status' }, bind(t, 'summary') + ' —'),
+                h('span', {}, bind(t, 'loading')),
+              ),
+            )
+          }
+          // 所有 provider 都被用户关闭时，说「未读取」会误导（数字不是读不到，
+          // 是根本没有启用的来源）。单独给一句「provider 已全部关闭」。
+          var allDisabled = providers.every(function (item) { return item.enabled === false })
+          if (allDisabled) {
+            return h(
+              'div',
+              { style: { display: 'flex', width: '100%', minWidth: 0, boxSizing: 'border-box', margin: '0 0 4px' } },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  onClick: refresh,
+                  style: {
+                    font: 'inherit',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: 8,
+                    width: '100%',
+                    boxSizing: 'border-box',
+                    padding: '4px 11px',
+                    lineHeight: '18px',
+                    cursor: 'pointer',
+                    borderRadius: 999,
+                    border: '0.5px solid var(--dsw-alias-border-l2)',
+                    background: 'transparent',
+                    color: 'var(--dsw-alias-label-secondary)',
+                    fontSize: 12,
+                  },
+                },
+                h('span', {}, bind(t, 'summary') + ' —'),
+                h('span', { title: bind(t, 'providersAllDisabledHint') }, bind(t, 'providersAllDisabled')),
+              ),
+            )
+          }
           // 末尾那句要说清楚「为什么没有数字」：一个 provider 都没有额度端点
           // 时说「未读取」，全都读失败时说「读取失败」——两者不是同一件事。
           var emptyLabel = providers.every(function (item) {

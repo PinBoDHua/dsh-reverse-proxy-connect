@@ -160,3 +160,43 @@ test('磁盘缓存来自更高版本：只读加载并拒绝覆盖（降级安�
     assert.equal(readFileSync(file, 'utf8'), future, '原文件一个字节都不能变')
   })
 })
+
+test('落盘是合并而不是整份覆盖：另一个进程刚写入的快照不能被抹掉', () => {
+  // 真实时序：宿主写了一份 workbuddy 快照；CLI（启动更早、内存基线更旧）
+  // 刷新完自己关心的 provider 后整份写回 —— 旧实现会把宿主那条静默抹掉。
+  withTempDir((dir) => {
+    const file = join(dir, 'credits-cache.json')
+    const hostAt = NOW
+    saveCreditsCache(dir, new Map([
+      ['workbuddy::a', { data: { state: 'ok', remain: 90, total: 100, unit: 'credits', items: [] }, fetchedAt: hostAt }],
+    ]))
+    const hostEntry = JSON.parse(readFileSync(file, 'utf8')).entries['workbuddy::a']
+    assert.ok(hostEntry !== undefined)
+
+    // CLI：内存里只有自己那份（更旧/更少），带一条新 provider。
+    saveCreditsCache(dir, new Map([
+      ['qoder::default', { data: { state: 'ok', remain: 7, total: 100, unit: 'credits', items: [] }, fetchedAt: hostAt + 1000 }],
+    ]))
+    const merged = JSON.parse(readFileSync(file, 'utf8')).entries
+    assert.deepEqual(Object.keys(merged).sort(), ['qoder::default', 'workbuddy::a'], '两边的 key 都要保留')
+    assert.equal(merged['workbuddy::a'].data.remain, 90, '宿主的快照不能被抹掉')
+
+    // 同一个 key 上，更新的快照赢；更旧的不能覆盖更新的。
+    saveCreditsCache(dir, new Map([
+      ['workbuddy::a', { data: { state: 'ok', remain: 11, total: 100, unit: 'credits', items: [] }, fetchedAt: hostAt - 5000 }],
+    ]))
+    assert.equal(
+      JSON.parse(readFileSync(file, 'utf8')).entries['workbuddy::a'].data.remain,
+      90,
+      '更旧的同 key 快照不能覆盖更新的',
+    )
+    saveCreditsCache(dir, new Map([
+      ['workbuddy::a', { data: { state: 'ok', remain: 55, total: 100, unit: 'credits', items: [] }, fetchedAt: hostAt + 9000 }],
+    ]))
+    assert.equal(
+      JSON.parse(readFileSync(file, 'utf8')).entries['workbuddy::a'].data.remain,
+      55,
+      '更新的同 key 快照应当赢',
+    )
+  })
+})

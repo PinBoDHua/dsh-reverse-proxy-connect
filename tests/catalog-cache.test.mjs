@@ -147,3 +147,41 @@ test('目录缓存：坏文件仍然允许重写修复（只有未来版本才�
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('目录缓存：超过上限时保留最新账号；时间戳相同时后写入者优先', () => {
+  const dir = tempDir()
+  try {
+    const now = Date.now()
+    // 25 个账号、同一轮刷新（fetchedAt 全部相同）：旧实现按写入顺序 break，
+    // 丢掉最后写入的（最新连接的）账号。
+    const entries = new Map()
+    for (let index = 0; index < 25; index++) {
+      entries.set(`workbuddy::acc-${String(index).padStart(2, '0')}`, {
+        models: [{ ...MODEL, id: `m-${index}` }],
+        fetchedAt: now,
+      })
+    }
+    saveCatalogCache(dir, entries)
+    const written = JSON.parse(readFileSync(join(dir, 'catalog-cache.json'), 'utf8')).entries
+    assert.equal(Object.keys(written).length, 24)
+    assert.ok(written['workbuddy::acc-24'] !== undefined, '最新写入的账号必须保留')
+    assert.equal(written['workbuddy::acc-00'], undefined, '最旧的账号应该被淘汰')
+
+    const loaded = loadCatalogCache(dir)
+    assert.equal(loaded.size, 24)
+    assert.ok(loaded.has('workbuddy::acc-24'), '读回时同样保留最新账号')
+
+    // 24 条过期行 + 1 条有效：必须是先过滤再截断，不能把唯一有效条目挤出窗口。
+    const mixed = {}
+    for (let index = 0; index < 24; index++) {
+      mixed[`workbuddy::expired-${index}`] = { models: [MODEL], fetchedAt: now - 90 * 24 * 3600_000 }
+    }
+    mixed['qoder::default'] = { models: [MODEL], fetchedAt: now - 1000 }
+    writeFileSync(join(dir, 'catalog-cache.json'), JSON.stringify({ version: 1, entries: mixed }))
+    const fresh = loadCatalogCache(dir)
+    assert.equal(fresh.size, 1)
+    assert.ok(fresh.has('qoder::default'), '唯一有效的目录不能被过期行挤出窗口')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
