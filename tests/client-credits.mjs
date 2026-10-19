@@ -535,7 +535,7 @@ console.log('✓ 签到按钮会发 action=checkin')
       ...accountsSnapshot[1],
       credits: { state: 'ok', remain: 0, total: 0, unit: 'credits', items: [] },
       cooldownUntil: 0,
-      lastTest: { at: now - 2 * 3600_000, ok: false, code: 'RATE_LIMIT', model: 'auto', latencyMs: 310, error: 'HTTP 429' },
+      lastTest: { at: now - 5 * 60_000, ok: false, code: 'RATE_LIMIT', model: 'auto', latencyMs: 310, error: 'HTTP 429' },
     },
   ]
   provider.checkin = {
@@ -573,6 +573,51 @@ console.log('✓ 签到按钮会发 action=checkin')
   } finally {
     provider.accounts = accountsSnapshot
     provider.checkin = checkinSnapshot
+  }
+}
+
+// ---------- 1c. 状态列：过期测试与凭证失效都不能显示成「可用」 ----------
+{
+  const provider = STATUS.providers[0]
+  const accountsSnapshot = provider.accounts
+  const credentialSnapshot = provider.credential
+  const now = Date.now()
+  const accountRow = () => findAll(cardTree, (node) => node.props?.role === 'row' && textOf(node).includes('本机登录'))[0]
+  try {
+    provider.accounts = [{
+      ...accountsSnapshot[0],
+      active: true,
+      configured: true,
+      credits: { state: 'ok', remain: 100, total: 200, unit: 'credits', items: [] },
+      cooldownUntil: 0,
+      lastTest: { at: now - 2 * 3600_000, ok: false, code: 'RATE_LIMIT', model: 'auto', error: 'HTTP 429' },
+    }]
+    cardTree = await mount(card, { t: (key) => key })
+    let row = accountRow()
+    if (row === undefined) throw new Error('找不到账号行')
+    if (textOf(row).includes('accountRateLimited')) throw new Error('2 小时前的测试失败仍被当成当前状态')
+    if (!textOf(row).includes('accountAvailable')) throw new Error('过期测试失败后应回落到「可用」')
+
+    // 1 分钟内的失败仍然是当前状态。
+    provider.accounts = [{
+      ...provider.accounts[0],
+      lastTest: { at: now - 60_000, ok: false, code: 'RATE_LIMIT', model: 'auto', error: 'HTTP 429' },
+    }]
+    cardTree = await mount(card, { t: (key) => key })
+    row = accountRow()
+    if (!textOf(row).includes('accountRateLimited')) throw new Error('刚失败的测试结果没有显示「被限流」')
+
+    // 凭证探测说 signed-out 时，桌面账号的 configured=true 不能让它显示成可用。
+    provider.accounts = [{ ...provider.accounts[0], lastTest: undefined }]
+    provider.credential = { status: 'signed-out', reason: 'pat-invalid', message: 'PAT 已失效' }
+    cardTree = await mount(card, { t: (key) => key })
+    row = accountRow()
+    if (!textOf(row).includes('accountAuthFailed')) throw new Error('凭证失效的账号没有显示「凭证失效」')
+    if (textOf(row).includes('accountAvailable')) throw new Error('凭证失效的账号仍显示「可用」')
+    console.log('✓ 状态列：过期测试不再冒充当前状态，凭证失效优先于「可用」')
+  } finally {
+    provider.accounts = accountsSnapshot
+    provider.credential = credentialSnapshot
   }
 }
 
@@ -883,6 +928,43 @@ cardTree = await mount(card, { t: (key) => (key === 'removeAccountAria' ? '{name
 const namedRemoveButtons = findAll(cardTree, (node) => node.type === 'button' && node.props?.['aria-label'] !== undefined && node.props['aria-label'].indexOf('本机登录') !== -1)
 if (namedRemoveButtons.length === 0) throw new Error('删除按钮的 aria-label 没有带账号名')
 console.log('✓ 删除按钮 aria-label 带账号名，多账号不混淆')
+
+// 删除确认必须按 provider 隔离：workbuddy 与 workbuddy-ai 的默认账号 id 都叫
+// `default`，只比 id 会让另一个标签页的同 id 账号预先进入「确认删除」。
+{
+  const provider = STATUS.providers[1]
+  const accountsSnapshot = provider.accounts
+  provider.accounts = [
+    { id: 'default', label: 'AI 默认', active: true, kind: 'desktop', configured: true, source: 'desktop', credits: { state: 'ok', remain: 10, total: 100, unit: 'credits', items: [] } },
+    { id: 'ai-2', label: 'AI 备用', active: false, kind: 'desktop', configured: true, source: 'desktop', credits: { state: 'ok', remain: 20, total: 100, unit: 'credits', items: [] } },
+  ]
+  try {
+    cardTree = await mount(card, { t: (key) => key })
+    const workbuddyTab = findButton(cardTree, 'WorkBuddy')
+    workbuddyTab.props.onClick()
+    cardTree = await render(card, { t: (key) => key })
+    const workbuddyRemoves = findAll(cardTree, (node) => node.type === 'button' && textOf(node) === 'removeAccount')
+    workbuddyRemoves[0].props.onClick()
+    cardTree = await render(card, { t: (key) => key })
+    if (findAll(cardTree, (node) => node.type === 'button' && textOf(node) === 'removeConfirm').length !== 1) {
+      throw new Error('WorkBuddy 的删除确认没有进入确认态')
+    }
+    const aiTab = findButton(cardTree, 'WorkBuddy AI')
+    aiTab.props.onClick()
+    cardTree = await render(card, { t: (key) => key })
+    if (findAll(cardTree, (node) => node.type === 'button' && textOf(node) === 'removeConfirm').length !== 0) {
+      throw new Error('切换 provider 后，另一个标签页的同 id 账号被预先武装成「确认删除」')
+    }
+    const beforeCrossRemove = removePosts()
+    const aiRemoves = findAll(cardTree, (node) => node.type === 'button' && textOf(node) === 'removeAccount')
+    aiRemoves[0].props.onClick()
+    cardTree = await render(card, { t: (key) => key })
+    if (removePosts() !== beforeCrossRemove) throw new Error('跨 provider 后第一次点删除就发了 removedAccounts')
+    console.log('✓ 删除确认按 provider 隔离，同 id 账号不会跨标签页误删')
+  } finally {
+    provider.accounts = accountsSnapshot
+  }
+}
 
 // ---------- 9. 侧栏小卡用轻量状态，不再拉整份模型清单 ----------
 if (!calls.some((call) => String(call.url).includes('?light=1'))) {
@@ -1449,6 +1531,43 @@ const selectedSwitch = find(cardTree, (node) => node.type === 'button' && textOf
 if (selectedSwitch.props['aria-pressed'] !== true) throw new Error('筛选按钮没有 aria-pressed 选中态')
 console.log('✓ 最近事件可筛选，换号/续期/额度失败分开显示')
 
+// 同一个后台失败会每轮刷新重复一次：时间线必须合并成一行并标 ×N。
+// 真实账本里 Trae 国际版「没有额度端点」15 小时记了 14 条，把真正的异常挤下去了。
+{
+  const eventsSnapshot = STATUS.events
+  const base = { type: 'credits', level: 'warn', provider: 'trae-global', accountId: 'default', message: '额度读取失败（本机登录）：Trae 国际版没有提供额度查询接口' }
+  STATUS.events = {
+    version: 1,
+    count: 4,
+    latestAt: 1792234600000,
+    limit: 50,
+    items: [
+      { ...base, id: 'dup-1', at: 1792234600000 },
+      { ...base, id: 'dup-2', at: 1792234000000 },
+      { ...base, id: 'dup-3', at: 1792233400000 },
+      { ...base, id: 'dup-4', at: 1792232800000 },
+    ],
+  }
+  try {
+    cardTree = await mount(card, { t: realT })
+    const rows = findAll(cardTree, (node) => node.type === 'li' && textOf(node).includes('Trae 国际版没有提供额度查询接口'))
+    if (rows.length !== 1) throw new Error(`同一事件应合并成 1 行，实际 ${rows.length} 行`)
+    const rowText = textOf(rows[0])
+    if (!rowText.includes('×4')) throw new Error('合并后的行没有显示 ×4 次数')
+    if (!/异常\s*1/.test(textOf(cardTree))) throw new Error('筛选按钮的计数没有跟着合并后的行数走')
+    const repeat = find(cardTree, (node) => typeof node.props?.title === 'string' && node.props.title.includes('同一事件共 4 次'))
+    if (repeat === undefined) throw new Error('合并行没有给出首次/最新时间的悬停说明')
+    if (!/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/.test(String(repeat.props.title))) {
+      throw new Error('合并行的首次/最新时间没有格式化')
+    }
+    console.log('✓ 重复事件合并为一行，显示 ×N 与首末时间')
+  } finally {
+    STATUS.events = eventsSnapshot
+  }
+  // 后面的清空用例要用回 key-only 的 t 与默认筛选状态。
+  cardTree = await mount(card, { t: (key) => key })
+}
+
 // 清空是写操作：必须带控制密钥走 /action，不能只清本地状态。
 const clearButton = find(cardTree, (node) => node.type === 'button' && textOf(node) === 'eventClear')
 if (clearButton === undefined) throw new Error('缺少「清空事件」按钮')
@@ -1910,7 +2029,13 @@ try {
 const eventsSnapshotR3 = STATUS.events
 try {
   const baseEvents = eventsSnapshotR3.items
-  const manyEvents = Array.from({ length: 8 }, (_, i) => ({ ...baseEvents[i % baseEvents.length], id: 'ev-many-' + i, at: baseEvents[0].at - i * 60000 }))
+  const manyEvents = Array.from({ length: 8 }, (_, i) => ({
+    ...baseEvents[i % baseEvents.length],
+    id: 'ev-many-' + i,
+    at: baseEvents[0].at - i * 60000,
+    // 每条消息都不同，避免被「重复事件合并」压成 3 行（下面的分组用例单独覆盖）。
+    message: String(baseEvents[i % baseEvents.length].message) + ' #' + i,
+  }))
   STATUS.events = { ...eventsSnapshotR3, count: 63, items: manyEvents }
   cardTree = await mount(card, { t: (key) => key })
   const evText = textOf(cardTree)

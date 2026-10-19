@@ -160,6 +160,15 @@ test('设置写盘：写锁在成功后释放，崩溃遗留的过期锁会被�
     store.patch({ checkin: { lastRunAt: 2 } })
     assert.equal(JSON.parse(readFileSync(file, 'utf8')).checkin.lastRunAt, 2)
     assert.equal(existsSync(`${file}.lock`), false)
+
+    // 系统时钟回拨后，锁的 mtime 会落在未来：旧的 `age > 10s` 永远不成立，
+    // 设置会永久写不进去。未来 1 小时必须按过期处理。
+    writeFileSync(`${file}.lock`, '12345')
+    const future = new Date(Date.now() + 3600_000)
+    utimesSync(`${file}.lock`, future, future)
+    store.patch({ checkin: { lastRunAt: 4 } })
+    assert.equal(JSON.parse(readFileSync(file, 'utf8')).checkin.lastRunAt, 4, '未来时间的锁不能把设置锁死')
+    assert.equal(existsSync(`${file}.lock`), false)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

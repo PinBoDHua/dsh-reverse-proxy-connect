@@ -161,6 +161,12 @@ test('签到回归：瞬时凭证读取失败记为 failed（保留 10 分钟重
       true,
       '瞬时失败后 11 分钟必须重试，不能整天跳过',
     )
+
+    // 上游繁忙时重试会连续失败：账本只保留 1 小时内第一条同样的失败，
+    // 否则 6 条/小时会把换号、凭证失效这些真正的异常挤出最近 50 条。
+    const retried = await runtime.runCheckin('qoder')
+    assert.equal(retried.outcomes[0].kind, 'failed')
+    assert.equal(events.list({ type: 'checkin' }).length, 1, '同一失败原因在去重窗口内只记一条')
   } finally {
     runtime.flushCaches()
     globalThis.fetch = originalFetch

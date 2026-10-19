@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { CHECKIN_RETRY_MS, checkinCompleted, checkinDue, checkinTerminal } from '../lib/checkin-schedule.js'
+import { CHECKIN_RETRY_MS, checkinCompleted, checkinDue, checkinReopenPatch, checkinTerminal } from '../lib/checkin-schedule.js'
 
 /** 某个本地日期的中午。 */
 function at(year, month, day, hour = 12, minute = 0) {
@@ -46,6 +46,27 @@ test('签到按 provider + 账号集合判断：当天新增账号仍会补签',
   assert.equal(checkinDue(checkin, 'workbuddy', now, ['a', 'b']), true, '新增账号 B 后不能整天漏签')
   // 老设置没有 accountIds：有账号集合时先跑一次（已签账号会返回 already）。
   assert.equal(checkinDue({ enabled: true, completedOn: { workbuddy: '2026-10-18' } }, 'workbuddy', now, ['a']), true)
+})
+
+test('凭证补上后：只重开当天被「未配置」跳过的 provider', () => {
+  const now = at(2026, 10, 18, 12)
+  const checkin = {
+    completedOn: { qoder: '2026-10-18', workbuddy: '2026-10-18', trae: '2026-10-17' },
+    accountIds: { qoder: ['default'], workbuddy: ['a'], trae: ['default'] },
+    results: {
+      qoder: { outcomes: [{ accountId: 'default', kind: 'unconfigured' }] },
+      workbuddy: { outcomes: [{ accountId: 'a', kind: 'claimed' }] },
+      trae: { outcomes: [{ accountId: 'default', kind: 'unconfigured' }] },
+    },
+  }
+  const patch = checkinReopenPatch(checkin, ['qoder', 'workbuddy', 'trae'], now)
+  assert.deepEqual(Object.keys(patch.completedOn), ['qoder'], '只有今天且确实有未配置账号的才重开')
+  assert.equal(patch.completedOn.qoder, '')
+  assert.deepEqual(patch.accountIds.qoder, [])
+  // 全成功 / 未完成 / 没有结果都不要动。
+  assert.deepEqual(checkinReopenPatch(checkin, ['workbuddy'], now).completedOn, {})
+  assert.deepEqual(checkinReopenPatch({ completedOn: {}, results: checkin.results }, ['qoder'], now).completedOn, {})
+  assert.deepEqual(checkinReopenPatch({ completedOn: { qoder: '2026-10-18' } }, ['qoder'], now).completedOn, {})
 })
 
 test('签到终态：所有账号都到终态才算今天结束', () => {

@@ -103,6 +103,22 @@ test('去重只压掉时间窗内的同一条，不误伤不同 provider / 不�
   assert.equal(log.summary().count, 4)
 })
 
+test('去重不看「最近 20 条」窗口：中间插入 25 条其它事件后，同一条失败仍只留一条', () => {
+  // 签到失败去重窗口是 1 小时；六个 provider 的目录/额度事件几分钟就能把
+  // 最近 20 条刷过去。如果去重只扫最近 20 条，窗口在繁忙时会失效。
+  let now = 1_700_000_000_000
+  const log = new EventLog({ now: () => now })
+  const failure = { type: 'checkin', provider: 'trae', level: 'warn', message: '签到：1 个账号，1 个失败，本次领到 0 分' }
+  assert.ok(log.record(failure, { dedupeMs: 60 * 60_000 }))
+  for (let index = 0; index < 25; index++) {
+    now += 1_000
+    log.record({ type: 'credits', provider: 'qoder', message: `第 ${String(index)} 次刷新` })
+  }
+  now += 60_000
+  assert.equal(log.record(failure, { dedupeMs: 60 * 60_000 }), false, '窗口内的同一条失败必须仍被压掉')
+  assert.equal(log.summary().count, 26)
+})
+
 test('筛选：按类型 / provider / 级别 / 时间起点', () => {
   let now = 1_700_000_000_000
   const log = new EventLog({ now: () => now })

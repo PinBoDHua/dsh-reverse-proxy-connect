@@ -201,6 +201,34 @@ test('额度历史：重复样本不写盘，删除账号会清掉历史', () =>
   }
 })
 
+test('额度历史：更新版本的文件只读，降级安装不会覆盖它', () => {
+  // 用户可见行为：装过新版本、又降级回旧版本后，旧版本第一次去抖落盘就把
+  // credits-history.json 写成 v1，把新版本的历史与未知字段整份清掉。
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-history-'))
+  try {
+    const filePath = creditsHistoryPathOf(dir)
+    const original = {
+      version: 2,
+      futureOnly: { note: 'keep me' },
+      entries: {
+        'qoder::default': {
+          recent: [{ at: at(8), remain: 12345, total: 20000 }],
+          hours: [{ at: at(8), first: at(8), last: at(8), spent: 0, topup: 0, samples: 1 }],
+        },
+      },
+    }
+    writeFileSync(filePath, JSON.stringify(original), 'utf8')
+    const history = new CreditHistory({ filePath, persistDelayMs: 0 })
+    assert.equal(history.writeBlocked, true)
+    assert.equal(history.unsupportedVersion, 2)
+    assert.equal(history.record('qoder', 'default', { state: 'ok', remain: 999, total: 20000 }, at(9)), false, '只读时不再累积')
+    history.flush()
+    assert.deepEqual(JSON.parse(readFileSync(filePath, 'utf8')), original, '更新版本的文件必须原样保留')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('额度历史：CLI 退出落盘不能把宿主刚记的样本冲掉（跨进程合并）', () => {
   // 用户可见行为：命令行跑完 `credits`/`doctor` 退出后，卡片上的「今日消耗 /
   // 预计可用」不能因为一次旁路落盘而跳变。

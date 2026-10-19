@@ -247,6 +247,8 @@ test('宿主入口：注册六个 provider，status v8 与诊断接口可用', a
     })
     assert.equal(cooled.status, 200)
     assert.equal(cooled.body.providers[0].accounts[0].cooldownUntil, 0)
+    // 「解除」后不能立刻又显示上一次的测试失败，否则用户会以为按钮没生效。
+    assert.equal(cooled.body.providers[0].accounts[0].lastTest, undefined, '解除冷却时同时清掉失败测试结论')
 
     const patched = await post(handlers[SETTINGS_PATH], SETTINGS_PATH, full.body.key, {
       advanced: { idleTimeoutMs: 60_000, stats: false },

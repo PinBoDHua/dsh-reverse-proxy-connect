@@ -35,6 +35,7 @@ import {
 } from '../lib/trae/credential.js'
 import {
   buildChatBody,
+  fetchCredits,
   interpretCheckinStatus,
   interpretClaim,
   kindOfStatus,
@@ -647,6 +648,22 @@ test('Trae：总额为 0 时按免费套餐处理，不是「已用尽」', () =
   assert.equal(credits.remain, 0)
   assert.equal(credits.freePlan, true)
   assert.equal(credits.planName, 'Free')
+})
+
+test('Trae：国际版额度端点 404 是「不可读」而不是一次读取失败', async () => {
+  // 用户可见行为：Trae 国际版根本没有额度端点。以前这里返回 state:'error'，
+  // 后台每轮额度刷新都会往账本写一条 warn（实测 15 小时 14 条）。
+  // 现在必须与「没配 PAT / 没有额度端点」同一语义：state none + 原因。
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('not found', { status: 404 })
+  try {
+    const credits = await fetchCredits('trae-global', { jwt: 'jwt', userId: 'u1' })
+    assert.equal(credits.state, 'none')
+    assert.equal(credits.remain, 0)
+    assert.match(credits.message, /没有提供额度查询接口/)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
 })
 
 test('Trae：签到状态与领取结果的码都覆盖到', () => {

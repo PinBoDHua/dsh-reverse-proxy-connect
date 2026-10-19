@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { patchNeedsRefresh, sanitizePatch } from '../lib/patch.js'
+import { credentialProvidersOf, patchNeedsRefresh, sanitizePatch } from '../lib/patch.js'
 import { defaults, normalize } from '../lib/settings.js'
 
 test('设置补丁：已知字段全部接受，未知字段全部丢弃', () => {
@@ -73,6 +73,20 @@ test('设置补丁：换凭证/切账号需要刷新，模型开关不需要', (
   assert.equal(patchNeedsRefresh({ advanced: { idleTimeoutMs: 30_000 } }), false)
   assert.equal(patchNeedsRefresh({ alerts: { lowRatio: 0.2 } }), false)
   assert.equal(patchNeedsRefresh({ autoSwitch: { thresholdRatio: 0.1 } }), false)
+})
+
+test('设置补丁：只有凭证字段会触发签到重新检查，改名字/开关不会', () => {
+  // 启动时没配 PAT → 签到按「未配置」跳过并标记当天完成；之后补 PAT 必须
+  // 重新检查当天签到，否则奖励要等到明天。
+  assert.deepEqual([...credentialProvidersOf(sanitizePatch({ qoder: { qoder: { pat: 'pt-x' } } }))], ['qoder'])
+  assert.deepEqual([...credentialProvidersOf(sanitizePatch({ qoder: { 'qoder-global': { pat: 'pt-y' } } }))], ['qoder-global'])
+  assert.deepEqual([...credentialProvidersOf(sanitizePatch({ trae: { trae: { storageFile: 'C:\\x.json' } } }))], ['trae'])
+  assert.deepEqual([...credentialProvidersOf(sanitizePatch({ accounts: { workbuddy: [{ id: 'default', label: '本机登录' }] } }))], [])
+  // 空 PAT 在 normalizeAccount 里就被丢掉了，不算「新增凭证」。
+  assert.deepEqual([...credentialProvidersOf(sanitizePatch({ accounts: { qoder: [{ id: 'default', label: 'x', pat: '' }] } }))], [])
+  assert.deepEqual([...credentialProvidersOf(sanitizePatch({ accounts: { workbuddy: [{ id: 'a', label: 'A', authFile: 'C:\\auth' }] } }))], ['workbuddy'])
+  assert.deepEqual([...credentialProvidersOf(sanitizePatch({ providers: { qoder: { enabled: true } } }))], [])
+  assert.deepEqual([...credentialProvidersOf(null)], [])
 })
 
 test('设置：v2 默认值包含 advanced，并且 normalize 会夹取非法数字', () => {

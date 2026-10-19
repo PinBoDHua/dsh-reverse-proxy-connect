@@ -323,6 +323,37 @@ test('统计：v2 文件升级后保留今日 provider 计数，并补出第一�
   }
 })
 
+test('统计：另一个窗口刚写过计数时，本机点「重置统计」不会被旧文档合并回来', () => {
+  // 用户可见行为：重置后仪表盘仍显示旧数字，而且文件里也被写回旧值。
+  // 原因：reset() 生成的空白文档 since 更新，但 flush 先把磁盘上的外部文档
+  // 按 max 合并，旧计数又被加回来。外部重置方向已有测试，这里是反方向。
+  const dir = tempDir()
+  try {
+    const filePath = statsPathOf(dir)
+    const now = Date.now()
+    const host = new Stats({ filePath, enabled: () => true, persistDelayMs: 0, now: () => now })
+    host.record({ provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop', durationMs: 10 })
+    host.stop()
+    assert.equal(host.snapshot().totals.requests, 1)
+
+    // 另一个窗口/进程在宿主重置前又写了 1 条。
+    const other = new Stats({ filePath, enabled: () => true, persistDelayMs: 0, now: () => now })
+    other.record({ provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop', durationMs: 10 })
+    other.stop()
+
+    const snapshot = host.reset()
+    assert.equal(snapshot.totals.requests, 0, '重置后的内存快照必须是空的')
+    const onDisk = JSON.parse(readFileSync(filePath, 'utf8'))
+    assert.equal(onDisk.totals.requests, 0, '落盘不能被另一个进程的旧计数合并回来')
+    assert.equal(onDisk.recent.length, 0)
+    const reloaded = new Stats({ filePath, enabled: () => true, now: () => now })
+    assert.equal(reloaded.snapshot().totals.requests, 0, '其它进程重载后也必须是空的')
+    reloaded.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('统计：CLI 在宿主运行期间重置后，宿主的下一次落盘不会把旧数字写回去', () => {
   const dir = tempDir()
   try {

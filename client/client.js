@@ -34,6 +34,13 @@ window.__ModuleLoader__.load({
     var POLL_MS = 20000
 
     /**
+     * 「账号测试」是**当时**的快照，不是持续状态：一个 2 小时前的 429 早就
+     * 可能恢复了，继续把「被限流」当当前可用性会误导。超过这个时长只保留
+     * 「上次测试失败」的时间线，不再决定状态列的颜色与标签。
+     */
+    var TEST_RESULT_TTL_MS = 30 * 60 * 1000
+
+    /**
      * 插件自带的两组主题自适应属性。
      *
      * 宿主 0.2.1 的 ui-theme 里没有 `--dsw-alias-bg-l2` / `--dsw-alias-state-warning-primary`
@@ -345,7 +352,7 @@ window.__ModuleLoader__.load({
       usageNoUsage: '上游没有返回 token 统计；这里显示 0 不代表没有消耗。',
       // 2.0.0：事件账本
       eventTitle: '最近事件',
-      eventHint: '记录换号、令牌续期、目录/额度降级、签到与探测；只保留最近 200 条元数据。',
+      eventHint: '记录换号、令牌续期、目录/额度降级、签到与探测；只保留最近 200 条元数据，重复事件合并为一行。',
       eventEmpty: '还没有事件。后台发生换号、续期或降级时会记在这里。',
       eventNoMatch: '没有符合筛选的事件。',
       eventAll: '全部',
@@ -372,6 +379,8 @@ window.__ModuleLoader__.load({
       eventTest: '账号测试',
       eventUnknown: '事件',
       eventRetained: '仅保留最近 {count} 条，更早的事件已轮转。',
+      eventRepeat: '×{count}',
+      eventRepeatHint: '同一事件共 {count} 次；最早 {first}，最新 {last}',
       searchOnlyUnavailable: '没有可用的匹配模型；{count} 个「账号不支持」的模型匹配，可在下方勾选强制显示。',
       advancedInvalid: '超出允许范围：{min}–{max}。',
       advancedClamped: '已按宿主安全范围保存：{fields}。',
@@ -660,7 +669,7 @@ window.__ModuleLoader__.load({
       usageNoUsage: 'The upstream did not report token usage; 0 here does not mean nothing was consumed.',
       // 2.0.0: event journal
       eventTitle: 'Recent events',
-      eventHint: 'Account switches, token refreshes, catalog/credit fallbacks, check-ins and probes; only the latest 200 metadata entries are kept.',
+      eventHint: 'Account switches, token refreshes, catalog/credit fallbacks, check-ins and probes; only the latest 200 metadata entries are kept. Repeated events are merged into one row.',
       eventEmpty: 'No events yet. Background switches, refreshes and fallbacks will appear here.',
       eventNoMatch: 'No events match this filter.',
       eventAll: 'All',
@@ -687,6 +696,8 @@ window.__ModuleLoader__.load({
       eventTest: 'Account test',
       eventUnknown: 'Event',
       eventRetained: 'Only the latest {count} events are kept; older entries have rotated out.',
+      eventRepeat: '×{count}',
+      eventRepeatHint: 'Same event {count} times; first {first}, latest {last}',
       searchOnlyUnavailable: 'No available model matches; {count} model(s) not in this plan match — expand the list below to force-show one.',
       advancedInvalid: 'Out of range: {min}–{max}.',
       advancedClamped: 'Saved with host-safe values: {fields}.',
@@ -1600,11 +1611,17 @@ window.__ModuleLoader__.load({
     function accountStatusOf(account, provider, t) {
       var now = Date.now()
       var lastTest = account.lastTest !== null && typeof account.lastTest === 'object' ? account.lastTest : undefined
+      // 没有 at 的旧宿主按「新」处理，不能因为字段缺失就把失败结论藏掉。
+      var testFresh = lastTest !== undefined
+        && (!isFiniteNumber(lastTest.at) || now - lastTest.at < TEST_RESULT_TTL_MS)
       var code = lastTest !== undefined && typeof lastTest.code === 'string' ? lastTest.code : ''
       var model = lastTest !== undefined && typeof lastTest.model === 'string' && lastTest.model !== ''
         ? lastTest.model
         : (account.active === true && provider.usage !== null && typeof provider.usage === 'object'
           && provider.usage.last !== null && typeof provider.usage.last === 'object'
+          // 最近一次请求是 provider 级的：切号后它可能属于另一个账号，
+          // 不能把别的账号的模型拼到这个账号的相对时间后面。
+          && provider.usage.last.accountId === account.id
           && typeof provider.usage.last.model === 'string' && provider.usage.last.model !== ''
           ? provider.usage.last.model
           : undefined)
@@ -1637,7 +1654,25 @@ window.__ModuleLoader__.load({
           title: title,
         }
       }
-      if (lastTest !== undefined && lastTest.ok === false) {
+      // 当前账号的凭证状态是 provider 级探测出来的；只有「当前账号」能套用它。
+      // 否则会出现状态区写着「未登录」、账号表格却是绿色「可用」的矛盾
+      // （桌面账号的 configured 恒为 true，不能代表真的登录成功）。
+      var credential = provider.credential
+      if (account.active === true && credential !== null && typeof credential === 'object'
+        && typeof credential.status === 'string'
+        && credential.status !== 'signed-in' && credential.status !== 'disabled') {
+        var reason = typeof credential.reason === 'string' ? credential.reason : ''
+        var unconfigured = reason === 'no-credential' || reason === 'app-not-found'
+          || reason === 'app-ambiguous' || reason === 'app-path-invalid' || reason === 'region-mismatch'
+        return {
+          label: bind(t, unconfigured ? 'signedOut' : 'accountAuthFailed'),
+          tone: unconfigured ? 'muted' : 'error',
+          badge: unconfigured ? undefined : bind(t, 'authBadge'),
+          detail: detail,
+          title: typeof credential.message === 'string' && credential.message !== '' ? credential.message : title,
+        }
+      }
+      if (testFresh && lastTest !== undefined && lastTest.ok === false) {
         var limit = code === 'RATE_LIMIT' || code === 'QUOTA'
         var auth = code === 'AUTH' || code === 'NO_ACCOUNT'
         return {
@@ -2964,6 +2999,9 @@ window.__ModuleLoader__.load({
         var accountLabel = typeof account.label === 'string' && account.label !== ''
           ? account.label
           : bind(t, 'accountFallback')
+        // 删除确认必须带 provider：不同 provider 的默认账号 id 都叫 `default`，
+        // 只比 id 会让「在 WorkBuddy 点删除」把另一个标签页的同 id 账号也武装起来。
+        var deleteConfirmKey = active.provider + '::' + account.id
         var usage = account.usage !== null && typeof account.usage === 'object' ? account.usage : undefined
         var usageMeta = usage !== undefined && (usage.requests || 0) > 0
           ? formatNumber(usage.requests || 0) + ' ' + bind(t, 'usageCalls') + ' · '
@@ -3112,7 +3150,7 @@ window.__ModuleLoader__.load({
           actionButtons.push(h('button', {
             key: 'remove',
             type: 'button',
-            style: Object.assign({}, S.buttonGhost, deleteConfirm === account.id
+            style: Object.assign({}, S.buttonGhost, deleteConfirm === deleteConfirmKey
               ? { color: 'var(--dsw-alias-state-error-primary, #b3261e)', borderColor: 'var(--dsw-alias-state-error-primary, #b3261e)' }
               : {}),
             disabled: isBusy('save'),
@@ -3120,8 +3158,8 @@ window.__ModuleLoader__.load({
             'aria-label': bind(t, 'removeAccountAria', { name: accountLabel }),
             title: bind(t, 'removeAccountAria', { name: accountLabel }),
             onClick: function () {
-              if (deleteConfirm !== account.id) {
-                armDeleteConfirm(account.id)
+              if (deleteConfirm !== deleteConfirmKey) {
+                armDeleteConfirm(deleteConfirmKey)
                 return
               }
               clearDeleteConfirm()
@@ -3136,7 +3174,7 @@ window.__ModuleLoader__.load({
               }
               mutate(patch)
             },
-          }, deleteConfirm === account.id ? bind(t, 'removeConfirm') : bind(t, 'removeAccount')))
+          }, deleteConfirm === deleteConfirmKey ? bind(t, 'removeConfirm') : bind(t, 'removeAccount')))
         }
         var actionsCell = h('div', { key: 'actions', role: 'cell', style: S.accountActions }, ...actionButtons)
 
@@ -4463,22 +4501,57 @@ window.__ModuleLoader__.load({
           return event !== null && typeof event === 'object'
             && isFiniteNumber(event.at) && typeof event.type === 'string'
         })
-        var eventFilters = [
-          { id: 'all', label: 'eventAll', count: allEvents.length },
-          { id: 'switch', label: 'eventSwitchFilter', count: allEvents.filter(function (event) { return event.type === 'account-switch' }).length },
-          { id: 'problem', label: 'eventProblemFilter', count: allEvents.filter(function (event) { return event.level === 'warn' || event.level === 'error' }).length },
-          { id: 'credential', label: 'eventCredentialFilter', count: allEvents.filter(function (event) { return event.type === 'credential' || event.type === 'credential-refresh' || event.type === 'login' }).length },
-        ]
-        var matchesEventFilter = function (event) {
-          if (eventFilter === 'switch') return event.type === 'account-switch'
-          if (eventFilter === 'problem') return event.level === 'warn' || event.level === 'error'
-          if (eventFilter === 'credential') return event.type === 'credential' || event.type === 'credential-refresh' || event.type === 'login'
+        // 同一个后台失败会每轮刷新重复一次（实测「Trae 国际版没有额度端点」15 小时
+        // 记了 14 条、「还没配 PAT」12 条）。同一 type/provider/账号/级别/消息合并
+        // 成一行并标 ×N：既保留「还在发生」的信息，又不会把其它事件挤到下面。
+        // 时间取最新一次，悬停里给出首次时间。
+        var groupRepeatedEvents = function (list) {
+          var groups = []
+          var byKey = Object.create(null)
+          for (var index = 0; index < list.length; index++) {
+            var event = list[index]
+            var key = [
+              event.type,
+              event.level,
+              event.provider || '',
+              event.accountId || '',
+              event.message || '',
+            ].join('\u0000')
+            var group = byKey[key]
+            if (group === undefined) {
+              group = { event: event, count: 1, firstAt: event.at, lastAt: event.at }
+              byKey[key] = group
+              groups.push(group)
+              continue
+            }
+            group.count += 1
+            if (event.at < group.firstAt) group.firstAt = event.at
+            if (event.at > group.lastAt) group.lastAt = event.at
+          }
+          return groups
+        }
+        // 筛选按钮上的数字用**合并后的行数**：表格里只画 4 行，却写「异常 34」
+        // 会让人以为列表被截断了。区块标题的 34 仍然是真实事件条数。
+        var matchesEventFilter = function (event, filter) {
+          if (filter === 'switch') return event.type === 'account-switch'
+          if (filter === 'problem') return event.level === 'warn' || event.level === 'error'
+          if (filter === 'credential') return event.type === 'credential' || event.type === 'credential-refresh' || event.type === 'login'
           return true
         }
-        var filteredEvents = allEvents.filter(matchesEventFilter)
-        // 展开即渲染全部筛选结果：宿主已把 items 截到 events.limit（默认 50），
-        // 不再用 30 这种「看起来是全部、其实不是」的隐性上限。
-        var visibleEvents = eventsExpanded === true ? filteredEvents : filteredEvents.slice(0, 6)
+        var groupedCountOf = function (filter) {
+          return groupRepeatedEvents(allEvents.filter(function (event) { return matchesEventFilter(event, filter) })).length
+        }
+        var eventFilters = [
+          { id: 'all', label: 'eventAll', count: groupedCountOf('all') },
+          { id: 'switch', label: 'eventSwitchFilter', count: groupedCountOf('switch') },
+          { id: 'problem', label: 'eventProblemFilter', count: groupedCountOf('problem') },
+          { id: 'credential', label: 'eventCredentialFilter', count: groupedCountOf('credential') },
+        ]
+        var filteredEvents = allEvents.filter(function (event) { return matchesEventFilter(event, eventFilter) })
+        var groupedEvents = groupRepeatedEvents(filteredEvents)
+        // 展开即渲染全部筛选结果（重复事件已合并）：宿主已把 items 截到
+        // events.limit（默认 50），不再用 30 这种「看起来是全部、其实不是」的隐性上限。
+        var visibleGroups = eventsExpanded === true ? groupedEvents : groupedEvents.slice(0, 6)
         var eventFilterButton = function (filter) {
           var selected = eventFilter === filter.id
           return h('button', {
@@ -4506,11 +4579,19 @@ window.__ModuleLoader__.load({
             },
           }, bind(t, filter.label) + (filter.count > 0 ? ' ' + String(filter.count) : ''))
         }
-        var eventRows = visibleEvents.map(function (event, index) {
+        var eventRows = visibleGroups.map(function (group, index) {
+          var event = group.event
           var typeLabel = bind(t, eventTextKey(event.type))
           var rawMessage = typeof event.message === 'string' ? event.message : ''
           var message = rawMessage === '' || rawMessage === event.type ? typeLabel : rawMessage
           var scope = typeof event.provider === 'string' ? shortProviderName(event.provider) : ''
+          var repeatHint = group.count > 1
+            ? bind(t, 'eventRepeatHint', {
+                count: formatNumber(group.count),
+                first: formatTime(group.firstAt),
+                last: formatTime(group.lastAt),
+              })
+            : ''
           return h('li', {
             key: typeof event.id === 'string' ? event.id : 'ev' + String(index),
             style: Object.assign({}, S.modelRow, {
@@ -4523,7 +4604,7 @@ window.__ModuleLoader__.load({
           h('span', {
             style: Object.assign({}, S.modelMeta, { fontVariantNumeric: 'tabular-nums' }),
             title: formatTime(event.at),
-          }, formatShortTime(event.at)),
+          }, formatShortTime(group.lastAt)),
           h('span', { style: S.badgeSoft }, typeLabel),
           scope === '' ? null : h('span', { style: S.modelId }, scope),
           h('span', {
@@ -4534,9 +4615,17 @@ window.__ModuleLoader__.load({
               textOverflow: 'clip',
             }),
             title: rawMessage,
-          }, message))
+          }, message),
+          group.count > 1
+            ? h('span', {
+                key: 'repeat',
+                style: S.badgeSoft,
+                title: repeatHint,
+                'aria-label': repeatHint,
+              }, bind(t, 'eventRepeat', { count: formatNumber(group.count) }))
+            : null)
         })
-        var eventsFooter = filteredEvents.length > 6
+        var eventsFooter = groupedEvents.length > 6
           ? h('button', {
               key: 'more',
               type: 'button',
@@ -4545,7 +4634,7 @@ window.__ModuleLoader__.load({
               onClick: function () { setEventsExpanded(!eventsExpanded) },
             }, eventsExpanded === true
               ? bind(t, 'eventLess')
-              : bind(t, 'eventMore', { count: filteredEvents.length }))
+              : bind(t, 'eventMore', { count: groupedEvents.length }))
           : null
         sections.push(
           h('div', { key: 'events', style: S.section },
