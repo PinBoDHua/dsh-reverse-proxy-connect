@@ -1593,8 +1593,14 @@ try {
     .filter((value) => Array.isArray(value))
   if (afterAllOff.length < 2) throw new Error(`全关 + 单开后应当发两次补丁，实际 ${afterAllOff.length}`)
   const finalList = afterAllOff[afterAllOff.length - 1]
-  if (!finalList.includes('t1') || !finalList.includes('t2')) {
-    throw new Error(`全关后单独开启一个模型，把整批改动丢了：${JSON.stringify(afterAllOff)}`)
+  // 全关后单独开启 t1：t2 必须仍然关着（批量改动没被丢），t1 必须真的被移出
+  // 关闭列表（本地意图生效）。旧实现拿 status 里的 model.disabled（全关前后都是
+  // false）算下一次值，会把 t1 又塞回列表 —— 界面上勾上了、补丁里还关着。
+  if (!finalList.includes('t2')) {
+    throw new Error(`全关后单独开启一个模型，把其它模型的关闭状态丢了：${JSON.stringify(afterAllOff)}`)
+  }
+  if (finalList.includes('t1')) {
+    throw new Error(`全关后单独开启 t1，补丁仍把 t1 关着（本地意图没生效）：${JSON.stringify(afterAllOff)}`)
   }
   console.log('✓ 连点两个模型不会互相覆盖（后一次补丁带上全部改动）')
 } finally {

@@ -200,3 +200,43 @@ test('落盘是合并而不是整份覆盖：另一个进程刚写入的快照�
     )
   })
 })
+
+test('复活：重新读到额度的账号能把墓碑从磁盘上摘掉', () => {
+  withTempDir((dir) => {
+    const file = join(dir, 'credits-cache.json')
+    // 1) 删除账号：写一条墓碑。
+    const deleted = new Map()
+    deleted.forgotten = new Set(['qoder::default'])
+    deleted.revived = new Set()
+    saveCreditsCache(dir, deleted)
+    assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')).forgotten, ['qoder::default'])
+
+    // 2) 账号重新出现并读到额度：revived 表示「这次保存要把墓碑摘掉」。
+    const revived = new Map([['qoder::default', sample]])
+    revived.forgotten = new Set()
+    revived.revived = new Set(['qoder::default'])
+    assert.equal(saveCreditsCache(dir, revived), true)
+    const doc = JSON.parse(readFileSync(file, 'utf8'))
+    assert.deepEqual(doc.forgotten, [], '墓碑必须从磁盘上摘掉')
+    assert.equal(doc.entries['qoder::default'].data.remain, 675, '新快照必须落盘')
+
+    // 3) 重启读取：快照在、墓碑不在（否则下次保存又会把它删掉）。
+    const loaded = loadCreditsCache(dir)
+    assert.equal(loaded.get('qoder::default').data.remain, 675)
+    assert.equal(loaded.forgotten.has('qoder::default'), false)
+
+    // 4) 另一个进程删掉了 trae 的默认账号（墓碑落盘）；随后某个进程写回一份
+    //    它的快照（没有 revived）—— 磁盘墓碑仍然有效，不能靠写回复活。
+    const tomb = new Map()
+    tomb.forgotten = new Set(['trae::default'])
+    tomb.revived = new Set()
+    saveCreditsCache(dir, tomb)
+    const other = new Map([['trae::default', { data: { ...sample.data, remain: 1 }, fetchedAt: NOW + 1000 }]])
+    other.forgotten = new Set()
+    other.revived = new Set()
+    saveCreditsCache(dir, other)
+    const again = JSON.parse(readFileSync(file, 'utf8'))
+    assert.deepEqual(again.forgotten, ['trae::default'])
+    assert.equal(again.entries['trae::default'], undefined, '磁盘墓碑必须挡住别的进程写回')
+  })
+})

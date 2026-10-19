@@ -347,3 +347,26 @@ test('CLI 续期写回：按 id 局部 upsert，不覆盖等待期外部新增�
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('Trae 默认账号（读本机登录、storageFile 为空）的续期结果能写回', () => {
+  const dir = tempDir()
+  try {
+    const file = join(dir, 'settings.json')
+    const store = new SettingsStore(file)
+    // 默认账号的空路径是「读本机登录 / 默认位置」的常态，不是「没有凭证」。
+    store.patch({ accounts: { trae: [] }, trae: { trae: { storageFile: '' } } })
+    assert.equal(
+      applyCredentialRefresh(store, 'trae', 'default', { jwt: 'JWT-1', expiresAtMs: Date.now() + 86_400_000 }),
+      true,
+      '空 storageFile 的默认 Trae 账号不能被判成已删除',
+    )
+    const saved = JSON.parse(readFileSync(file, 'utf8'))
+    assert.equal(saved.accounts.trae.some((row) => row.id === 'default'), true)
+
+    // 账号池里有别的账号、却没有 default：说明 default 被删了，拒绝写回。
+    store.patch({ accounts: { trae: [{ id: 'acc-2', label: 'B' }] } })
+    assert.equal(applyCredentialRefresh(store, 'trae', 'default', { jwt: 'JWT-2' }), false)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})

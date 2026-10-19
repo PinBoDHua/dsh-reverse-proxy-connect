@@ -3130,19 +3130,30 @@ window.__ModuleLoader__.load({
         // 分两种情况，写不同的字段：
         // - 账号不支持的模型：勾选 = 加入 forced（强制显示），与用户的 disabled 无关；
         // - 正常模型：勾选 = 从 disabled 移除。
+        //
+        // 两种都要以「含本地未落盘意图」的当前值为基准：POST 没回来之前
+        // status 还是旧快照，连点两次会从同一个旧值出发、发出同一个补丁，
+        // 第二次（想撤销的那次）直接丢失。
+        var pendingOf = function (scope) {
+          var bucket = pendingModelToggles.current[entry.provider + '::' + scope]
+          return bucket !== undefined && bucket[model.id] !== undefined ? bucket[model.id] : undefined
+        }
         if (model.unavailable) {
-          // 基于「含本地未落盘改动」的集合计算，避免连点时用旧快照覆盖。
+          var forcedNow = pendingOf('forced')
+          var nextForced = forcedNow === undefined ? model.forced !== true : forcedNow !== true
           var forced = pendingSetFor(entry, 'forced').filter(function (id) { return id !== model.id })
-          if (!model.forced) forced.push(model.id)
-          markPending(entry.provider, 'forced', model.id, !model.forced)
+          if (nextForced) forced.push(model.id)
+          markPending(entry.provider, 'forced', model.id, nextForced)
           var forcePatch = { forcedModels: {} }
           forcePatch.forcedModels[entry.provider] = forced
           mutate(forcePatch)
           return
         }
+        var disabledNow = pendingOf('disabled')
+        var nextDisabled = disabledNow === undefined ? model.disabled !== true : disabledNow !== true
         var disabled = pendingSetFor(entry, 'disabled').filter(function (id) { return id !== model.id })
-        if (!model.disabled) disabled.push(model.id)
-        markPending(entry.provider, 'disabled', model.id, !model.disabled)
+        if (nextDisabled) disabled.push(model.id)
+        markPending(entry.provider, 'disabled', model.id, nextDisabled)
         var providersPatch = {}
         providersPatch[entry.provider] = { disabledModels: disabled }
         mutate({ providers: providersPatch })
@@ -5119,7 +5130,7 @@ window.__ModuleLoader__.load({
               totalTokens: dailyByDate[key]?.totalTokens,
             })
           }
-          var maxDailyTokens = 1
+          var maxDailyTokens = 0
           var peakDate = buckets[buckets.length - 1].date
           var anyDailyTokens = false
           buckets.forEach(function (day) {
@@ -5129,6 +5140,9 @@ window.__ModuleLoader__.load({
               peakDate = day.date
             }
           })
+          // 全零时不能拿 0 当分母（高度会变 NaN）；峰值恰好是 1 时也要落在
+          // 真正有数据的那一天，而不是默认的最后一天。
+          if (maxDailyTokens <= 0) maxDailyTokens = 1
           var todayKey = buckets[buckets.length - 1].date
           usageBody.push(
             h('div', { key: 'heat', className: 'rpc-subsection' },
@@ -6326,6 +6340,9 @@ window.__ModuleLoader__.load({
         // 与卡片同名：写入点统一走这里（侧栏没有竞态，只起可读性作用）。
         var applyStatus = function (document) {
           if (document === null || typeof document !== 'object' || Array.isArray(document)) return
+          // 每次落地都递增代数：在途的轻量 GET 回来时据此判断「自己是不是旧的」。
+          // 只比对请求序号不够 —— 手动刷新（POST）的结果永远比同期的 GET 新。
+          statusEpoch.current += 1
           setStatus(document)
         }
         var busyState = useState(false)
@@ -6464,15 +6481,13 @@ window.__ModuleLoader__.load({
           if (event !== undefined && event.preventDefault !== undefined) event.preventDefault()
           if (status === undefined || busyRef.current === true) return
           busyRef.current = true
-          // 记下发起时的代数：刷新结果与「刷新前就发出、刷新后才回来」的旧 GET
-          // 都靠它排序 —— 只有代数没变（中间没有别的写入）的结果才落地。
-          statusEpoch.current += 1
-          var epoch = statusEpoch.current
           setBusy(true)
           setFailed(false)
           postJson(ACTION_PATH, { action: 'credits' }, status.key)
             .then(function (document) {
-              if (epoch === statusEpoch.current) applyStatus(document)
+              // 手动刷新的结果永远落地：它比任何在途的轻量 GET 都新。
+              // GET 那边用代数判旧（applyStatus 递增），两者配合才不会互相覆盖。
+              applyStatus(document)
               busyRef.current = false
               setBusy(false)
               // 失败后 5 秒内又刷新成功：必须立刻清掉失败提示，否则旧定时器
