@@ -2967,4 +2967,48 @@ function extractFn(header) {
   }
 }
 
+// 51) 折叠状态下「状态」列不能整列为空：只有被折叠起来的行带徽章时，
+//     可见的 8 行会得到一整列空白 —— 正是 0.6.0 想避免的「空列挤掉模型名」。
+{
+  const statsSnapshot = { accountModels: STATUS.stats.accountModels, accountModelToday: STATUS.stats.accountModelToday }
+  const accountsSnapshot = STATUS.providers[0].accounts
+  try {
+    const pairs = {}
+    const today = {}
+    for (let index = 0; index < 12; index++) {
+      // 补零：表体按 token → 账号 → 模型排序，id 不补零会让「第 12 行」跑到
+      // 可见区里去（'m10' < 'm2'），测试前提就不成立了。
+      const model = `m${String(index).padStart(2, '0')}`
+      const key = `workbuddy::default::${model}`
+      const row = { provider: 'workbuddy', accountId: 'default', model, requests: 1, totalTokens: 10, avgDurationMs: 100 }
+      pairs[key] = { ...row }
+      today[key] = { ...row }
+    }
+    STATUS.stats.accountModels = pairs
+    STATUS.stats.accountModelToday = today
+    // 徽章落在排序后**最后一行**（m11），折叠时它在隐藏区里。
+    STATUS.providers[0].accounts = accountsSnapshot.map((account, index) => index === 0
+      ? { ...account, modelTests: { m11: { ok: true, latencyMs: 100, at: Date.now() } } }
+      : account)
+    let tree = await mount(card, { t: realT })
+    const usageTab = find(tree, (node) => node.type === 'button'
+      && node.props?.className === 'rpc-pagetab'
+      && textOf(node).startsWith(realT('navUsage')))
+    if (usageTab === undefined) throw new Error('找不到「用量」分区按钮')
+    usageTab.props.onClick()
+    tree = await render(card, { t: realT })
+    const head = find(tree, (node) => node.props?.className === 'rpc-usage-head rpc-usage-pairs')
+    if (head === undefined) throw new Error('找不到账号 × 模型表头')
+    const columns = head.children.filter((child) => child !== null && child !== undefined).length
+    if (columns !== 5) {
+      throw new Error(`折叠时唯一的徽章在被折叠的行里，可见行却仍渲染了「状态」空列（列数 ${String(columns)}）`)
+    }
+    console.log('✓ 折叠时状态列按可见行计算，不会整列为空')
+  } finally {
+    STATUS.stats.accountModels = statsSnapshot.accountModels
+    STATUS.stats.accountModelToday = statsSnapshot.accountModelToday
+    STATUS.providers[0].accounts = accountsSnapshot
+  }
+}
+
 console.log('client-credits: OK')

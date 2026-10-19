@@ -5464,7 +5464,13 @@ window.__ModuleLoader__.load({
           // 所有行都没有测试徽章时不再留一列空白的「状态」——窄屏下列宽本来就
           // 紧张，空列只会把模型名挤成省略号。
           var pairStatusBadges = accountModelRows.map(function (entry) { return modelStatusBadge(entry) })
-          var hasPairStatus = pairStatusBadges.some(function (badge) { return badge !== null })
+          // 判据必须落在**真正渲染出来的行**上：折叠时只画前 N 行，若唯一的徽章
+          // 恰好被折叠起来，用全量行判断会给可见区留下一整列空白（正是上面要
+          // 避免的情况）。展开后重新按全量行计算，列随之出现。
+          var visiblePairRows = accountModelExpanded === true
+            ? accountModelRows.length
+            : Math.min(ACCOUNT_MODEL_ROWS, accountModelRows.length)
+          var hasPairStatus = pairStatusBadges.slice(0, visiblePairRows).some(function (badge) { return badge !== null })
           var accountModelColumns = hasPairStatus
             ? 'minmax(78px, .9fr) minmax(126px, 1.8fr) minmax(40px, .55fr) minmax(60px, .8fr) minmax(50px, .65fr) minmax(104px, 1.1fr)'
             : 'minmax(78px, .9fr) minmax(126px, 1.8fr) minmax(40px, .55fr) minmax(60px, .8fr) minmax(50px, .65fr)'
