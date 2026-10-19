@@ -48,6 +48,14 @@ window.__ModuleLoader__.load({
     var HEALTH_EVIDENCE_TTL_MS = 30 * 60 * 1000
 
     /**
+     * 「账号 × 模型」表默认渲染的行数。
+     *
+     * 一个账号几十个模型、多家账号时这张表能到上百行，全画出来会把整页拉长；
+     * 但**不能静默截断** —— 折叠时必须给出「还有 N 行」并留展开入口。
+     */
+    var ACCOUNT_MODEL_ROWS = 8
+
+    /**
      * 插件自带的两组主题自适应属性。
      *
      * 宿主 0.2.1 的 ui-theme 里没有 `--dsw-alias-bg-l2` / `--dsw-alias-state-warning-primary`
@@ -492,6 +500,9 @@ window.__ModuleLoader__.load({
       accountAuthFile: '登录文件路径（留空 = 读本机登录）',
       accountSecretHint: '令牌只保存在本机设置里，不会回传到浏览器。',
       accountDefaultLabel: '新账号',
+      // 隐式默认账号的名字由插件生成（服务端下发 `labelKey`），按当前语言显示。
+      accountDefaultDesktop: '本机登录',
+      accountDefaultPat: '默认令牌',
       // 账号表格：让「还剩多少 / 现在能不能用 / 今天签没签」第一眼可见
       accountColAccount: '账号',
       accountColCredits: '积分',
@@ -707,6 +718,34 @@ window.__ModuleLoader__.load({
       eventEvents: '账本',
       eventTest: '账号测试',
       eventUnknown: '事件',
+      // 服务端下发的事件文案（`event.messageKey`）。没有对应键时回落到
+      // `event.message`（中文原文），所以老账本仍然能看。
+      eventStartupDetail: '插件 v{version} 已启动，{providers} 个 provider{swept}',
+      eventStartupSwept: '，清理 {count} 个中断写入的临时文件',
+      eventCreditsFailed: '额度读取失败（{account}）：{reason}',
+      eventCreditsRecovered: '额度读取已恢复（{account}）',
+      eventSwitchByCredits: '额度{reason}，自动切换到「{to}」',
+      eventSwitchReasonExhausted: '已用尽',
+      eventSwitchReasonLow: '低于阈值',
+      eventCredentialRefreshed: '登录令牌已自动续期（{account}）',
+      eventCatalogUpdated: '模型目录已更新（{count} 个模型）',
+      eventCatalogFallback: '模型目录拉取失败，回退到 {source}（{reason}）',
+      eventProbeDone: '能力探测完成：{models} 个模型，{unavailable} 个账号不支持',
+      eventCheckinSummary: '签到：{accounts} 个账号{suffix}',
+      eventCheckinSkippedSuffix: '，{skipped} 个账号未登录，已跳过',
+      eventCheckinFailedSuffix: '，{failed} 个失败',
+      eventCheckinCreditSuffix: '，本次领到 {credit} 分',
+      eventFailover: '账号「{from}」请求失败（{code}），切换到「{to}」',
+      eventAccountForgotten: '账号已删除，相关缓存与历史已清理',
+      eventLoginStarted: '已开始浏览器登录',
+      eventLoginImported: '浏览器登录成功，已导入账号「{label}」',
+      eventLoginSaveFailed: '保存账号失败：{reason}',
+      eventLoginFailed: '浏览器登录失败：{reason}',
+      eventLoginCancelled: '已取消浏览器登录',
+      eventManualRefresh: '已手动刷新模型目录与额度',
+      eventManualCredits: '已手动刷新额度',
+      eventStatsReset: '用量统计已重置',
+      eventCleared: '事件账本已清空',
       eventRetained: '仅保留最近 {count} 条，更早的事件已轮转。',
       eventRepeat: '×{count}',
       eventRepeatHint: '同一事件共 {count} 次；最早 {first}，最新 {last}',
@@ -851,6 +890,9 @@ window.__ModuleLoader__.load({
       accountAuthFile: 'Sign-in file path (blank = local sign-in)',
       accountSecretHint: 'Tokens stay in the local settings file and are never sent back to the browser.',
       accountDefaultLabel: 'New account',
+      // Implicit default accounts are named by the plugin (server sends `labelKey`).
+      accountDefaultDesktop: 'This machine',
+      accountDefaultPat: 'Default token',
       accountColAccount: 'Account',
       accountColCredits: 'Credits',
       accountColStatus: 'Status / model',
@@ -1065,6 +1107,34 @@ window.__ModuleLoader__.load({
       eventEvents: 'Journal',
       eventTest: 'Account test',
       eventUnknown: 'Event',
+      // Server-provided event text (`event.messageKey`); falls back to the
+      // Chinese `event.message` when a key is missing (older journals).
+      eventStartupDetail: 'Plugin v{version} started with {providers} providers{swept}',
+      eventStartupSwept: ', cleaned up {count} temp files left by interrupted writes',
+      eventCreditsFailed: 'Credit read failed ({account}): {reason}',
+      eventCreditsRecovered: 'Credit read recovered ({account})',
+      eventSwitchByCredits: 'Credits {reason}; switched to “{to}” automatically',
+      eventSwitchReasonExhausted: 'exhausted',
+      eventSwitchReasonLow: 'below the threshold',
+      eventCredentialRefreshed: 'Login token refreshed automatically ({account})',
+      eventCatalogUpdated: 'Model catalog updated ({count} models)',
+      eventCatalogFallback: 'Model catalog fetch failed; fell back to {source} ({reason})',
+      eventProbeDone: 'Probe finished: {models} models, {unavailable} unsupported by this account',
+      eventCheckinSummary: 'Check-in: {accounts} accounts{suffix}',
+      eventCheckinSkippedSuffix: ', {skipped} not signed in, skipped',
+      eventCheckinFailedSuffix: ', {failed} failed',
+      eventCheckinCreditSuffix: ', {credit} credits claimed',
+      eventFailover: 'Account “{from}” failed ({code}); switched to “{to}”',
+      eventAccountForgotten: 'Account deleted; its caches and history were cleaned up',
+      eventLoginStarted: 'Browser login started',
+      eventLoginImported: 'Browser login succeeded; imported account “{label}”',
+      eventLoginSaveFailed: 'Saving the account failed: {reason}',
+      eventLoginFailed: 'Browser login failed: {reason}',
+      eventLoginCancelled: 'Browser login cancelled',
+      eventManualRefresh: 'Model catalog and credits refreshed manually',
+      eventManualCredits: 'Credits refreshed manually',
+      eventStatsReset: 'Usage statistics reset',
+      eventCleared: 'Event journal cleared',
       eventRetained: 'Only the latest {count} events are kept; older entries have rotated out.',
       eventRepeat: '×{count}',
       eventRepeatHint: 'Same event {count} times; first {first}, latest {last}',
@@ -1169,6 +1239,29 @@ window.__ModuleLoader__.load({
       if (provider === 'trae') return 'TRAE'
       if (provider === 'trae-global') return 'TRAEG'
       return provider.slice(0, 4).toUpperCase()
+    }
+
+    /**
+     * 账号的显示名。
+     *
+     * 隐式默认账号（`id === 'default'`）的名字是**插件生成的**（「本机登录」/
+     * 「默认令牌」），服务端会带 `labelKey`；英文界面用键本地化，中文界面与
+     * 老宿主没有键时回落到 `label` 本身。用户自己命名的账号永远没有键，
+     * 原样显示 —— 不能把用户起的名字翻译掉。
+     *
+     * @param account - 账号（可能来自 `/status`，也可能是本地构造的）。
+     * @param t - 当前语言的绑定函数。
+     * @returns 显示名。
+     */
+    function accountNameOf(account, t) {
+      var label = account !== null && typeof account === 'object' && typeof account.label === 'string' ? account.label : ''
+      var key = account !== null && typeof account === 'object' && typeof account.labelKey === 'string' ? account.labelKey : ''
+      if (key !== '') {
+        var localized = bind(t, key)
+        // 未知键会回显键名本身：那比中文原文更糟，回落 label。
+        if (typeof localized === 'string' && localized !== '' && localized !== key) return localized
+      }
+      return label === '' ? bind(t, 'accountFallback') : label
     }
 
     /**
@@ -1619,6 +1712,74 @@ window.__ModuleLoader__.load({
       if (level === 'error') return 'var(--dsw-alias-state-error-primary, #b3261e)'
       if (level === 'warn') return 'var(--dsh-rpc-warn, #9d5c00)'
       return 'var(--dsw-alias-label-secondary)'
+    }
+
+    /**
+     * 把服务端的 `messageKey` 渲染成当前语言的一句话。
+     *
+     * 服务端在记录事件时会同时写中文 `message`（CLI 与老客户端直接读它）和
+     * `messageKey: {key, params}`。这里优先用后者：同一个账本在中文与英文界面
+     * 下都能正确显示。没有对应键（老账本、新增事件还没加键）时回落到
+     * `message`，绝不因为缺一个翻译就把整行渲染成空白。
+     *
+     * 参数里混着两类值：
+     * - **账号名**（`account` / `from` / `to` / `label`）：隐式默认账号的名字是
+     *   插件生成的，服务端会给 `*LabelKey`；这里用同样的 `labelKey` 规则本地化，
+     *   用户自己起的名字保持原样。
+     * - **原因/来源/代码**：上游原文，不翻译。
+     *
+     * 少数键带一个「条件片段」参数（签到摘要的 skipped / failed / credit，
+     * 启动事件的临时文件清理），这里先拼好片段再交给 `bind()` 插值。
+     *
+     * @param event - 账本事件。
+     * @param t - 当前语言的绑定函数。
+     * @param fallback - 没有可用键时的文本。
+     * @returns 显示用文本。
+     */
+    function eventMessageOf(event, t, fallback) {
+      var spec = event !== null && typeof event === 'object' ? event.messageKey : undefined
+      if (spec === null || typeof spec !== 'object' || typeof spec.key !== 'string' || spec.key === '') return fallback
+      var params = spec.params !== null && typeof spec.params === 'object' ? spec.params : {}
+      var values = {}
+      var keys = Object.keys(params)
+      for (var index = 0; index < keys.length; index++) values[keys[index]] = params[keys[index]]
+      // 账号名参数：服务端同时给了 `accountLabelKey` / `fromLabelKey` /
+      // `toLabelKey` / `labelKey`，命中就换成当前语言的名字。
+      var namePairs = [['account', 'accountLabelKey'], ['from', 'fromLabelKey'], ['to', 'toLabelKey'], ['label', 'labelKey']]
+      for (var pair = 0; pair < namePairs.length; pair++) {
+        var valueField = namePairs[pair][0]
+        var keyField = namePairs[pair][1]
+        var labelKey = params[keyField]
+        if (typeof params[valueField] !== 'string' || typeof labelKey !== 'string' || labelKey === '') continue
+        var localized = bind(t, labelKey)
+        if (typeof localized === 'string' && localized !== '' && localized !== labelKey) values[valueField] = localized
+      }
+      if (spec.key === 'eventStartup') {
+        var swept = typeof params.swept === 'number' && params.swept > 0 ? params.swept : 0
+        values.swept = swept > 0 ? bind(t, 'eventStartupSwept', { count: swept }) : ''
+        return bind(t, 'eventStartupDetail', values)
+      }
+      if (spec.key === 'eventCheckinSummary') {
+        var suffix = ''
+        if (typeof params.skipped === 'number' && params.skipped > 0) {
+          suffix += bind(t, 'eventCheckinSkippedSuffix', { skipped: params.skipped })
+        }
+        if (typeof params.failed === 'number' && params.failed > 0) suffix += bind(t, 'eventCheckinFailedSuffix', { failed: params.failed })
+        suffix += bind(t, 'eventCheckinCreditSuffix', { credit: typeof params.credit === 'number' ? params.credit : 0 })
+        values.suffix = suffix
+        return bind(t, 'eventCheckinSummary', values)
+      }
+      if (spec.key === 'eventSwitchByCredits') {
+        values.reason = params.reason === 'exhausted'
+          ? bind(t, 'eventSwitchReasonExhausted')
+          : bind(t, 'eventSwitchReasonLow')
+        return bind(t, 'eventSwitchByCredits', values)
+      }
+      // 其余键都是「同名文案键 + 直接插值」。
+      var text = bind(t, spec.key, values)
+      // bind 对未知键会回显键名本身（`eventFoo`）：那比中文原文更糟，回落。
+      if (typeof text !== 'string' || text === '' || text === spec.key) return fallback
+      return text
     }
 
     /** Qoder PAT 页面（按区域）。 */
@@ -2416,6 +2577,11 @@ window.__ModuleLoader__.load({
       var accountModelRangeState = useState('today')
       var accountModelRange = accountModelRangeState[0]
       var setAccountModelRange = accountModelRangeState[1]
+      // 「账号 × 模型」表默认只画前若干行（避免 50+ 行把整页拉长），但必须
+      // 给出「还有 N 行」与展开入口 —— 静默截断会让人以为那就是全部数据。
+      var accountModelExpandedState = useState(false)
+      var accountModelExpanded = accountModelExpandedState[0]
+      var setAccountModelExpanded = accountModelExpandedState[1]
       // 可用性测试的账号 / 模型选择，按 provider 记住，切服务商不丢。
       var testPickState = useState({})
       var testPicks = testPickState[0]
@@ -2560,10 +2726,21 @@ window.__ModuleLoader__.load({
         return entry.provider === activeTab
       })[0]
 
-      /** 选择服务商：同时回到该服务商的「概览」，避免停留在上一家的设置页。 */
+      /**
+       * 选择服务商：同时回到该服务商的「概览」，避免停留在上一家的设置页。
+       *
+       * 顺带清空模型搜索词：搜索框只在模型多于 6 个时才渲染，切成一家模型少的
+       * provider 后输入框会消失、但**过滤词还在**，列表被上一个 provider 的搜索词
+       * 静默过滤 —— 界面显示「没有匹配的模型」，却没有任何地方能清除它。
+       * 放在这里（而不是 effect 里）是因为它必须跟着「用户真的切了服务商」，
+       * 而不是跟着每次状态轮询。
+       *
+       * @param provider - provider id。
+       */
       var selectProvider = function (provider) {
         setActiveTab(provider)
         setActivePage('overview')
+        setSearchDraft('')
       }
 
       var currentTestPick = active === undefined ? {} : (testPicks[active.provider] || {})
@@ -2685,6 +2862,21 @@ window.__ModuleLoader__.load({
         bucket[id] = on
       }
 
+      /**
+       * 写一次设置并合并返回的状态。
+       *
+       * 失败时**不 rethrow**：这个函数被 14 处 UI 事件直接调用，全部是
+       * `mutate(patch)` 这种「发出去就不管」的写法。旧实现末尾 `throw failure`
+       * 会让每一次保存失败都变成一次 UnhandledPromiseRejection —— 用户看到的是
+       * 错误横幅（正确），但宿主控制台同时多一条未处理拒绝（噪声，且会干扰
+       * 真正的异常排查）。失败信息已经通过 `setError()` 呈现在界面上，调用方
+       * 需要「成功后做点什么」时用 `options.onSuccess`，需要「失败后做点什么」
+       * 时用 `options.onError`。
+       *
+       * @param patch - 设置补丁。
+       * @param options - `{ clearPatDraft?, onSuccess?, onError? }`。
+       * @returns 最新的状态文档（失败时为 undefined）。
+       */
       var mutate = function (patch, options) {
         if (status === undefined) return Promise.resolve()
         beginBusy('save')
@@ -2713,7 +2905,14 @@ window.__ModuleLoader__.load({
             }
             // 失败时丢弃本地猜测，让界面回到服务端真实值。
             pendingModelToggles.current = {}
-            throw failure
+            if (options !== undefined && typeof options.onError === 'function') {
+              try {
+                options.onError(failure)
+              } catch (_) {
+                /* 回调失败不该再产生一个未处理拒绝 */
+              }
+            }
+            return undefined
           })
       }
 
@@ -3570,7 +3769,7 @@ window.__ModuleLoader__.load({
               ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 } }, rpcIcon('key', 12), credential.email)
               : null,
             activeAccountLabel !== undefined
-              ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 } }, rpcIcon('users', 12), bind(t, 'creditsCurrent', { label: activeAccountLabel.label || bind(t, 'accountFallback') }))
+              ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 } }, rpcIcon('users', 12), bind(t, 'creditsCurrent', { label: accountNameOf(activeAccountLabel, t) }))
               : null,
             h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } }, rpcIcon('cube', 12), String(modelTotal) + ' ' + bind(t, 'models')))),
         h('div', { className: 'rpc-detail-actions' },
@@ -3698,9 +3897,7 @@ window.__ModuleLoader__.load({
               : creditsAlert === undefined
                 ? 'var(--dsw-alias-label-primary)'
                 : toneColor(creditsAlert === 'exhausted' ? 'error' : 'warn')
-        var accountLabel = typeof account.label === 'string' && account.label !== ''
-          ? account.label
-          : bind(t, 'accountFallback')
+        var accountLabel = accountNameOf(account, t)
         // 删除确认必须带 provider：不同 provider 的默认账号 id 都叫 `default`，
         // 只比 id 会让「在 WorkBuddy 点删除」把另一个标签页的同 id 账号也武装起来。
         var deleteConfirmKey = active.provider + '::' + account.id
@@ -4196,7 +4393,7 @@ window.__ModuleLoader__.load({
                     return h('option', {
                       key: 'a' + index,
                       value: account.id,
-                    }, (typeof account.label === 'string' && account.label !== '' ? account.label : bind(t, 'accountFallback'))
+                    }, accountNameOf(account, t)
                       + (account.active === true ? ' · ' + bind(t, 'currentAccount') : ''))
                   }))),
                 h('label', { className: 'rpc-testfield' },
@@ -4243,8 +4440,8 @@ window.__ModuleLoader__.load({
               }, bind(t, 'manageAccounts'), rpcIcon('chevron', 12))),
             h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 } },
               h('span', { style: dot(DOT_OK) }),
-              h('span', { style: Object.assign({}, S.modelName, { fontWeight: 600 }), title: overviewRow !== undefined ? overviewRow.label : '' },
-                overviewRow !== undefined && overviewRow.label !== undefined && overviewRow.label !== '' ? overviewRow.label : bind(t, 'accountFallback')),
+              h('span', { style: Object.assign({}, S.modelName, { fontWeight: 600 }), title: overviewRow !== undefined ? accountNameOf(overviewRow, t) : '' },
+                overviewRow !== undefined ? accountNameOf(overviewRow, t) : bind(t, 'accountFallback')),
               overviewRow !== undefined ? h('span', { className: 'rpc-chip rpc-chip-accent' }, bind(t, 'currentAccount')) : null,
               h('span', { style: S.grow }),
               h('span', { className: rpcChipClass(overviewCheckinTone), title: checkinFailureRaw !== '' ? checkinFailureRaw : '' }, checkinLabel)),
@@ -4607,11 +4804,14 @@ window.__ModuleLoader__.load({
         if (validDaily.length > 0) {
           var dailyByDate = {}
           validDaily.forEach(function (day) { dailyByDate[day.date] = day })
-          var anchored = new Date(
-            Number(validDaily[validDaily.length - 1].date.slice(0, 4)),
-            Number(validDaily[validDaily.length - 1].date.slice(5, 7)) - 1,
-            Number(validDaily[validDaily.length - 1].date.slice(8, 10)),
-          )
+          // 窗口必须锚定在**今天**，不能锚在「最后一条有数据的日期」。
+          //
+          // 旧实现拿 `validDaily.at(-1).date` 当锚点：用户三天没用这一家时，
+          // 14 格窗口整体左移到三天前，最右一格既不是今天、也不是任何有意义的
+          // 边界 —— 用户看到「今天没用量」，其实今天那一格根本没画出来。
+          // 缺的日期由下面的补 0 逻辑兜住（窗口内没有数据 = 0）。
+          var now = new Date()
+          var anchored = new Date(now.getFullYear(), now.getMonth(), now.getDate())
           var buckets = []
           for (var offset = 13; offset >= 0; offset--) {
             var cursor = new Date(anchored.getFullYear(), anchored.getMonth(), anchored.getDate() - offset)
@@ -4746,7 +4946,9 @@ window.__ModuleLoader__.load({
           && accountModelSource !== null && typeof accountModelSource === 'object') {
           var labelOfAccount = {}
           safeArray(active.accounts).forEach(function (account) {
-            if (account !== null && typeof account.id === 'string') labelOfAccount[account.id] = account.label
+            // 默认账号的名字由插件生成：这里也要本地化，否则英文界面的
+            // 账号 × 模型表会混着中文。「账号 id」作为最后的兜底。
+            if (account !== null && typeof account.id === 'string') labelOfAccount[account.id] = accountNameOf(account, t)
           })
           Object.keys(accountModelSource).forEach(function (key) {
             var counters = accountModelSource[key]
@@ -4766,7 +4968,6 @@ window.__ModuleLoader__.load({
           accountModelRows.sort(function (a, b) {
             return (Number(b.counters.totalTokens) || 0) - (Number(a.counters.totalTokens) || 0)
           })
-          accountModelRows = accountModelRows.slice(0, 8)
         }
         // 上方那张汇总表用的是同一个口径（今日 / 累计），直接拿来当分母。
         var accountModelTotal = effectiveAccountModelRange === 'all'
@@ -4885,6 +5086,7 @@ window.__ModuleLoader__.load({
                   usageHead('a4', bind(t, 'usageAvg'), true),
                   usageHead('a5', bind(t, 'usageAccountModelStatus'), true)),
                 accountModelRows.map(function (entry, index) {
+                  if (accountModelExpanded !== true && index >= ACCOUNT_MODEL_ROWS) return null
                   return h('div', {
                     key: 'am' + index,
                     'data-pair-row': 'true',
@@ -4896,7 +5098,21 @@ window.__ModuleLoader__.load({
                   h('span', { style: usageNumberCell }, formatNumber(entry.counters.totalTokens || 0)),
                   h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--rpc-muted)' }) }, formatDuration(entry.counters.avgDurationMs)),
                   modelTestCell(entry))
-                }))),
+                })),
+              // 折叠时明确说出「还有多少行」并给一个展开入口。旧实现直接
+              // `slice(0, 8)`：15 行数据只画 8 行，另外 7 行**没有任何提示**，
+              // 用户会以为这张表就是全部。
+              accountModelRows.length > ACCOUNT_MODEL_ROWS
+                ? h('div', { key: 'more', style: { display: 'flex', justifyContent: 'flex-end', marginTop: 4 } },
+                    h('button', {
+                      type: 'button',
+                      className: 'rpc-btn rpc-btn-sm',
+                      'aria-expanded': accountModelExpanded === true,
+                      onClick: function () { setAccountModelExpanded(!accountModelExpanded) },
+                    }, accountModelExpanded === true
+                      ? bind(t, 'eventLess')
+                      : bind(t, 'eventMore', { count: accountModelRows.length })))
+                : null),
           )
         }
 
@@ -5441,7 +5657,11 @@ window.__ModuleLoader__.load({
           var event = group.event
           var typeLabel = bind(t, eventTextKey(event.type))
           var rawMessage = typeof event.message === 'string' ? event.message : ''
-          var message = rawMessage === '' || rawMessage === event.type ? typeLabel : rawMessage
+          // 服务端会同时写 `messageKey`（结构化）与 `message`（中文原文）：
+          // 有键就本地化，没有就退回中文，老账本照样能看。
+          var message = rawMessage === '' || rawMessage === event.type
+            ? typeLabel
+            : eventMessageOf(event, t, rawMessage)
           var scope = typeof event.provider === 'string' ? shortProviderName(event.provider) : ''
           var repeatHint = group.count > 1
             ? bind(t, 'eventRepeatHint', {
@@ -5461,9 +5681,11 @@ window.__ModuleLoader__.load({
           }, formatShortTime(group.lastAt)),
           h('span', { className: 'rpc-chip' }, typeLabel),
           scope === '' ? null : h('span', { className: 'rpc-model-id' }, scope),
+          // tooltip 也走本地化文本：悬停时显示中文原文会让英文界面显得两套语言。
+          // 本地化失败（没有键）时 message 就是原文，行为不变。
           h('span', {
             className: 'rpc-event-msg',
-            title: rawMessage,
+            title: message,
           }, message),
           group.count > 1
             ? h('span', {
@@ -6254,7 +6476,7 @@ window.__ModuleLoader__.load({
             if (problem !== undefined) meta.push(h('span', { key: 'problem', style: microChip('var(--dsh-rpc-warn, #9d5c00)'), title: problemDetail }, problem))
             if (snapshot.planName !== undefined && snapshot.planName !== '') meta.push(h('span', { key: 'plan', style: microChip() }, snapshot.planName))
             if (percent !== undefined) meta.push(h('span', { key: 'pct', style: microChip(warn ? 'var(--dsh-rpc-warn, #9d5c00)' : accent) }, bind(t, 'creditsPercent', { percent: percent })))
-            if (activeAccount !== undefined && problem === undefined) meta.push(h('span', { key: 'acc', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bind(t, 'creditsCurrent', { label: activeAccount.label })))
+            if (activeAccount !== undefined && problem === undefined) meta.push(h('span', { key: 'acc', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bind(t, 'creditsCurrent', { label: accountNameOf(activeAccount, t) })))
             if (isFiniteNumber(snapshot.resetAtMs) && snapshot.resetAtMs > 0) meta.push(h('span', { key: 'reset', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsResetShort', { date: formatShortDate(snapshot.resetAtMs) })))
             if (sidebarShowUsage && todayUsage !== undefined && isFiniteNumber(todayUsage.requests) && todayUsage.requests > 0) meta.push(h('span', { key: 'today', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsToday', { count: formatNumber(todayUsage.requests), tokens: formatNumber(todayUsage.totalTokens || 0) })))
             if (snapshot.stale === true) meta.push(h('span', { key: 'cached', style: microChip() }, bind(t, 'creditsCached')))

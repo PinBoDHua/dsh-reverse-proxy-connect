@@ -185,6 +185,33 @@ test('坏文件 / 错版本 / 坏条目不会让账本整体失效', () => {
   }
 })
 
+test('磁盘账本来自更高版本：只读加载、拒绝覆盖（降级安装不能清空事件）', () => {
+  const { dir, dispose } = tempDir()
+  try {
+    const file = eventsPathOf(dir)
+    const future = JSON.stringify({
+      version: EVENT_VERSION + 1,
+      events: [{ at: 1_700_000_000_000, type: 'startup', level: 'info', message: '未来版本写的事件' }],
+    })
+    writeFileSync(file, future)
+
+    const log = new EventLog({ filePath: file, persistDelayMs: 0 })
+    assert.equal(log.summary().count, 0, '未来版本按当前字段不读')
+    assert.equal(log.writeBlocked, true, '必须标记只读')
+    assert.equal(log.unsupportedVersion, EVENT_VERSION + 1)
+
+    // 记录与落盘都被挡住；原文件一个字节都不能变。
+    log.record({ type: 'startup', message: '降级后启动' })
+    assert.equal(log.flush(), false, 'writeBlocked 时 flush 直接返回 false')
+    assert.equal(readFileSync(file, 'utf8'), future, '未来版本的事件不能被覆盖')
+    // clear() 同理：不能把对方的账本清成空文件。
+    assert.equal(log.clear(), false)
+    assert.equal(readFileSync(file, 'utf8'), future)
+  } finally {
+    dispose()
+  }
+})
+
 test('clear() 同时清内存与磁盘；stop() 之后不再记录', () => {
   const { dir, dispose } = tempDir()
   try {

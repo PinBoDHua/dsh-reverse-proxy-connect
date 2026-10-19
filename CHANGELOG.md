@@ -1,5 +1,81 @@
 # 更新记录
 
+## 0.4.1 — 2026-10-19
+
+两路独立只读审计（后端 / 前端）确认了 12 个可复现问题，本轮一并修复；不新增
+功能、不改协议、不改任何设置项。所有修复都补了回归用例：`node --test tests/*.test.mjs`
+296 项（原 289）与 `tests/client-credits.mjs` 全部通过。
+
+### 跨进程与统计
+
+- **跨午夜合并把昨天的计数并进今天**：`mergeStatsData()` 只给 `today` 加了日期门，
+  `providerToday` 与 `accountModelToday` 仍无条件取 max。两个窗口/CLI 跨过午夜各写
+  一次，就会出现「今日 3 次，但 WorkBuddy 今日 10 次」这种自相矛盾的卡片，而且
+  错误数字会落盘。现在三个「今日」维度共用同一个日期门：只有两边是同一天才合并，
+  否则只采纳日期更新的一侧。
+- **已恢复的 provider 仍显示「不可用」**：`consecutiveFailures` 不是单调累计量
+  （一次成功会清零），却被 `mergeCountersMax()` 取 max —— 另一个窗口成功过一次，
+  本进程的旧连败又把它覆盖回去，`healthOf()` 继续判 `down`，目录刷新因此继续按
+  `cooling-down` 跳过 120 秒。现在这一项跟着「最后一次请求更新的一侧」走。
+- **已删账号的统计会复活**：`forgetAccount()` 删完内存就 `flush()`，而 `flush()`
+  必先合并磁盘另一份文档（键取并集），刚删掉的 `accounts` / `accountModels` /
+  `accountModelToday` 原样回来，函数却返回 `true`。现在被删的键记进 `forgotten`
+  集合，合并时跳过（与 `credit-history.js` 同一套做法）。账号重新产生数据时自动失效。
+- **时钟前跳后今日桶永久钉在未来日期**：`#rollDay()` 只允许向前翻，一次 NTP 校正 /
+  虚拟机快照恢复把「今日」写成两天后，时钟回来后既不回退也不清空，两天数据继续
+  累加进那个未来日期。现在按「进程时钟属于哪一天」双向换桶；补记一条更早的请求
+  （`entry.at` 是昨天）仍然不会清空今日桶。
+- **超过上限后丢的是最新数据**：`#load()` 用 `Object.entries().slice(0, N)` 按**文件
+  插入顺序**取前 N 条，也就是保留最旧的。models / accounts / sessions /
+  accountModels / providerDaily 五处都改成按最近活跃时间（`lastAt`）或最近日期保留。
+- **目录缓存的两个上限同样按写入顺序截断**：`loadCatalogCache()` 先 `slice(0, 24)`
+  再过滤，24 条过期行就能把唯一有效条目挤出窗口（断网重启后选择器退回内置兜底）；
+  `saveCatalogCache()` 按写入顺序 `break`，会丢掉刚刷新的账号。两处都改成先校验
+  再按 `fetchedAt` 保留最新。
+
+### 版本与只读保护
+
+- **`events.json` 与 `credits-cache.json` 缺「未来版本只读」保护**：降级安装后第一次
+  去抖落盘就把对方写过的文件整份覆盖成当前版本（事件账本是换号/凭证失效的唯一
+  持久证据）。现在与 settings / stats / catalog-cache / credits-history 一致：读到
+  更高版本就标记 `writeBlocked`、拒绝写回，原文件一个字节不变。
+
+### CLI
+
+- **CLI 刷新的目录与额度缓存从不落盘**：`bin.js` 的退出钩子只调用了
+  `creditHistory.stop()`，两个缓存落盘定时器都 `unref()` 过，命令一结束进程就退出
+  （实测刷新成功、`catalog-cache.json` 一个字节都没写）。现在退出时若有待写缓存
+  就 `flushCaches()`；只读命令（如 `events`）仍然不碰缓存文件的 mtime。
+
+### 健康状态语义
+
+- **同一个 `health` 字段在三处含义不同**：客户端早已把超过 30 分钟的失败证据降级成
+  「待验证」，服务端 `healthOf()` 仍按连续失败次数长期断言 `down` —— 卡片写「待验证」，
+  `doctor --strict` 却因为同一份数据退出 1，诊断导出也写「不可用」。现在
+  `healthOf()` 用同一个 30 分钟阈值降级成 `stale`，CLI 的 `healthLabel()` 显示
+  「待验证（最后一次失败在 …）」，`doctor` 不再把它算成问题。
+
+### 额度语义
+
+- **非有限 / 荒谬大的 `total` 恒亮低额度并触发换号**：`remain / Infinity` 与
+  `remain / 1e308` 都等于 0，于是每个「读到了数字」的账号都永久判成低于阈值，
+  自动换号在两个「看起来 0%」的账号之间来回跳。这类值只可能来自被手改或被旧版本
+  写坏的 `credits-cache.json`（`1e308` 是合法 JSON 数字）。`creditsAlertOf()` 与
+  `isBelowThreshold()` 现在要求 `total` 是有限正数且不超过 `CREDITS_ABS_LIMIT`。
+
+### 界面
+
+- **英文界面里的中文**：服务端下发的动态文案（事件账本、账号默认名）以前只有中文。
+  现在事件额外携带 `messageKey: {key, params}`、隐式默认账号携带 `labelKey`，客户端
+  按当前语言渲染；没有键时（老账本、老宿主）回落到中文原文，不会渲染成空白。
+  用户自己命名的账号永远不翻译。
+- **模型搜索词跨 provider 泄漏**：搜索框只在模型多于 6 个时渲染，切到一家模型少的
+  provider 后输入框消失、但过滤词还在 —— 列表被上一个 provider 的搜索词静默过滤，
+  界面显示「没有匹配的模型」却没有任何地方能清除它。切换服务商时清空搜索词。
+- **保存失败产生未处理的 Promise 拒绝**：`mutate()` 失败时 rethrow，而它的 14 个调用点
+  全部是「发出去就不管」的写法。错误横幅本来就会显示，rethrow 只会在宿主控制台多一条
+  UnhandledPromiseRejection。现在失败走 `options.onError`（可选）并返回 `undefined`。
+
 ## 0.4.0 — 2026-10-19
 
 一次完整的界面重构，不改变任何代理、账号或额度行为。原设置卡片把六家服务商、

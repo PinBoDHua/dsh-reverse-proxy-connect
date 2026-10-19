@@ -345,6 +345,11 @@ test('WorkBuddy 目录：disabled 的模型即使还在花名册里也不能复�
 test('OpenAI SSE 终态与 usage 归一化', () => {
   assert.equal(openAiFinishKind('stop', true), 'tool-calls')
   assert.equal(openAiFinishKind('length', false), 'max-tokens')
+  // 被 max_tokens 截断时，即使已经发过 tool_calls 也必须报 max-tokens：
+  // 截断的工具参数一定不完整，报成 tool-calls 会让宿主拿半截参数执行工具。
+  assert.equal(openAiFinishKind('length', true), 'max-tokens', '截断优先于 tool-calls')
+  assert.equal(openAiFinishKind('content_filter', true), 'error', '内容拦截优先于 tool-calls')
+  assert.equal(openAiFinishKind('tool_calls', false), 'tool-calls')
   const usage = normalizeOpenAiUsage({
     prompt_tokens: 50,
     completion_tokens: 10,
@@ -354,6 +359,27 @@ test('OpenAI SSE 终态与 usage 归一化', () => {
   assert.equal(usage.inputTokens, 30)
   assert.equal(usage.cacheReadTokens, 20)
   assert.equal(usage.reasoningTokens, 4)
+})
+
+test('截断的工具调用：端到端终态是 max-tokens，不会让宿主执行半截参数', async () => {
+  // 上游先发 tool_call 分片（arguments 是一段被截断的 JSON），再发 finish_reason=length。
+  const frames = [
+    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"write_file","arguments":"{\\"path\\":\\"C:\\\\tmp\\\\a"}}]}}]}',
+    'data: {"choices":[{"delta":{},"finish_reason":"length"}]}',
+    'data: [DONE]',
+  ]
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(new TextEncoder().encode(`${frames.join('\n\n')}\n\n`))
+      controller.close()
+    },
+  })
+  const events = []
+  for await (const event of parseOpenAiSse(body)) events.push(event)
+  const finish = events.find((event) => event.type === 'finish')
+  assert.equal(finish.kind, 'max-tokens', '截断的工具调用不能被上报成 tool-calls')
+  // 工具分片本身照常产出（宿主需要看到它才能决定怎么收尾）。
+  assert.ok(events.some((event) => event.type === 'tool'))
 })
 
 test('Qoder 排队超时：给出 RATE_LIMIT 与明确文案，而不是空等两分钟', () => {

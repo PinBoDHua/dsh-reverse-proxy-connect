@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { Stats, dayKey, healthOf, statsPathOf } from '../lib/stats.js'
+import { Stats, dayKey, emptyCounters, healthOf, mergeCountersMax, mergeStatsData, statsPathOf } from '../lib/stats.js'
 
 /** 临时目录。 */
 function tempDir() {
@@ -660,6 +660,94 @@ test('统计：删除账号时清掉该账号的累计与交叉维度', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+test('统计合并：跨午夜时 providerToday / accountModelToday 不能把昨天并进今天', () => {
+  // 只给 `today` 加日期门是不够的：另两个「今日」维度同样是无条件 max 合并，
+  // 跨进程跨午夜后会显示「今日 3 次，WorkBuddy 今日 10 次」这种自相矛盾的数字。
+  const base = {
+    since: 1,
+    totals: emptyCounters(),
+    providers: {},
+    accounts: {},
+    models: {},
+    accountModels: {},
+    daily: {},
+    providerDaily: {},
+    sessions: {},
+    providerSessions: {},
+    recent: [],
+  }
+  const left = {
+    ...base,
+    today: { ...emptyCounters(), date: '2026-10-19', requests: 3 },
+    providerToday: { workbuddy: { ...emptyCounters(), requests: 3, lastAt: 10 } },
+    accountModelToday: { 'workbuddy::acc-b::hy3': { ...emptyCounters(), requests: 3 } },
+  }
+  const right = {
+    ...base,
+    today: { ...emptyCounters(), date: '2026-10-18', requests: 10 },
+    providerToday: { workbuddy: { ...emptyCounters(), requests: 10, lastAt: 5 } },
+    accountModelToday: { 'workbuddy::acc-a::hy3': { ...emptyCounters(), requests: 10 } },
+  }
+  const merged = mergeStatsData(left, right)
+  assert.equal(merged.today.date, '2026-10-19')
+  assert.equal(merged.today.requests, 3, 'today 只认新的一天')
+  assert.equal(merged.providerToday.workbuddy.requests, 3, '分 provider 的今日同样只认新的一天')
+  assert.equal(merged.accountModelToday['workbuddy::acc-a::hy3'], undefined, '昨天的账号×模型今日计数不能复活')
+  assert.equal(merged.accountModelToday['workbuddy::acc-b::hy3'].requests, 3)
+  // 同一天时仍然要合并（否则两个窗口会互相覆盖）。
+  const sameDay = mergeStatsData(
+    { ...left, providerToday: { workbuddy: { ...emptyCounters(), requests: 3 } } },
+    {
+      ...right,
+      today: { ...emptyCounters(), date: '2026-10-19', requests: 4 },
+      providerToday: { workbuddy: { ...emptyCounters(), requests: 4 } },
+    },
+  )
+  assert.equal(sameDay.today.requests, 4)
+  assert.equal(sameDay.providerToday.workbuddy.requests, 4)
+})
+
+test('统计合并：已恢复的 provider 不会因为另一侧旧连败继续显示「不可用」', () => {
+  // consecutiveFailures 不是单调累计量：成功会清零，而 healthOf() 只凭 ≥3 判 down。
+  // 按 max 合并会让「另一个窗口成功过一次」被本进程的旧连败覆盖回去。
+  const stale = { ...emptyCounters(), consecutiveFailures: 3, lastAt: 1000, lastErrorAt: 1000 }
+  const recovered = { ...emptyCounters(), consecutiveFailures: 0, lastAt: 2000, lastOkAt: 2000 }
+  // 谁的最后一次请求更新，谁说了算 —— 与参数顺序无关。
+  assert.equal(mergeCountersMax(stale, recovered).consecutiveFailures, 0, '较新的成功必须赢')
+  assert.equal(mergeCountersMax(recovered, stale).consecutiveFailures, 0, '较新的成功必须赢（参数顺序无关）')
+  // 反过来：较新的失败同样要能覆盖旧的 0。
+  const freshFailure = { ...emptyCounters(), consecutiveFailures: 2, lastAt: 3000, lastErrorAt: 3000 }
+  assert.equal(mergeCountersMax(recovered, freshFailure).consecutiveFailures, 2, '较新的失败同样必须赢')
+  assert.equal(mergeCountersMax(freshFailure, recovered).consecutiveFailures, 2)
+  // 累计量仍然按 max。
+  assert.equal(mergeCountersMax({ ...emptyCounters(), requests: 9 }, { ...emptyCounters(), requests: 2 }).requests, 9)
+})
+
+test('统计：时钟前跳后回拨不会把今日钉在未来日期', () => {
+  const dir = tempDir()
+  const T0 = new Date(2026, 9, 18, 10, 0, 0).getTime()
+  const req = () => ({ provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop', durationMs: 1 })
+  try {
+    let clock = T0
+    const stats = new Stats({ filePath: statsPathOf(dir), enabled: () => true, now: () => clock })
+    stats.record(req())
+    stats.record(req())
+    assert.equal(stats.snapshot().today.requests, 2)
+    // 时钟前跳两天（NTP / 虚拟机快照恢复），然后被校正回来。
+    clock = T0 + 2 * 86_400_000
+    stats.record(req())
+    assert.equal(stats.snapshot().today.date, dayKey(clock))
+    clock = T0 + 1000
+    stats.record(req())
+    const snapshot = stats.snapshot()
+    assert.equal(snapshot.today.date, dayKey(T0), '时钟回到今天后今日桶必须跟着回来')
+    assert.equal(snapshot.today.requests, 1, '今天从 0 重新开始计数，而不是继续往未来日期累加')
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('统计：today 日期缺失或损坏时，不以「今天」的名义复活旧今日桶', () => {
   // `data.today.date` 在 today 缺失时会被归一化成「今天」，用它当判据会把
   // 昨天的 accountModelToday 当成今天的。判据必须看**文件里**写的日期。

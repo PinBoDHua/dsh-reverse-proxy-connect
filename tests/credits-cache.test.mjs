@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -131,4 +131,32 @@ test('坏文件 / 不存在 / 非对象内容都安静退化成空缓存', () =>
 
 test('写盘失败不抛（目录不可写时返回 false）', () => {
   assert.equal(saveCreditsCache('', new Map([['workbuddy', sample]])), false)
+})
+
+test('磁盘缓存来自更高版本：只读加载并拒绝覆盖（降级安装不能清空快照）', () => {
+  withTempDir((dir) => {
+    const file = join(dir, 'credits-cache.json')
+    const future = JSON.stringify({
+      version: 2,
+      entries: {
+        'qoder::default': { data: { state: 'ok', remain: 42, total: 100, unit: 'credits' }, fetchedAt: NOW },
+      },
+    })
+    writeFileSync(file, future, 'utf8')
+
+    const entries = loadCreditsCache(dir)
+    assert.equal(entries.size, 0, '未来版本不做字段猜测')
+    assert.equal(entries.writeBlocked, true, '必须标记只读，否则下一次落盘会覆盖它')
+    assert.equal(entries.unsupportedVersion, 2)
+
+    // 三条写入路径都必须被挡住：带标记的 Map、全新的空 Map、以及有新数据的 Map。
+    assert.equal(saveCreditsCache(dir, entries), false, '带标记时拒绝写')
+    assert.equal(saveCreditsCache(dir, new Map()), false, '新建的 Map 也要先查磁盘版本')
+    assert.equal(
+      saveCreditsCache(dir, new Map([['qoder::default', sample]])),
+      false,
+      '有新数据也不能覆盖未来版本的缓存',
+    )
+    assert.equal(readFileSync(file, 'utf8'), future, '原文件一个字节都不能变')
+  })
 })

@@ -94,6 +94,26 @@ test('低于阈值提前换号：不会切到另一个同样低的账号', () =>
   assert.equal(target.id, 'c', 'b 也低于阈值，不应该切过去')
 })
 
+test('低于阈值：分母非有限或荒谬大数不触发换号（坏缓存不再让账号来回跳）', () => {
+  // `remain / Infinity` 与 `remain / 1e308` 都是 0，旧实现会把每个账号都判成
+  // 「低于阈值」，自动换号在两个「余额看起来是 0%」的账号之间来回跳。
+  for (const total of [Infinity, -Infinity, Number.NaN, 1e308, 1e13]) {
+    assert.equal(isBelowThreshold({ state: 'ok', remain: 675, total }, 0.15), false, `total=${String(total)}`)
+  }
+  assert.equal(isBelowThreshold({ state: 'ok', remain: Number.NaN, total: 1200 }, 0.15), false)
+  assert.equal(isBelowThreshold({ state: 'ok', remain: Infinity, total: 1200 }, 0.15), false)
+  // 换号候选筛选走的是同一个判据：坏数据不能让「看起来没额度」的账号被排除。
+  const settings = settingsWith({
+    accounts: { [QG]: [{ id: 'a', pat: 'p1' }, { id: 'b', pat: 'p2' }] },
+  })
+  const credits = {
+    a: { state: 'ok', remain: 10, total: 100 },
+    b: { state: 'ok', remain: 900, total: 1e308 },
+  }
+  const target = pickSwitchTarget(QG, settings, 'a', (id) => credits[id], { minRatio: 0.15 })
+  assert.equal(target.id, 'b', 'total 非有限的账号不该被判成「也已用尽」')
+})
+
 test('请求失败换号：排除刚失败的账号，优先额度明确可用的', () => {
   const settings = settingsWith({
     accounts: { [QG]: [{ id: 'a', pat: 'p1' }, { id: 'b', pat: 'p2' }, { id: 'c', pat: 'p3' }, { id: 'd', pat: 'p4', enabled: false }] },
