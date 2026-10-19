@@ -936,6 +936,7 @@ console.log('✓ 健康状态、图片能力与用量区块都渲染出来了')
 {
   const provider = STATUS.providers[0]
   const healthSnapshot = provider.health
+  const accountsSnapshot = provider.accounts
   try {
     provider.health = {
       state: 'down',
@@ -943,12 +944,25 @@ console.log('✓ 健康状态、图片能力与用量区块都渲染出来了')
       lastErrorAt: Date.now() - 2 * 60 * 60_000,
       lastSuccessAt: Date.now() - 3 * 60 * 60_000,
     }
+    provider.accounts = accountsSnapshot.map((account, index) => index === 0
+      ? { ...account, modelTests: { auto: { at: Date.now() - 60_000, ok: true, latencyMs: 900, model: 'auto' } } }
+      : account)
     cardTree = await mount(card, { t: (key) => key })
     const staleText = textOf(cardTree)
     if (!staleText.includes('healthStale')) throw new Error('过期健康证据没有降级成「待验证」')
     if (staleText.includes('healthDown')) throw new Error('2 小时前的连续失败仍显示「连续失败」')
-    if (!staleText.includes('healthStaleHint')) throw new Error('「待验证」没有说明原因')
+    if (!staleText.includes('healthStaleHint') && !staleText.includes('healthStaleTestOkHint')) throw new Error('「待验证」没有说明原因')
     if (!staleText.includes('lastSuccessAtLabel')) throw new Error('没有显示最近成功时间')
+    if (!staleText.includes('testedAvailableShort')) throw new Error('最近测试通过没有回写到状态卡')
+    if (!staleText.includes('healthStaleTestOkHint')) throw new Error('最近测试通过后没有更新待验证说明')
+
+    provider.accounts = accountsSnapshot.map((account, index) => index === 0
+      ? { ...account, modelTests: { auto: { at: Date.now() - 60_000, ok: false, code: 'RATE_LIMIT', latencyMs: 250, model: 'auto', error: 'HTTP 429', resetHint: '2026-10-19 20:00' } } }
+      : account)
+    cardTree = await mount(card, { t: (key) => key })
+    const limitedText = textOf(cardTree)
+    if (!limitedText.includes('testedLimitedShort')) throw new Error('最近测试限额没有回写到状态卡')
+    if (!limitedText.includes('healthStaleTestLimitHint')) throw new Error('最近测试限额后没有更新待验证说明')
 
     provider.health = {
       state: 'down',
@@ -960,9 +974,10 @@ console.log('✓ 健康状态、图片能力与用量区块都渲染出来了')
     const freshText = textOf(cardTree)
     if (!freshText.includes('healthDown')) throw new Error('30 分钟内的连续失败没有显示 healthDown')
     if (freshText.includes('healthStale')) throw new Error('近期失败不应显示「待验证」')
-    console.log('✓ 健康状态按时间降级：过期连续失败显示待验证，近期失败才显示连续失败')
+    console.log('✓ 健康状态按时间降级，并把最近一次模型测试结果回写到状态卡')
   } finally {
     provider.health = healthSnapshot
+    provider.accounts = accountsSnapshot
     cardTree = await mount(card, { t: (key) => key })
   }
 }

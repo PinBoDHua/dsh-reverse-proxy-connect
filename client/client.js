@@ -553,6 +553,10 @@ window.__ModuleLoader__.load({
       healthStale: '待验证',
       healthUnknown: '无记录',
       healthStaleHint: '最后一次请求失败已超过 30 分钟，之后没有成功记录；在下方「可用性测试」里选模型验证，或发一次消息自动更新。',
+      healthStaleTestOkHint: '最近一次模型测试已通过（{model}，{time}）；真实请求成功后历史健康状态会自动更新。',
+      healthStaleTestLimitHint: '最近一次模型测试显示该模型被限额（{model}，{time}；{reset}）。',
+      testedAvailableShort: '刚测可用',
+      testedLimitedShort: '刚测限额',
       lastFailureAt: '最近失败',
       lastSuccessAtLabel: '最近成功',
       neverSucceeded: '还没有成功记录',
@@ -904,6 +908,10 @@ window.__ModuleLoader__.load({
       healthStale: 'Needs check',
       healthUnknown: 'No data',
       healthStaleHint: 'The last request failed more than 30 minutes ago and no success has been recorded since. Verify with a model in Availability test below, or send a message to refresh.',
+      healthStaleTestOkHint: 'The latest model test passed ({model}, {time}); a successful real request will refresh the historical health status.',
+      healthStaleTestLimitHint: 'The latest model test shows this model is rate limited ({model}, {time}; {reset}).',
+      testedAvailableShort: 'Tested OK',
+      testedLimitedShort: 'Tested limited',
       lastFailureAt: 'Last failure',
       lastSuccessAtLabel: 'Last success',
       neverSucceeded: 'No success recorded yet',
@@ -3408,6 +3416,65 @@ window.__ModuleLoader__.load({
       // 只有「最后一次失败之后还没成功过」时才需要把上次成功也摆出来；
       // 正常 provider 的最近成功时间对排障没有帮助，反而增加一行噪音。
       var showLastSuccess = healthLastErrorAt > 0 && !(healthLastSuccessAt > healthLastErrorAt)
+      // 最近一次「账号 × 模型」可用性测试（可能来自任意账号/模型）。
+      // 它比历史健康更及时：把它作为一个独立的「刚测…」证据挂到状态卡，
+      // 但不覆盖 provider 级历史 health，避免用一次模型测试冒充整体健康。
+      var latestModelTestEvidence
+      safeArray(active.accounts).forEach(function (account) {
+        var tests = account.modelTests
+        if (tests === null || typeof tests !== 'object') return
+        Object.keys(tests).forEach(function (modelId) {
+          var result = tests[modelId]
+          if (result === null || typeof result !== 'object' || !isFiniteNumber(result.at)) return
+          if (latestModelTestEvidence === undefined || result.at > latestModelTestEvidence.result.at) {
+            var model = safeArray(active.models).filter(function (entry) { return entry.id === modelId })[0]
+            latestModelTestEvidence = {
+              result: result,
+              modelId: modelId,
+              modelName: model !== undefined && (model.name || model.id) ? (model.name || model.id) : modelId,
+              accountId: typeof account.id === 'string' ? account.id : undefined,
+              accountLabel: typeof account.label === 'string' && account.label !== '' ? account.label : bind(t, 'accountFallback'),
+            }
+          }
+        })
+      })
+      var latestModelTestFresh = latestModelTestEvidence !== undefined
+        && latestModelTestEvidence.result.at > 0
+        && Date.now() - latestModelTestEvidence.result.at < TEST_RESULT_TTL_MS
+      var latestModelTestOk = latestModelTestFresh && latestModelTestEvidence.result.ok === true
+      var latestModelTestLimit = latestModelTestFresh
+        && (latestModelTestEvidence.result.code === 'RATE_LIMIT' || latestModelTestEvidence.result.code === 'QUOTA')
+      var latestModelTestAuth = latestModelTestFresh && latestModelTestEvidence.result.code === 'AUTH'
+      var latestModelTestLabel = latestModelTestOk
+        ? 'testedAvailableShort'
+        : latestModelTestLimit ? 'testedLimitedShort' : latestModelTestAuth ? 'authBadge' : 'modelTestFailed'
+      var latestModelTestTitle = latestModelTestFresh
+        ? [
+            latestModelTestEvidence.modelName,
+            latestModelTestEvidence.accountLabel,
+            formatTime(latestModelTestEvidence.result.at),
+            latestModelTestEvidence.result.code,
+            latestModelTestEvidence.result.error,
+          ].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · ')
+        : ''
+      var showLatestTestChip = latestModelTestFresh && (!latestModelTestOk || activeHealthState !== 'ok')
+      var latestTestStaleHint
+      if (activeHealthState === 'stale' && latestModelTestFresh) {
+        if (latestModelTestOk) {
+          latestTestStaleHint = bind(t, 'healthStaleTestOkHint', {
+            model: latestModelTestEvidence.modelName,
+            time: formatAgo(latestModelTestEvidence.result.at, t),
+          })
+        } else if (latestModelTestLimit) {
+          latestTestStaleHint = bind(t, 'healthStaleTestLimitHint', {
+            model: latestModelTestEvidence.modelName,
+            time: formatAgo(latestModelTestEvidence.result.at, t),
+            reset: typeof latestModelTestEvidence.result.resetHint === 'string' && latestModelTestEvidence.result.resetHint !== ''
+              ? latestModelTestEvidence.result.resetHint
+              : '—',
+          })
+        }
+      }
       var catalogText =
         active.catalogSource === 'live'
           ? bind(t, 'catalogLive') + ' · ' + formatTime(active.fetchedAt)
@@ -3490,6 +3557,12 @@ window.__ModuleLoader__.load({
                 ? bind(t, 'consecutiveFailures', { count: activeHealth.consecutiveFailures })
                 : '',
             }, bind(t, healthTextKey(activeHealthState))),
+            showLatestTestChip
+              ? h('span', {
+                  className: rpcChipClass(latestModelTestOk ? 'ok' : 'warn'),
+                  title: latestModelTestTitle,
+                }, bind(t, latestModelTestLabel))
+              : null,
             h('span', { style: S.grow }),
             h('span', { className: 'rpc-chip' }, active.images === true ? bind(t, 'imagesShort') : bind(t, 'imagesShortOff'))),
           h('dl', { className: 'rpc-kv' },
@@ -3531,7 +3604,8 @@ window.__ModuleLoader__.load({
               }))
             : null,
           activeHealthState === 'stale'
-            ? h('p', { key: 'stale', className: 'rpc-inline-note' }, rpcIcon('clock', 13), bind(t, 'healthStaleHint'))
+            ? h('p', { key: 'stale', className: 'rpc-inline-note' }, rpcIcon('clock', 13),
+                latestTestStaleHint !== undefined ? latestTestStaleHint : bind(t, 'healthStaleHint'))
             : null,
           extraMessage !== undefined ? h('p', { key: 'msg', className: 'rpc-warn-text' }, extraMessage) : null),
       )
@@ -4004,11 +4078,18 @@ window.__ModuleLoader__.load({
         if ((a.unavailable === true) !== (b.unavailable === true)) return a.unavailable === true ? 1 : -1
         return 0
       })
-      var defaultTestModel = testModelOptions.filter(function (model) { return model.id === 'auto' })[0]
+      var latestTestModelOption = latestModelTestEvidence !== undefined
+        ? testModelOptions.filter(function (model) { return model.id === latestModelTestEvidence.modelId })[0]
+        : undefined
+      var defaultTestModel = latestTestModelOption
+        || testModelOptions.filter(function (model) { return model.id === 'auto' })[0]
         || testModelOptions.filter(function (model) { return model.unavailable !== true })[0]
         || testModelOptions[0]
       var chosenTestModel = testModelOptions.filter(function (model) { return model.id === currentTestPick.model })[0] || defaultTestModel
       var chosenTestAccount = testAccountOptions.filter(function (account) { return account.id === currentTestPick.account })[0]
+        || (latestModelTestEvidence !== undefined
+          ? testAccountOptions.filter(function (account) { return account.id === latestModelTestEvidence.accountId })[0]
+          : undefined)
         || testAccountOptions.filter(function (account) { return account.active === true })[0]
         || testAccountOptions[0]
       var testModelResult = chosenTestAccount !== undefined && chosenTestModel !== undefined
