@@ -4,7 +4,14 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseCatalog, parseStream, resolveIdentity } from '../lib/qoder/transport.js'
+import {
+  classifyUpstreamBody,
+  describeQueue,
+  fetchQueueStatus,
+  parseCatalog,
+  parseStream,
+  resolveIdentity,
+} from '../lib/qoder/transport.js'
 
 /**
  * 用一次性的假 fetch 跑 fn，结束后恢复。
@@ -77,4 +84,109 @@ test('Qoder 内容安全拦截：终态带 CONTENT_FILTER failure，而不是一
   assert.equal(finish.kind, 'error')
   assert.equal(finish.failure?.code, 'CONTENT_FILTER', 'content_filter 终态必须带可路由的 failure code')
   assert.match(finish.failure?.message ?? '', /内容安全|content_filter/)
+})
+
+/**
+ * 上游真实的排队/无容量响应体：三层嵌套 JSON，`isQueued` 在第三层。
+ * @param extra - 覆盖最内层的字段。
+ * @returns 序列化后的 body 文本。
+ */
+function nestedQueueBody(extra = {}) {
+  const innermost = JSON.stringify({
+    isQueued: true,
+    modelKey: 'dfmodel',
+    queueCount: 0,
+    queueType: 'p3',
+    retryAfterSeconds: 30,
+    serviceAvailable: false,
+    subCode: 'RESOURCE_LIMIT',
+    waitTime: 30,
+    ...extra,
+  })
+  return JSON.stringify({
+    code: '403',
+    message: JSON.stringify({ code: '10605', message: innermost, subCode: 'RESOURCE_LIMIT' }),
+  })
+}
+
+test('Qoder 无容量（RESOURCE_LIMIT）不能写成「正在排队」：要解析出队列字段并说明真实原因', () => {
+  const failure = classifyUpstreamBody(nestedQueueBody(), 403)
+  assert.equal(failure.kind, 'soft-rate')
+  assert.equal(failure.status, 429)
+  assert.equal(failure.retryAfterMs, 30_000)
+  assert.deepEqual(failure.queue, { type: 'p3', count: 0, available: false, subCode: 'RESOURCE_LIMIT' })
+  assert.match(failure.message, /没有可用容量/)
+  assert.match(failure.message, /RESOURCE_LIMIT/)
+  assert.match(failure.message, /排队人数 0/)
+  assert.doesNotMatch(failure.message, /正在排队/, '空队列不能写成「正在排队」')
+
+  // 真的有人在前面排队时才可以说「排队」，并给出人数。
+  const real = classifyUpstreamBody(nestedQueueBody({ queueCount: 5, serviceAvailable: true }), 403)
+  assert.deepEqual(real.queue, { type: 'p3', count: 5, available: true, subCode: 'RESOURCE_LIMIT' })
+  assert.match(real.message, /正在排队/)
+  assert.match(real.message, /前面还有 5 个请求/)
+
+  // 只带 isQueued、没有队列字段时保持旧文案（不能凭空断言「没有容量」）。
+  const bare = classifyUpstreamBody('{"isQueued":true,"retryAfterSeconds":12}', 429)
+  assert.equal(bare.queue, undefined)
+  assert.match(bare.message, /正在排队/)
+  assert.equal(bare.retryAfterMs, 12_000)
+})
+
+test('describeQueue：capacity / queue / unknown 三种判定', () => {
+  assert.equal(describeQueue({ queueCount: 0, serviceAvailable: false }).verdict, 'capacity')
+  assert.equal(describeQueue({ queueCount: 0 }).verdict, 'unknown')
+  assert.equal(describeQueue({ serviceAvailable: false }).verdict, 'capacity')
+  assert.equal(describeQueue({ queueCount: 3, serviceAvailable: false }).verdict, 'queue')
+  assert.equal(describeQueue({ queueCount: 3 }).verdict, 'queue')
+  assert.equal(describeQueue({}).verdict, 'unknown')
+  // waitTime 在没有 retryAfterSeconds 时也要变成「N 秒后重试」。
+  assert.match(describeQueue({ queueCount: 0, serviceAvailable: false, waitTimeSeconds: 18 }).message, /18 秒后重试/)
+})
+
+test('fetchQueueStatus：用 requestSetId + modelKey + queueType 查等位状态', async () => {
+  const seen = []
+  await withFetch(async (url) => {
+    seen.push(String(url))
+    return new Response(JSON.stringify({
+      subCode: 'RESOURCE_LIMIT',
+      isQueued: true,
+      modelKey: 'dfmodel',
+      queueType: 'p3',
+      queueCount: 0,
+      waitTime: 29,
+      retryAfterSeconds: 29,
+      serviceAvailable: false,
+    }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }, async () => {
+    const status = await fetchQueueStatus(
+      { region: 'global', userID: 'u1', authToken: 'job', machineID: 'm', name: '', email: '' },
+      { requestSetId: 'rs-1', modelKey: 'dfmodel', queueType: 'p3' },
+      undefined,
+    )
+    assert.deepEqual(status, {
+      queued: true,
+      available: false,
+      count: 0,
+      waitMs: 29_000,
+      retryAfterMs: 29_000,
+      queueType: 'p3',
+      subCode: 'RESOURCE_LIMIT',
+    })
+  })
+  assert.equal(seen.length, 1)
+  assert.match(seen[0], /\/algo\/api\/v2\/service\/ask\/queue\/status\?/)
+  assert.match(seen[0], /requestSetId=rs-1/)
+  assert.match(seen[0], /modelKey=dfmodel/)
+  assert.match(seen[0], /queueType=p3/)
+
+  // 状态查询永远是「尽力而为」：非 200 / 坏 JSON / 缺 requestSetId 都返回 undefined，
+  // 不能把一次聊天请求弄失败。
+  await withFetch(async () => new Response('nope', { status: 500 }), async () => {
+    assert.equal(await fetchQueueStatus({ region: 'global', userID: 'u', authToken: 't', machineID: 'm' }, { requestSetId: 'rs' }, undefined), undefined)
+  })
+  await withFetch(async () => new Response('<html>', { status: 200 }), async () => {
+    assert.equal(await fetchQueueStatus({ region: 'global', userID: 'u', authToken: 't', machineID: 'm' }, { requestSetId: 'rs' }, undefined), undefined)
+  })
+  assert.equal(await fetchQueueStatus({ region: 'global', userID: 'u', authToken: 't', machineID: 'm' }, {}, undefined), undefined)
 })

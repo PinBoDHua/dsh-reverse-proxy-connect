@@ -475,8 +475,101 @@ test('Qoder 流中排队：整次请求的预算用尽后不再重开，结论�
   assert.equal(reopened, 0, '预算已用尽时不该再打上游')
 })
 
-test('正常完成：宿主收到 finish 后立即停止消费，统计仍记 stop 而不是中断', async () => {
-  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-finish-'))
+test('Qoder 免费池没有容量：两次尝试后给出「没有可用容量」，不装成排队空等一分钟', async () => {
+  // 上游对「真的在排队」和「没有容量」都回 isQueued:true；后者 queueCount=0、
+  // serviceAvailable=false、subCode=RESOURCE_LIMIT。实测连续 4 分钟重试都不会
+  // 轮到，所以插件必须尽快把真实原因交给用户，而不是睡满 qoderQueueWaitMs。
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-capacity-'))
+  const originalFetch = globalThis.fetch
+  const encoder = new TextEncoder()
+  const chatCalls = []
+  const statusCalls = []
+  globalThis.fetch = async (url) => {
+    const text = String(url)
+    if (text.includes('/ask/queue/status')) {
+      statusCalls.push(text)
+      return new Response(JSON.stringify({
+        subCode: 'RESOURCE_LIMIT',
+        isQueued: true,
+        modelKey: 'dfmodel',
+        queueType: 'p3',
+        queueCount: 0,
+        waitTime: 30,
+        retryAfterSeconds: 30,
+        serviceAvailable: false,
+      }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }
+    chatCalls.push(text)
+    const inner = JSON.stringify({
+      isQueued: true,
+      modelKey: 'dfmodel',
+      queueCount: 0,
+      queueType: 'p3',
+      retryAfterSeconds: 30,
+      serviceAvailable: false,
+      subCode: 'RESOURCE_LIMIT',
+      waitTime: 30,
+    })
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify({
+          headers: { 'Content-Type': ['application/json'] },
+          body: JSON.stringify({ code: '403', message: JSON.stringify({ code: '10605', message: inner, subCode: 'RESOURCE_LIMIT' }) }),
+          statusCodeValue: 403,
+        })}\n\n`))
+        controller.close()
+      },
+    })
+    return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  }
+  try {
+    const settings = defaults()
+    settings.accounts['qoder-global'] = [{ id: 'a', label: 'PAT', enabled: true, pat: 'pt-test' }]
+    settings.activeAccount['qoder-global'] = 'a'
+    settings.advanced.qoderQueueWaitMs = 60_000
+    const runtime = new Runtime({ settings: () => settings, dataDir: dir, logger: {} })
+    runtime.catalogs.set('qoder-global::a', {
+      models: [{ id: 'dfmodel', name: 'DeepSeek-Flash', contextWindow: 200_000, maxTokens: 32_768, reasoningEfforts: [], source: 'system' }],
+      fetchedAt: Date.now(),
+      source: 'live',
+    })
+    runtime.identities.set('qoder-global::a', {
+      pat: 'pt-test', region: 'global', userID: 'u1', authToken: 'job-token', name: 'tester',
+      email: 'a@b.c', machineID: 'm', expiresAtMs: Date.now() + 3600_000,
+    })
+    try {
+      const startedAt = Date.now()
+      const opened = await runtime.openStream('qoder-global', {
+        model: 'dfmodel',
+        messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
+        signal: AbortSignal.timeout(20_000),
+      })
+      await assert.rejects(async () => {
+        for await (const _event of opened.events) {
+          /* 不该有内容 */
+        }
+      }, (error) => {
+        assert.equal(failureCodeOf(error), 'RATE_LIMIT')
+        assert.match(error.message, /没有可用容量/)
+        assert.match(error.message, /RESOURCE_LIMIT/)
+        assert.doesNotMatch(error.message, /正在排队/)
+        return true
+      })
+      const elapsed = Date.now() - startedAt
+      assert.ok(elapsed < 10_000, `无容量要在几秒内给出结论，实际 ${String(elapsed)}ms`)
+      assert.equal(chatCalls.length, 2, '原请求 + 一次短确认；不能重开十几次')
+      assert.equal(statusCalls.length, 2, '每次被拒都查一次等位接口')
+      assert.ok(chatCalls.every((url) => url.includes('agent_chat_generation')))
+    } finally {
+      runtime.flushCaches()
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('正常完成：宿主收到 finish 后立即停止消费，统计仍记 stop 而不是中断', async () => {  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-finish-'))
   const originalFetch = globalThis.fetch
   globalThis.fetch = async () => sseResponse('done')
   try {

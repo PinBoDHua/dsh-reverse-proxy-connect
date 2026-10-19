@@ -1,5 +1,39 @@
 # 更新记录
 
+## 0.6.5 — 2026-10-20
+
+Qoder 的 `isQueued` 不再一律当成「你在排队」。状态接口仍是 v8，设置文件仍是 v2。
+
+### 排队 / 容量
+
+- **`isQueued:true` 被误报成「免费模型正在排队」**：上游其实用同一个信号表达两件
+  事 —— 真的有人排在前面（`queueCount > 0`），和**当前根本没有容量**
+  （`queueCount:0` + `serviceAvailable:false` + `subCode:RESOURCE_LIMIT`）。旧实现
+  一律写「Qoder 免费模型正在排队（已等待 N 秒）」，用户拿官方客户端一对比就会
+  认为插件在偷偷排队。现在解析 `queueType` / `queueCount` / `serviceAvailable` /
+  `subCode` / `waitTime`，两种情况给不同的结论与文案。
+- **没有容量时会白等一整份预算**：实测（2026-10-20，同一账号、三台推理节点
+  api1/api2/api3、8 次请求 / 4 分钟）`serviceAvailable` 恒为 false、`queueCount`
+  恒为 0 —— 它不会在预算内「轮到」。现在只做一次 1.5 秒的短确认，随后立刻抛出
+  `QoderCapacityExhausted`（仍是 `RATE_LIMIT`，provider 级、不换号），3 秒内把
+  真实原因交给用户，而不是让他对着「正在排队」等 60 秒。
+- **接上官方等位接口**：`GET /algo/api/v2/service/ask/queue/status?requestSetId=
+  &modelKey=&queueType=`（用稳定的 `chat_record_id` 当 `requestSetId`）。状态说
+  `serviceAvailable:true` / `isQueued:false` 时立刻重开，不再睡满 30 秒；查询失败
+  一律按「问不到」处理，绝不让状态查询本身弄失败一次请求。
+- **文案带上套餐证据**：额度缓存里已知是 Qoder Free 时，容量不足的错误会说明
+  「当前账号是 Free 套餐（付费额度为 0），只能用免费模型」，并建议换有额度的账号
+  或其它 provider。付费模型（`auto` / `dmodel` 等）在 Free 账号上会被上游回
+  `code:112`（`pricingUrl`）—— 这与「客户端里同一个模型不排队」的差异来源一致：
+  客户端登录的是另一个账号/套餐，或者用的是付费模型。
+
+### 测试
+
+- 后端 `node --test tests/*.test.mjs` **322 项**（原 317）、`tests/client-credits.mjs`
+  **100 项**全部通过。新增：三层嵌套 `RESOURCE_LIMIT` 体的解析与文案、`describeQueue`
+  三态判定、`fetchQueueStatus` 的 URL/解析/失败兜底、Free 套餐的容量错误文案、
+  以及一条运行时回归（无容量时两次尝试内给出结论，而不是重开十几次）。
+
 ## 0.6.4 — 2026-10-20
 
 第八轮审计：**没有发现可修缺陷**。这一版把本轮的取证方式沉淀成回归、并把结论记

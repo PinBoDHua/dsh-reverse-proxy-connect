@@ -395,6 +395,32 @@ test('Qoder 排队超时：给出 RATE_LIMIT 与明确文案，而不是空等�
   assert.match(attempts.message, /重开次数已用尽/)
 })
 
+test('Qoder 免费池没有容量：结论是「没有可用容量」，不是「正在排队」', () => {
+  // 上游对「真的在排队」和「没有容量」都回 isQueued:true；后者 queueCount=0、
+  // serviceAvailable=false、subCode=RESOURCE_LIMIT。把它写成排队会误导用户
+  // 以为插件在偷偷排队（而官方客户端此时也进不去）。
+  const error = qoderQueueFailure(
+    { retryAfterMs: 30_000, queue: { type: 'p3', count: 0, available: false, subCode: 'RESOURCE_LIMIT' } },
+    3_000,
+    60_000,
+    { planHint: '当前 Qoder 账号是 Free 套餐（付费额度为 0），只能用免费模型；' },
+  )
+  assert.equal(error.kind, 'soft-rate')
+  assert.equal(error.name, 'QoderCapacityExhausted')
+  assert.deepEqual(error.queue, { type: 'p3', count: 0, available: false, subCode: 'RESOURCE_LIMIT' })
+  assert.match(error.message, /没有可用容量/)
+  assert.match(error.message, /RESOURCE_LIMIT/)
+  assert.match(error.message, /Free 套餐/)
+  assert.match(error.message, /3 秒/)
+  assert.doesNotMatch(error.message, /正在排队/)
+
+  // 真排队时仍然说排队，并带上「前面还有 N 个」。
+  const queued = qoderQueueFailure({ queue: { type: 'p3', count: 7, available: true } }, 5_000, 60_000)
+  assert.equal(queued.name, 'QoderQueueTimeout')
+  assert.match(queued.message, /正在排队/)
+  assert.match(queued.message, /前面还有 7 个请求/)
+})
+
 test('OpenAI SSE：finish_reason 之后的 usage 不会丢失，finish 永远在最后', async () => {
   const encoder = new TextEncoder()
   const body = new ReadableStream({

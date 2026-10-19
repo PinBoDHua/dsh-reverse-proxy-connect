@@ -1056,12 +1056,23 @@ Windows「添加/删除程序」注册表（同时读 `DisplayName`，所以两�
 也支持环境变量 `QODER_CN_PERSONAL_ACCESS_TOKEN` / `QODER_PERSONAL_ACCESS_TOKEN`
 （只对隐式默认账号生效，不猜用户手动添加的账号）。
 
-Qoder 免费额度在高峰期会排队（上游把排队回成 403/429 + `isQueued` +
-`retryAfterSeconds`）。插件**首包与流中**都会按上游建议在本地等一次再重开；
-只要还没吐过一个字节，重试就是无损的。
+Qoder 在没放行请求时会回一个 `isQueued:true`，但**它并不总是「排队」**。插件的
+`describeQueue()` 会按上游的 `queueCount` / `serviceAvailable` / `subCode` 分开处理：
 
-排队等待有明确预算：**首包 45 秒、流中默认 60 秒**；流中预算可在「高级」里
-调到 15–180 秒。超过预算不再无限重开，而是直接报一条 `RATE_LIMIT`：
+- `queueCount > 0`：真的在排队，文案写「前面还有 N 个请求」；
+- `queueCount:0` + `serviceAvailable:false` + `subCode:RESOURCE_LIMIT`：**上游当前
+  没有容量**，队列里一个人都没有。等下去不会轮到你，所以插件会先查一次官方等位
+  接口 `/algo/api/v2/service/ask/queue/status`（`requestSetId` + `modelKey` +
+  `queueType`），做一次 1.5 秒的短确认后直接给出：
+
+```text
+Qoder 免费模型当前没有可用容量（上游 RESOURCE_LIMIT，排队人数 0，不是你排在别人后面；已在 2 秒内确认）。
+这不是令牌失效、也不是模型下线；免费池的容量由上游控制，继续等不会轮到你：
+请稍后重试，或换一个有额度的账号 / 其它 provider。
+```
+
+真排队时仍然有明确预算：**首包 45 秒、流中默认 60 秒**；流中预算可在「高级」里
+调到 15–180 秒。超过预算报一条 `RATE_LIMIT`：
 
 ```text
 Qoder 免费模型正在排队（已等待 60 秒，超过本地 60 秒上限）。
@@ -1069,9 +1080,16 @@ Qoder 免费模型正在排队（已等待 60 秒，超过本地 60 秒上限）
 ```
 
 Qoder Free 的 `userQuota.total` 本来就是 0，上游也会回 `isQuotaExceeded=true`；
-`qfmodel`（Qwen3.8-Flash）是 `x0` 免费模型，仍可用，只是高峰期排队。
+`qfmodel`（Qwen3.8-Flash）与 `dfmodel`（DeepSeek-Flash）是 `x0` 免费模型。
 卡片会明确写出「付费额度为 0；免费模型不扣积分但会排队」，避免把它误解成
 「免费模型坏了」。
+
+> **为什么官方客户端看起来不排队？** 插件用的是 PAT（个人访问令牌）对应的账号：
+> 如果这个账号是 Free、付费额度为 0，它只能用 `p3` 免费池；Qoder 客户端里能直接
+> 用的模型（Auto / DeepSeek-V4-Pro / Ultimate 等）需要付费额度，Free 账号在插件里
+> 会得到 `code:112`（`pricingUrl`）。同一个模型在客户端里不排队、在插件里一直
+> `RESOURCE_LIMIT`，通常说明客户端登录的是**另一个账号/套餐**，或者用的是付费模型。
+> 插件侧能做的是把上游状态如实报出来、不假装排队，它不能替上游放行免费池。
 
 ### Trae 两个版本
 
