@@ -1,7 +1,7 @@
 {
   "name": "dsh-reverse-proxy-connect",
-  "version": "0.4.3",
-  "description": "鎶?WorkBuddy锛堝浗鍐呯増 / 鍥介檯鐗堬級銆丵oder锛堝叏鐞冪増 / 鍥藉唴鐗堬級涓?Trae锛堝浗鍐呯増 / 鍥介檯鐗堬級璐﹀彿閲岀殑妯″瀷鎺ュ叆 DeepSeek Harness锛氬璐﹀彿姹犮€侀搴﹁秼鍔夸笌鑰楀敖棰勬祴銆?29 鑷姩鎹㈠彿銆佹瘡鏃ョ鍒般€佸浘鐗囪緭鍏ャ€佺敤閲忓巻鍙层€佷簨浠惰处鏈笌璐﹀彿娴嬭瘯銆侭ring WorkBuddy, Qoder and Trae account models into DeepSeek Harness with multi-account failover, credit forecast, daily check-in, image input, usage history, an event journal and account tests.",
+  "version": "0.5.0",
+  "description": "把 WorkBuddy（国内版 / 国际版）、Qoder（全球版 / 国内版）与 Trae（国内版 / 国际版）账号里的模型接入 DeepSeek Harness：多账号池、额度趋势与耗尽预测、429 自动换号、每日签到、图片输入、用量历史、事件账本与账号测试。Bring WorkBuddy, Qoder and Trae account models into DeepSeek Harness with multi-account failover, credit forecast, daily check-in, image input, usage history, an event journal and account tests.",
   "type": "module",
   "main": "lib/index.js",
   "license": "MIT",
@@ -83,4 +83,3 @@
     "name": "PinBoDHua"
   }
 }
-

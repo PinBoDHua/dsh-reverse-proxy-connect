@@ -5,7 +5,7 @@ import { join } from 'node:path'
 import test from 'node:test'
 
 import { SettingsStore, defaults } from '../lib/settings.js'
-import { applyCredentialRefresh, applyLoginAccount } from '../lib/accounts.js'
+import { applyCredentialRefresh, applyLoginAccount, mergeAccountSecrets } from '../lib/accounts.js'
 
 /** 临时目录。 */
 function tempDir() {
@@ -65,6 +65,39 @@ test('设置写盘：另一个进程改过文件时先重读再合并，不能�
     const saved = JSON.parse(readFileSync(file, 'utf8'))
     assert.equal(saved.accounts.qoder.find((account) => account.id === 'cli-acc')?.pat, 'pt-CLI')
     assert.equal(saved.checkin.lastRunAt, 2)
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('两个 store 交错做「读-合并-写」：谁的账号都不能丢（合并必须在锁内算）', () => {
+  const dir = tempDir()
+  try {
+    const file = join(dir, 'settings.json')
+    const a = new SettingsStore(file)
+    const b = new SettingsStore(file)
+    a.patch({ accounts: { qoder: [{ id: 'seed', label: '种子', pat: 'pt-seed' }] } })
+
+    // 两个进程各自拿到同一份快照（这正是旧实现 sync() 在锁外的那一步）。
+    const snapshotA = a.sync()
+    const snapshotB = b.sync()
+    assert.deepEqual(snapshotA.accounts.qoder.map((row) => row.id), ['seed'])
+    assert.deepEqual(snapshotB.accounts.qoder.map((row) => row.id), ['seed'])
+
+    const upsert = (current, row) => mergeAccountSecrets(
+      { accounts: { qoder: [...current.accounts.qoder, row] } },
+      current,
+    )
+    a.update((current) => upsert(current, { id: 'acc-A', label: 'A', pat: 'pt-A' }))
+    // B 内存里仍是「只有 seed」的旧快照；update() 必须在锁内重读，
+    // 否则这一步会把 A 刚写的账号整表覆盖掉。
+    b.update((current) => upsert(current, { id: 'acc-B', label: 'B', pat: 'pt-B' }))
+
+    const saved = JSON.parse(readFileSync(file, 'utf8'))
+    const ids = saved.accounts.qoder.map((row) => row.id).sort()
+    assert.deepEqual(ids, ['acc-A', 'acc-B', 'seed'], '两个进程的账号必须都留下')
+    assert.equal(saved.accounts.qoder.find((row) => row.id === 'acc-A')?.pat, 'pt-A')
+    assert.equal(saved.accounts.qoder.find((row) => row.id === 'acc-B')?.pat, 'pt-B')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

@@ -11,6 +11,9 @@ _*.mjs
 _*_scratch/
 tests/_*.mjs
 
+# scripts/preview-ui.mjs 生成的静态预览（截图用，本身可随时重建）
+.preview/
+
 # 编辑器与系统
 .vscode/
 .idea/

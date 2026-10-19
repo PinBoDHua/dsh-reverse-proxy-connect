@@ -194,6 +194,15 @@ window.__ModuleLoader__.load({
           '.rpc-chip-warn{background:color-mix(in srgb,var(--rpc-warn) 10%,transparent);border-color:color-mix(in srgb,var(--rpc-warn) 22%,transparent);color:var(--rpc-warn)}',
           '.rpc-chip-error{background:color-mix(in srgb,var(--rpc-danger) 9%,transparent);border-color:color-mix(in srgb,var(--rpc-danger) 20%,transparent);color:var(--rpc-danger)}',
           '.rpc-chip-accent{background:color-mix(in srgb,var(--rpc-accent) 8%,transparent);border-color:color-mix(in srgb,var(--rpc-accent) 18%,transparent);color:var(--rpc-accent)}',
+          /* 页头「六家一览」：一条六段小条 + 正常家数。段色与 provider 卡同一套。 */
+          '.rpc-fleet{gap:6px;padding-left:5px}',
+          '.rpc-fleet-bars{display:inline-flex;align-items:center;gap:2px}',
+          '.rpc-fleet-seg{display:block;width:10px;height:6px;border-radius:2px;background:var(--rpc-faint);opacity:.4}',
+          '.rpc-fleet-seg[data-tone="ok"]{background:var(--rpc-success);opacity:.95}',
+          '.rpc-fleet-seg[data-tone="warn"]{background:var(--rpc-warn);opacity:.95}',
+          '.rpc-fleet-seg[data-tone="error"]{background:var(--rpc-danger);opacity:.95}',
+          '.rpc-fleet-seg[data-tone="idle"]{background:var(--rpc-faint);opacity:.5}',
+          '.rpc-fleet-seg[data-tone="off"]{background:var(--rpc-border-strong);opacity:.9}',
 
           /* 文本 / 通用行 */
           '.rpc-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}',
@@ -217,6 +226,19 @@ window.__ModuleLoader__.load({
           '.rpc-check{width:14px;height:14px;margin:0;accent-color:var(--rpc-accent);cursor:pointer;flex:0 0 auto}',
           '.rpc-check-label{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;line-height:19px;color:var(--rpc-muted);cursor:pointer;white-space:nowrap}',
           '.rpc-check-label:hover{color:var(--rpc-text)}',
+          /* 即时生效的开关（provider 接入 / 自动签到 …）：原生 checkbox 保留键盘与读屏，
+             视觉上换成 32×18 的轨道 + 滑块，状态用底色而不用文字。 */
+          '.rpc-switch{display:inline-flex;align-items:center;gap:7px;cursor:pointer;user-select:none;flex:0 0 auto}',
+          '.rpc-switch-input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}',
+          '.rpc-switch-track{position:relative;width:32px;height:18px;border-radius:999px;background:var(--rpc-surface-2);',
+          'border:1px solid var(--rpc-border-strong);transition:background .16s ease,border-color .16s ease;flex:0 0 auto}',
+          '.rpc-switch-track::after{content:"";position:absolute;left:2px;top:2px;width:12px;height:12px;border-radius:999px;',
+          'background:var(--rpc-faint);transition:transform .16s ease,background .16s ease}',
+          '.rpc-switch-input:checked+.rpc-switch-track{background:color-mix(in srgb,var(--rpc-accent) 88%,#000);border-color:transparent}',
+          '.rpc-switch-input:checked+.rpc-switch-track::after{transform:translateX(14px);background:#fff}',
+          '.rpc-switch-input:focus-visible+.rpc-switch-track{outline:2px solid color-mix(in srgb,var(--rpc-accent) 55%,transparent);outline-offset:2px}',
+          '.rpc-switch-text{font-size:12.5px;line-height:19px;color:var(--rpc-muted)}',
+          '.rpc-switch:hover .rpc-switch-text{color:var(--rpc-text)}',
 
           /* 服务商详情头 */
           '.rpc-detail{display:flex;flex-direction:column;min-width:0;flex:0 0 auto}',
@@ -267,6 +289,8 @@ window.__ModuleLoader__.load({
           '.rpc-table-row[data-active="true"]{background:color-mix(in srgb,var(--rpc-accent) 5%,transparent);box-shadow:inset 3px 0 0 var(--rpc-accent)}',
           '.rpc-cell{display:flex;flex-direction:column;gap:2px;min-width:0}',
           '.rpc-cell-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px;flex-wrap:wrap}',
+          '.rpc-mini-bar{display:block;height:3px;width:100%;max-width:104px;border-radius:999px;background:var(--rpc-surface-2);overflow:hidden;margin-top:3px}',
+          '.rpc-mini-bar>i{display:block;height:100%;border-radius:inherit;opacity:.85}',
 
           /* 列表 / 模型 / 事件 */
           '.rpc-list{border:1px solid var(--rpc-border);border-radius:12px;overflow:hidden;background:var(--rpc-bg);min-width:0}',
@@ -330,6 +354,24 @@ window.__ModuleLoader__.load({
           '.rpc-heat-cell{flex:1 1 0;min-width:4px;max-width:56px;height:38px;display:flex;align-items:flex-end;border-radius:4px 4px 0 0;',
           'background:transparent;border-bottom:2px solid var(--rpc-surface-2);overflow:hidden}',
           '.rpc-heat-fill{width:100%;border-radius:4px;background:var(--rpc-accent);transition:height .2s ease,opacity .2s ease}',
+          /* 近 14 天用量：等宽 14 列 + 基线 + 今天高亮。
+             旧版每列 max-width:56px，宽卡片里右半边留白、只剩两根孤零零的柱子；
+             现在整行铺满，并给出峰值与日期轴，扫一眼就知道量级和趋势。 */
+          '.rpc-chart{display:flex;flex-direction:column;gap:6px;min-width:0}',
+          '.rpc-chart-plot{position:relative;display:grid;grid-template-columns:repeat(14,minmax(0,1fr));gap:4px;',
+          'align-items:end;height:64px;padding:6px 0 0;min-width:0;',
+          'background:linear-gradient(to top,color-mix(in srgb,var(--rpc-border) 55%,transparent) 0 1px,transparent 1px);',
+          'background-size:100% 50%;background-position:0 100%;background-repeat:no-repeat}',
+          '.rpc-chart-col{display:flex;align-items:flex-end;justify-content:center;height:100%;min-width:0;border-radius:4px;',
+          'transition:background .12s ease}',
+          '.rpc-chart-col:hover{background:color-mix(in srgb,var(--rpc-accent) 6%,transparent)}',
+          '.rpc-chart-bar{width:100%;max-width:34px;border-radius:3px 3px 1px 1px;transition:height .25s ease,opacity .2s ease}',
+          '.rpc-chart-col[data-today="true"] .rpc-chart-bar{box-shadow:0 0 0 1px color-mix(in srgb,var(--rpc-accent) 26%,transparent)}',
+          '.rpc-chart-axis{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:10px;line-height:14px;color:var(--rpc-faint)}',
+          '.rpc-chart-axis>span{white-space:nowrap}',
+          '.rpc-chart-today{display:inline-flex;align-items:center;gap:4px}',
+          '.rpc-chart-today::before{content:"";width:4px;height:4px;border-radius:999px;background:var(--rpc-accent)}',
+          '.rpc-chart-empty{display:flex;align-items:center;gap:6px;margin:0;font-size:11.5px;line-height:17px;color:var(--rpc-faint)}',
           '.rpc-subsection{display:flex;flex-direction:column;gap:7px;min-width:0}',
           '.rpc-table-frame{border:1px solid var(--rpc-border);border-radius:10px;overflow-x:auto;background:var(--rpc-bg);min-width:0}',
 
@@ -478,6 +520,7 @@ window.__ModuleLoader__.load({
       navSettings: '设置',
       navActivity: '动态',
       providersEnabled: '已接入 {count}/{total}',
+      fleetHealthy: '{count} 家正常',
       providersCredits: '{count} 家额度可读',
       updatedAt: '更新于 {time}',
       autoRefreshHint: '每 20 秒自动刷新',
@@ -655,6 +698,11 @@ window.__ModuleLoader__.load({
       resetCooldownShort: '解除',
       usageSession: '当前会话',
       usageHeatmap: '近 14 天',
+      usageHeatPeak: '峰值 {value}',
+      usageHeatPeakHint: '{date} 是这 14 天里用量最高的一天',
+      usageHeatAria: '近 {days} 天每日 token 用量柱状图',
+      usageHeatToday: '今天',
+      usageHeatEmpty: '这 14 天还没有用量记录；发起一次对话后就会出现在这里。',
       usageTopModels: '模型用量',
       usageAccountModels: '账号 × 模型用量',
       usageAccountModelsHint: '同一模型可能被多个账号使用；按账号拆分 token。',
@@ -871,6 +919,7 @@ window.__ModuleLoader__.load({
       navSettings: 'Settings',
       navActivity: 'Activity',
       providersEnabled: '{count}/{total} connected',
+      fleetHealthy: '{count} healthy',
       providersCredits: '{count} with readable credits',
       updatedAt: 'Updated {time}',
       autoRefreshHint: 'Auto-refresh every 20s',
@@ -1047,6 +1096,11 @@ window.__ModuleLoader__.load({
       resetCooldownShort: 'Clear',
       usageSession: 'This session',
       usageHeatmap: 'Last 14 days',
+      usageHeatPeak: 'Peak {value}',
+      usageHeatPeakHint: '{date} had the highest usage in this window',
+      usageHeatAria: 'Daily token usage for the last {days} days',
+      usageHeatToday: 'Today',
+      usageHeatEmpty: 'No usage in the last 14 days yet; it shows up here after your first request.',
       usageTopModels: 'Model usage',
       usageAccountModels: 'Account × model usage',
       usageAccountModelsHint: 'One model can be shared by several accounts; tokens are split per account.',
@@ -1285,9 +1339,18 @@ window.__ModuleLoader__.load({
     /** 大数缩写：1.2K / 400.3M / 1.1B（KPI 卡片用，完整数字放 title）。 */
     function compactTokens(value) {
       if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return '—'
-      if (value >= 1e9) return String(Math.round((value / 1e9) * 10) / 10) + 'B'
-      if (value >= 1e6) return String(Math.round((value / 1e6) * 10) / 10) + 'M'
-      if (value >= 1e3) return String(Math.round((value / 1e3) * 10) / 10) + 'K'
+      // 先按单位换算再四舍五入，但边界上要进位：999,999,999 / 1e6 舍入后是
+      // 1000，继续写 "1000M" 很难看。换算值 ≥ 1000 时升一级单位再算。
+      var scaled = function (divisor) { return Math.round((value / divisor) * 10) / 10 }
+      if (value >= 1e9) return String(scaled(1e9)) + 'B'
+      if (value >= 1e6) {
+        var millions = scaled(1e6)
+        return millions >= 1000 ? String(scaled(1e9)) + 'B' : String(millions) + 'M'
+      }
+      if (value >= 1e3) {
+        var thousands = scaled(1e3)
+        return thousands >= 1000 ? String(scaled(1e6)) + 'M' : String(thousands) + 'K'
+      }
       return String(Math.round(value))
     }
 
@@ -2156,6 +2219,14 @@ window.__ModuleLoader__.load({
       return fetch(url, { headers: { Accept: 'application/json' }, signal: requestSignal(15_000) }).then(function (response) {
         if (!response.ok) throw new Error('status ' + response.status)
         return response.json()
+      }).then(function (document) {
+        // 200 但 body 是 `null` / 数组 / 字符串：宿主出错或中间的代理返回了别的东西。
+        // 旧代码只拦 `undefined`，`null` 会一路走到 `status.settings` 抛 TypeError，
+        // 宿主的错误边界把整张卡片替换成空白。文档形状在这里一次性把关。
+        if (document === null || typeof document !== 'object' || Array.isArray(document)) {
+          throw new Error('status payload is not an object')
+        }
+        return document
       })
     }
 
@@ -2401,7 +2472,9 @@ window.__ModuleLoader__.load({
 
     function formatWindow(tokens) {
       if (typeof tokens !== 'number' || !Number.isFinite(tokens) || tokens <= 0) return '—'
+      // 999,999 会舍入成 1000K：边界上直接进位成 1M，别输出「1000K」。
       if (tokens >= 1000000) return String(Math.round((tokens / 1000000) * 10) / 10) + 'M'
+      if (tokens >= 999500) return '1M'
       if (tokens >= 1000) return String(Math.round(tokens / 1000)) + 'K'
       return String(tokens)
     }
@@ -2659,6 +2732,9 @@ window.__ModuleLoader__.load({
       // 否则一个慢轮询会把刚保存的账号切换/模型开关覆盖回旧快照。
       var statusEpoch = useRef(0)
       var applyStatus = function (document) {
+        // 只接受对象文档：`/action` 的响应也会走这里，宿主或中间代理出错时
+        // 可能是 `null` / 数组 / 字符串，直接塞进 state 会让下一次渲染抛错。
+        if (document === null || typeof document !== 'object' || Array.isArray(document)) return
         statusEpoch.current += 1
         setStatus(document)
       }
@@ -2868,6 +2944,9 @@ window.__ModuleLoader__.load({
       // 高级设置：只要用户没在编辑，就跟随宿主每次下发的值（含外部修改）。
       useEffect(function () {
         if (status === undefined || !status.settings) return
+        // 新一轮状态已到（无论是保存回读还是轮询）：把 provider 开关的本地意图
+        // 交还给服务端值。否则一次失败的保存会让开关永远停在用户点出来的值上。
+        pendingProviderEnabled.current = {}
         if (advDirty.current === true) return
         var advanced = status.settings.advanced || {}
         // 非有限值不能进输入框：`NaN / 1000` 会显示字面「NaN」，`Infinity * 100`
@@ -3029,9 +3108,17 @@ window.__ModuleLoader__.load({
           })
       }
 
+      // provider 接入开关的本地意图：/settings 会等一轮目录 + 额度刷新才回，
+      // 期间连点两次都从旧 status 的 `!entry.enabled` 出发会发同一个值，
+      // 「关掉再打开」最后仍停在关闭。这里按 provider 记住最后一次意图。
+      var pendingProviderEnabled = useRef({})
       var toggleProvider = function (entry) {
+        if (busyNow('save')) return
+        var pending = pendingProviderEnabled.current[entry.provider]
+        var next = pending === undefined ? !(entry.enabled !== false) : !pending
+        pendingProviderEnabled.current[entry.provider] = next
         var providersPatch = {}
-        providersPatch[entry.provider] = { enabled: !entry.enabled }
+        providersPatch[entry.provider] = { enabled: next }
         mutate({ providers: providersPatch })
       }
 
@@ -3452,7 +3539,12 @@ window.__ModuleLoader__.load({
       var clearPat = function () {
         if (active === undefined) return
         if (accountRows.length > 0 && activeRow !== undefined) {
-          mutate(activeAccountPatch({ forget: true }), { clearPatDraft: true })
+          // 清空草稿必须同时丢掉「按 provider 记住的草稿」：只清可见输入框的话，
+          // 切走再切回会由草稿恢复 effect 把那串刚被清除的 PAT 重新填回来。
+          mutate(activeAccountPatch({ forget: true }), {
+            clearPatDraft: true,
+            onSuccess: function () { forgetDraft('pat') },
+          })
           return
         }
         var patch = { qoder: {} }
@@ -3504,7 +3596,7 @@ window.__ModuleLoader__.load({
         write(JSON.stringify({ error: error }, null, 2))
       }
 
-      if (status === undefined) {
+      if (status === undefined || status === null) {
         // 首屏读取失败时不能再只留一行裸英文错误：给完整卡片外壳 + 本地化说明 +
         // 可点的「重试」，否则用户只能等 20 秒轮询或重开设置页。
         return h(
@@ -3575,6 +3667,7 @@ window.__ModuleLoader__.load({
         var healthState = cardTest !== undefined && cardTest.state !== undefined
           ? cardTest.state
           : displayHealthState(health)
+        var disabled = entry.enabled === false
         var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
         var credits = entry.credits || { state: 'none' }
         var today = (entry.usage && entry.usage.today) || {}
@@ -3598,7 +3691,9 @@ window.__ModuleLoader__.load({
         if (credits.state === 'ok' && credits.unlimited !== true && isFiniteNumber(credits.total) && credits.total > 0 && isFiniteNumber(credits.remain)) {
           ratio = Math.max(0, Math.min(1, credits.remain / credits.total))
         }
-        var healthTone = signed ? healthColor(healthState) : DOT_OFF
+        // 关闭的服务商不能继续挂「无记录」/「正常」：那会被读成「配置有问题」，
+        // 而真实原因是「你把它关了」。颜色也退回中性灰。
+        var healthTone = disabled ? DOT_IDLE : signed ? healthColor(healthState) : DOT_OFF
         return h(
           'button',
           {
@@ -3622,13 +3717,13 @@ window.__ModuleLoader__.load({
             h('span', {
               className: 'rpc-provider-dot',
               style: { background: healthTone },
-              title: bind(t, healthTextKey(healthState)),
+              title: disabled ? bind(t, 'disabled') : bind(t, healthTextKey(healthState)),
             }),
             h('span', { className: 'rpc-provider-name' }, entry.displayName),
             h('span', {
               className: 'rpc-provider-health',
-              style: { color: healthColor(healthState) },
-            }, bind(t, healthTextKey(healthState)))),
+              style: { color: disabled ? 'var(--rpc-faint)' : healthColor(healthState) },
+            }, disabled ? bind(t, 'disabled') : bind(t, healthTextKey(healthState)))),
           h('span', { className: 'rpc-provider-value' },
             h('span', {
               // 读不到额度时不要用品牌色画「—」：中性色 + 悬停原因。
@@ -3659,6 +3754,27 @@ window.__ModuleLoader__.load({
                 })),
         )
       })
+
+      // 六家的健康一览：把「几家正常 / 几家异常 / 几家没接入」压成一条六段小条，
+      // 比三个数字更容易一眼扫完；段色与 provider 卡上的状态点同一套。
+      var fleet = providers.map(function (entry) {
+        var health = entry.health || { state: 'unknown' }
+        var cardTest = freshModelTestOf(entry)
+        var state = cardTest !== undefined && cardTest.state !== undefined ? cardTest.state : displayHealthState(health)
+        var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
+        var tone = entry.enabled === false
+          ? 'off'
+          : !signed
+            ? 'idle'
+            : state === 'ok' ? 'ok' : state === 'down' ? 'error' : state === 'unknown' ? 'idle' : 'warn'
+        return {
+          provider: entry.provider,
+          name: entry.displayName,
+          tone: tone,
+          text: entry.enabled === false ? bind(t, 'disabled') : bind(t, healthTextKey(state)),
+        }
+      })
+      var fleetOk = fleet.filter(function (item) { return item.tone === 'ok' }).length
 
       // 额度预警：只提醒，不改变行为。真正换号由 autoSwitch.thresholdRatio 控制。
       var alertProviders = alertsEnabled
@@ -3698,6 +3814,18 @@ window.__ModuleLoader__.load({
           h('p', { className: 'rpc-hero-sub' }, bind(t, 'intro')),
           h('div', { className: 'rpc-hero-meta' },
             h('span', { className: 'rpc-chip' }, rpcIcon('users', 12), bind(t, 'providersEnabled', { count: enabledCount, total: providers.length })),
+            fleet.length === 0
+              ? null
+              : h('span', {
+                  key: 'fleet',
+                  className: 'rpc-chip rpc-fleet',
+                  title: fleet.map(function (item) { return item.name + ' · ' + item.text }).join('\n'),
+                },
+                h('span', { className: 'rpc-fleet-bars', 'aria-hidden': 'true' },
+                  fleet.map(function (item) {
+                    return h('i', { key: item.provider, className: 'rpc-fleet-seg', 'data-tone': item.tone })
+                  })),
+                bind(t, 'fleetHealthy', { count: fleetOk })),
             h('span', { className: 'rpc-chip' }, rpcIcon('wallet', 12), bind(t, 'providersCredits', { count: readableCount })),
             latestUpdate > 0
               ? h('span', { className: 'rpc-chip', title: formatTime(latestUpdate) }, rpcIcon('clock', 12), bind(t, 'updatedAt', { time: formatShortTime(latestUpdate) }))
@@ -3889,14 +4017,23 @@ window.__ModuleLoader__.load({
               : null,
             h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } }, rpcIcon('cube', 12), String(modelTotal) + ' ' + bind(t, 'models')))),
         h('div', { className: 'rpc-detail-actions' },
-          h('label', { className: 'rpc-check-label' },
-            h('input', {
-              type: 'checkbox',
-              className: 'rpc-check',
-              checked: active.enabled !== false,
-              onChange: function () { toggleProvider(active) },
-            }),
-            bind(t, 'enabled'))))
+          // 开关而不是复选框：这里控制的是「这个 provider 参不参与请求」，
+          // 是即时生效的模式开关，不是表单里的多选项；开关的语义与状态色都更直接。
+          h('label', {
+            className: 'rpc-switch',
+            title: bind(t, 'enabled'),
+          },
+          h('input', {
+            type: 'checkbox',
+            className: 'rpc-switch-input',
+            checked: pendingProviderEnabled.current[active.provider] !== undefined
+              ? pendingProviderEnabled.current[active.provider] === true
+              : active.enabled !== false,
+            disabled: isBusy('save'),
+            onChange: function () { toggleProvider(active) },
+          }),
+          h('span', { className: 'rpc-switch-track', 'aria-hidden': 'true' }),
+          h('span', { className: 'rpc-switch-text' }, bind(t, 'enabled')))))
 
       sections.push(
         h('div', {
@@ -4083,7 +4220,24 @@ window.__ModuleLoader__.load({
                 whiteSpace: 'nowrap',
               },
               title: creditsExpiry,
-            }, creditsExpiry))
+            }, creditsExpiry),
+        // 每行给一条 3px 的额度条：多账号并排时，谁快见底一眼就能比出来，
+        // 不用在脑子里算 735/1300 与 52/1300。
+        (function () {
+          if (snapshot.state !== 'ok' || snapshot.unlimited === true) return null
+          if (!isFiniteNumber(snapshot.total) || !(snapshot.total > 0) || !isFiniteNumber(snapshot.remain)) return null
+          var share = Math.max(0, Math.min(1, snapshot.remain / snapshot.total))
+          return h('span', {
+            key: 'bar',
+            className: 'rpc-mini-bar',
+            'aria-hidden': 'true',
+          }, h('i', {
+            style: {
+              width: Math.round(share * 100) + '%',
+              background: freePlan ? toneColor('ok') : creditsAlert === undefined ? 'var(--rpc-accent)' : toneColor(creditsAlert === 'exhausted' ? 'error' : 'warn'),
+            },
+          }))
+        })())
 
         var statusCell = h('div', {
           key: 'status',
@@ -4325,6 +4479,9 @@ window.__ModuleLoader__.load({
                 type: 'checkbox',
                 className: 'rpc-check',
                 checked: active.autoSwitch !== false,
+                // 保存期间禁用：/settings 要等一轮目录 + 额度刷新，连点两次会
+                // 用同一份旧 status 算出同一个值，第二次（想撤销的那次）丢失。
+                disabled: isBusy('save'),
                 onChange: function () { mutate({ autoSwitch: { enabled: active.autoSwitch === false } }) },
               }),
               bind(t, 'autoSwitch'))),
@@ -4959,26 +5116,46 @@ window.__ModuleLoader__.load({
             })
           }
           var maxDailyTokens = 1
+          var peakDate = buckets[buckets.length - 1].date
+          var anyDailyTokens = false
           buckets.forEach(function (day) {
-            if (isFiniteNumber(day.totalTokens) && day.totalTokens > maxDailyTokens) maxDailyTokens = day.totalTokens
+            if (isFiniteNumber(day.totalTokens) && day.totalTokens > 0) anyDailyTokens = true
+            if (isFiniteNumber(day.totalTokens) && day.totalTokens > maxDailyTokens) {
+              maxDailyTokens = day.totalTokens
+              peakDate = day.date
+            }
           })
+          var todayKey = buckets[buckets.length - 1].date
           usageBody.push(
             h('div', { key: 'heat', className: 'rpc-subsection' },
-              h('div', { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+              h('div', { className: 'rpc-section-head' },
                 h('span', { style: S.sectionTitle }, rpcIcon('chart', 13), bind(t, 'usageHeatmap')),
                 h('span', { style: S.grow }),
-                h('span', { className: 'rpc-chip' }, '14d')),
-              h('div', { className: 'rpc-heat' },
+                anyDailyTokens
+                  ? h('span', {
+                      key: 'peak',
+                      className: 'rpc-chip',
+                      title: bind(t, 'usageHeatPeakHint', { date: peakDate }),
+                    }, bind(t, 'usageHeatPeak', { value: compactTokens(maxDailyTokens) }))
+                  : null,
+                h('span', { key: 'window', className: 'rpc-chip' }, '14d')),
+              h('div', {
+                className: 'rpc-chart',
+                role: 'img',
+                'aria-label': bind(t, 'usageHeatAria', { days: buckets.length }),
+              },
+              h('div', { className: 'rpc-chart-plot' },
                 buckets.map(function (day) {
                   var tokens = isFiniteNumber(day.totalTokens) ? day.totalTokens : 0
-                  var height = tokens > 0 ? Math.max(4, Math.round((tokens / maxDailyTokens) * 34)) : 3
+                  var height = tokens > 0 ? Math.max(4, Math.round((tokens / maxDailyTokens) * 52)) : 3
                   return h('div', {
                     key: 'd' + day.date,
-                    className: 'rpc-heat-cell',
+                    className: 'rpc-chart-col',
+                    'data-today': day.date === todayKey ? 'true' : undefined,
                     title: bind(t, 'usageHeatCell', { date: day.date, requests: formatNumber(day.requests || 0), tokens: formatNumber(tokens) }),
                   },
                   h('div', {
-                    className: 'rpc-heat-fill',
+                    className: 'rpc-chart-bar',
                     style: {
                       height: height,
                       background: tokens > 0
@@ -4988,9 +5165,13 @@ window.__ModuleLoader__.load({
                     },
                   }))
                 })),
-              h('div', { style: { display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--rpc-muted)' } },
+              h('div', { className: 'rpc-chart-axis' },
                 h('span', {}, buckets[0].date.slice(5)),
-                h('span', {}, buckets[buckets.length - 1].date.slice(5)))),
+                h('span', {}, buckets[Math.floor(buckets.length / 2)].date.slice(5)),
+                h('span', { className: 'rpc-chart-today' }, bind(t, 'usageHeatToday')))),
+              anyDailyTokens
+                ? null
+                : h('p', { className: 'rpc-chart-empty' }, rpcIcon('chart', 12), bind(t, 'usageHeatEmpty'))),
           )
         }
 
@@ -5145,6 +5326,9 @@ window.__ModuleLoader__.load({
             var test = account !== undefined && account.modelTests !== null && typeof account.modelTests === 'object'
               ? account.modelTests[entry.model]
               : undefined
+            // `typeof null === 'object'`：坏缓存里 `modelTests: { auto: null }` 会
+            // 通过上一行的判据，然后 `test.ok` 直接抛 TypeError，整张卡片变空白。
+            if (test === null) test = undefined
             var recent = test === undefined ? recentLimitFor(entry.accountId, entry.model) : undefined
             var badge = null
             if (test !== undefined && typeof test === 'object') {
@@ -5545,7 +5729,7 @@ window.__ModuleLoader__.load({
                 type: 'checkbox',
                 className: 'rpc-check',
                 checked: advStats !== false,
-                onChange: function () { setAdvStats(!(advStats !== false)) },
+                onChange: function () { advDirty.current = true; setAdvStats(!(advStats !== false)) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedStats'))),
             h('label', { key: 'cache', className: 'rpc-check-label', style: { cursor: 'pointer' } },
@@ -5553,7 +5737,7 @@ window.__ModuleLoader__.load({
                 type: 'checkbox',
                 className: 'rpc-check',
                 checked: advCache !== false,
-                onChange: function () { setAdvCache(!(advCache !== false)) },
+                onChange: function () { advDirty.current = true; setAdvCache(!(advCache !== false)) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedCache'))),
             h('label', { key: 'alerts', className: 'rpc-check-label', style: { cursor: 'pointer' } },
@@ -5561,7 +5745,7 @@ window.__ModuleLoader__.load({
                 type: 'checkbox',
                 className: 'rpc-check',
                 checked: advAlertsEnabled !== false,
-                onChange: function () { setAdvAlertsEnabled(!(advAlertsEnabled !== false)) },
+                onChange: function () { advDirty.current = true; setAdvAlertsEnabled(!(advAlertsEnabled !== false)) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedAlertsEnabled'))),
             h('label', { key: 'probe', className: 'rpc-check-label', style: { cursor: 'pointer' } },
@@ -5569,7 +5753,7 @@ window.__ModuleLoader__.load({
                 type: 'checkbox',
                 className: 'rpc-check',
                 checked: advProbeEnabled !== false,
-                onChange: function () { setAdvProbeEnabled(!(advProbeEnabled !== false)) },
+                onChange: function () { advDirty.current = true; setAdvProbeEnabled(!(advProbeEnabled !== false)) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedProbe'))),
             h('div', { key: 'btn', style: S.row },
@@ -5594,7 +5778,11 @@ window.__ModuleLoader__.load({
       var available = models.filter(function (row) { return !row.unavailable })
       var unavailable = models.filter(function (row) { return row.unavailable })
       var probe = status.probe || {}
-      var query = searchDraft.trim().toLowerCase()
+      // 搜索框只在模型多于 6 个时才渲染；列表如果缩小到 ≤6，输入框消失但
+      // searchDraft 还在 —— 继续用它过滤会让列表看起来「没有匹配的模型」，
+      // 而界面上已经没有能清掉这个条件的控件。计数降下来就当作没搜索。
+      var searchable = models.length > 6
+      var query = searchable ? searchDraft.trim().toLowerCase() : ''
       var matches = function (row) {
         if (query === '') return true
         // 坏缓存里 name/id 可能缺失或不是字符串；搜索框只有在模型多于 6 个时
@@ -5607,6 +5795,14 @@ window.__ModuleLoader__.load({
       // 搜索词可能只命中「账号不支持」的模型：这时不能说「没有匹配」，否则和下方
       // 不可用列表自相矛盾。分开统计，给不同的空状态文案。
       var unavailableMatches = query === '' ? [] : unavailable.filter(matches)
+
+      // 坏缓存里 name 可能缺失、甚至不是字符串（对象会被 React 当成 child 抛错），
+      // 而 aria-label 缺失会让复选框变成没有名字的控件。统一取可显示的标签。
+      var modelLabelOf = function (model) {
+        if (typeof model.name === 'string' && model.name !== '') return model.name
+        if (typeof model.id === 'string' && model.id !== '') return model.id
+        return 'model'
+      }
 
       var modelMetaText = function (model) {
         var parts = [formatWindow(model.contextWindow)]
@@ -5678,10 +5874,10 @@ window.__ModuleLoader__.load({
                       && pendingModelToggles.current[active.provider + '::disabled'][model.id] !== undefined
                       ? !pendingModelToggles.current[active.provider + '::disabled'][model.id]
                       : !model.disabled,
-                    'aria-label': model.name,
+                    'aria-label': modelLabelOf(model),
                     onChange: function () { toggleModel(active, model) },
                   }),
-                  h('span', { className: 'rpc-model-name', style: S.modelName, title: model.name }, model.name),
+                  h('span', { className: 'rpc-model-name', style: S.modelName, title: modelLabelOf(model) }, modelLabelOf(model)),
                   h('span', { className: 'rpc-model-meta', style: S.modelMeta }, modelMetaText(model)),
                   h('span', { style: S.grow }),
                   h('span', { className: 'rpc-model-id', style: S.modelId }, model.id))
@@ -5705,12 +5901,18 @@ window.__ModuleLoader__.load({
                 h('input', {
                   type: 'checkbox',
                   className: 'rpc-check',
-                  checked: model.forced === true,
-                  'aria-label': model.name,
+                  // 与可用模型同一套「本地意图」：POST 没回来之前用
+                  // pendingModelToggles 的值，否则连点两次都从旧的 forced === false
+                  // 出发，两次都发「强制显示」，第二次无法撤销第一次。
+                  checked: pendingModelToggles.current[active.provider + '::forced'] !== undefined
+                    && pendingModelToggles.current[active.provider + '::forced'][model.id] !== undefined
+                    ? pendingModelToggles.current[active.provider + '::forced'][model.id] === true
+                    : model.forced === true,
+                  'aria-label': modelLabelOf(model),
                   title: bind(t, 'forceShow'),
                   onChange: function () { toggleModel(active, model) },
                 }),
-                h('span', { style: S.modelMeta }, model.name),
+                h('span', { style: S.modelMeta }, modelLabelOf(model)),
                 h('span', { className: 'rpc-chip rpc-chip-warn' }, bind(t, 'unavailable')),
                 model.forced === true ? h('span', { className: 'rpc-chip' }, bind(t, 'forced')) : null,
                 h('span', { style: S.grow }),
@@ -6118,7 +6320,10 @@ window.__ModuleLoader__.load({
         var status = statusState[0]
         var setStatus = statusState[1]
         // 与卡片同名：写入点统一走这里（侧栏没有竞态，只起可读性作用）。
-        var applyStatus = function (document) { setStatus(document) }
+        var applyStatus = function (document) {
+          if (document === null || typeof document !== 'object' || Array.isArray(document)) return
+          setStatus(document)
+        }
         var busyState = useState(false)
         var busy = busyState[0]
         var setBusy = busyState[1]
@@ -6134,6 +6339,12 @@ window.__ModuleLoader__.load({
         var hovered = hoverState[0]
         var setHovered = hoverState[1]
         var rootRef = useRef(undefined)
+        // 轻量 GET 与「刷新积分」的 POST 是两个独立请求：POST 之后才回来的旧 GET
+        // 会把刚刷新的额度盖回旧快照。与卡片同款：每次写入递增代数，晚到的响应
+        // 发现代数变了就丢弃。busyRef 管的是「同一 tick 里连点两次」的情况 ——
+        // 只靠 state 的话两次点击都读到 busy === false，会发两个 POST。
+        var statusEpoch = useRef(0)
+        var busyRef = useRef(false)
         // 失败提示的 5s 自动清除用序号防竞态：成功刷新要立刻清掉失败态，
         // 旧定时器也不能清掉之后新产生的失败。
         var failedSeq = useRef(0)
@@ -6162,12 +6373,14 @@ window.__ModuleLoader__.load({
             // 同时触发，不能让两个 /status?light=1 互相覆盖。
             if (loading || disposed) return
             loading = true
+            var epoch = statusEpoch.current
             fetchStatus(true)
               .then(function (document) {
                 loading = false
                 if (disposed) return
                 lastAt = Date.now()
-                applyStatus(document)
+                // 请求期间发生过手动刷新：这份是旧快照，丢掉，别把新额度盖回去。
+                if (epoch === statusEpoch.current) applyStatus(document)
                 if (hasCredits(document)) settle()
               }, function () {
                 loading = false
@@ -6245,12 +6458,18 @@ window.__ModuleLoader__.load({
 
         var refresh = function (event) {
           if (event !== undefined && event.preventDefault !== undefined) event.preventDefault()
-          if (status === undefined || busy === true) return
+          if (status === undefined || busyRef.current === true) return
+          busyRef.current = true
+          // 记下发起时的代数：刷新结果与「刷新前就发出、刷新后才回来」的旧 GET
+          // 都靠它排序 —— 只有代数没变（中间没有别的写入）的结果才落地。
+          statusEpoch.current += 1
+          var epoch = statusEpoch.current
           setBusy(true)
           setFailed(false)
           postJson(ACTION_PATH, { action: 'credits' }, status.key)
             .then(function (document) {
-              applyStatus(document)
+              if (epoch === statusEpoch.current) applyStatus(document)
+              busyRef.current = false
               setBusy(false)
               // 失败后 5 秒内又刷新成功：必须立刻清掉失败提示，否则旧定时器
               // 未到点前界面仍挂着「刷新失败」，看起来像失败但其实成功。
@@ -6258,6 +6477,7 @@ window.__ModuleLoader__.load({
               setFailed(false)
             })
             .catch(function (failure) {
+              busyRef.current = false
               setBusy(false)
               // 刷新失败不能只靠 1.6 秒描边变色：面板底部给一条 5 秒的
               // role=status 文案（原因放 title），色盲/读屏用户也能感知。

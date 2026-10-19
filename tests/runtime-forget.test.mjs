@@ -5,7 +5,7 @@
 // 删除动作被静默撤销；隐式默认账号（id 固定 `default`）删掉后又会被合成回来，
 // 于是「删除 → 重新配置」的新账号直接继承旧账号的余额与消耗历史。
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, existsSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -79,9 +79,47 @@ test('删除账号后，在途额度刷新不得把它的额度与消耗历史�
     const cacheText = existsSync(join(dir, 'credits-cache.json'))
       ? readFileSync(join(dir, 'credits-cache.json'), 'utf8')
       : ''
-    assert.equal(cacheText.includes('qoder::default'), false, '磁盘缓存里也不能留下被删账号')
+    // 墓碑（forgotten）里出现这个 key 是**对的**：它正是「别再把这条写回来」的
+    // 判据。要保证的是快照本身不在了 —— 否则下次启动又会读出一个已删账号的余额。
+    const cacheDoc = cacheText === '' ? { entries: {}, forgotten: [] } : JSON.parse(cacheText)
+    assert.equal(cacheDoc.entries['qoder::default'], undefined, '磁盘缓存里不能留下被删账号的快照')
+    assert.equal(cacheDoc.forgotten.includes('qoder::default'), true, '删除必须落一条墓碑')
   } finally {
     globalThis.fetch = originalFetch
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('删除账号的墓碑要挡住「保存时与磁盘合并」，重启后不能再读出它的余额', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-forget-disk-'))
+  const settings = hangingSettings()
+  try {
+    // 先造一份「上次运行留下的」磁盘快照（模拟删账号之前已经落过盘）。
+    writeFileSync(join(dir, 'credits-cache.json'), JSON.stringify({
+      version: 1,
+      entries: {
+        'qoder::default': {
+          data: { state: 'ok', remain: 4242, total: 5000, unit: 'credits', items: [] },
+          fetchedAt: Date.now() - 1000,
+        },
+      },
+    }))
+    const runtime = new Runtime({ settings: () => settings, dataDir: dir, logger: {} })
+    // 启动时读到了这份快照。
+    assert.equal(runtime.creditsFor('qoder', 'default').remain, 4242)
+    settings.qoder.qoder.pat = ''
+    settings.accounts.qoder = []
+    runtime.forgetAccount('qoder', 'default')
+    runtime.flushCaches()
+
+    // 合并写盘读的是磁盘上的旧条目：墓碑必须在 saveCreditsCache 里生效。
+    const doc = JSON.parse(readFileSync(join(dir, 'credits-cache.json'), 'utf8'))
+    assert.equal(doc.entries['qoder::default'], undefined, '墓碑没能删掉磁盘上的旧快照')
+
+    // 重启（重新 loadCreditsCache）后不能再读到已删除账号的余额。
+    const restarted = new Runtime({ settings: () => settings, dataDir: dir, logger: {} })
+    assert.equal(restarted.creditsFor('qoder', 'default').state, 'none', '重启后又读出了已删除账号的余额')
+  } finally {
     rmSync(dir, { recursive: true, force: true })
   }
 })

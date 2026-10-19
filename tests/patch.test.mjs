@@ -85,6 +85,12 @@ test('设置补丁：只有凭证字段会触发签到重新检查，改名字/�
   // 空 PAT 在 normalizeAccount 里就被丢掉了，不算「新增凭证」。
   assert.deepEqual([...credentialProvidersOf(sanitizePatch({ accounts: { qoder: [{ id: 'default', label: 'x', pat: '' }] } }))], [])
   assert.deepEqual([...credentialProvidersOf(sanitizePatch({ accounts: { workbuddy: [{ id: 'a', label: 'A', authFile: 'C:\\auth' }] } }))], ['workbuddy'])
+  // 桌面端的「登录文件」路径同样是凭证来源（accountsFor 会把它当成隐式默认
+  // 账号的凭证）；漏掉它时补路径后当天签到不会再打开。
+  assert.deepEqual([...credentialProvidersOf(sanitizePatch({ workbuddy: { workbuddy: { authFile: 'C:\\auth' } } }))], ['workbuddy'])
+  assert.deepEqual([...credentialProvidersOf(sanitizePatch({ workbuddy: { 'workbuddy-ai': { authFile: 'C:\\auth2' } } }))], ['workbuddy-ai'])
+  // 只是换个 App 路径，不是新凭证。
+  assert.deepEqual([...credentialProvidersOf(sanitizePatch({ workbuddy: { workbuddy: { electronPath: 'C:\\app.exe' } } }))], [])
   assert.deepEqual([...credentialProvidersOf(sanitizePatch({ providers: { qoder: { enabled: true } } }))], [])
   assert.deepEqual([...credentialProvidersOf(null)], [])
 })

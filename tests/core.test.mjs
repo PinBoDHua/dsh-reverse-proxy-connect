@@ -688,6 +688,16 @@ test('失败种类映射到 DSH 的稳定 code', () => {
   assert.equal(stableFailureCode('AUTH'), 'AUTH')
 })
 
+test('AbortSignal.timeout 的 TimeoutError 归成可重试的 TIMEOUT', () => {
+  // fetch 超时抛 DOMException{name:'TimeoutError', code:23}：没有字符串 code、
+  // 没有 kind。以前落成 upstream-error（宿主不重试、界面是英文原文）。
+  const timedOut = new DOMException('The operation was aborted due to timeout', 'TimeoutError')
+  assert.equal(timedOut.code, 23)
+  assert.equal(failureCodeOf(timedOut), 'TIMEOUT')
+  // 普通错误仍然保持原分类，不能被这条特判吞掉。
+  assert.equal(failureCodeOf(Object.assign(new Error('x'), { name: 'TypeError' })), 'upstream-error')
+})
+
 test('设置归一化容忍缺字段与错类型', () => {
   const value = normalize({ providers: { workbuddy: { enabled: false, disabledModels: ['a', 3] } }, qoder: { qoder: { pat: 'x' } } })
   assert.equal(value.providers.workbuddy.enabled, false)

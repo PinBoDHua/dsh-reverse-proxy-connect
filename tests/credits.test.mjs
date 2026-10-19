@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseLocalTime, emptyCredits } from '../lib/credits.js'
+import { parseLocalTime, emptyCredits, fetchQoderCredits } from '../lib/credits.js'
+import { isExhaustedCredits, isQoderFreePlan } from '../lib/quota.js'
 import { normalizeRateLabel, displayNameOfModel, toModelInfo } from '../lib/adapter.js'
 
 test('parseLocalTime 按本机时区解析无时区时间', () => {
@@ -50,6 +51,30 @@ test('模型名拼倍率：只在开启且有可识别倍率时拼，且不重�
   assert.equal(displayNameOfModel({ id: 'x', name: 'X · x0.79', credits: 'x0.79' }, true), 'X · x0.79')
   // 免费档显示「免费」。
   assert.equal(displayNameOfModel({ id: 'h', name: 'Hy3', credits: 'x0.00' }, true), 'Hy3 · 免费')
+})
+
+test('Qoder 计划接口失败：快照带 planUnknown，0 额度仍按 Free 处理', async () => {
+  const original = globalThis.fetch
+  globalThis.fetch = async (input) => {
+    const target = String(input)
+    if (target.includes('/api/v2/quota/usage')) {
+      return new Response(JSON.stringify({ userQuota: { total: 0, used: 0, remaining: 0 }, isQuotaExceeded: true }), { status: 200 })
+    }
+    // 计划接口 500：planName / paid / freePlan 三件证据全缺。
+    if (target.includes('/api/v2/user/plan')) return new Response('', { status: 500 })
+    return new Response(JSON.stringify({ nextResetAt: 1794000000000 }), { status: 200 })
+  }
+  try {
+    const credits = await fetchQoderCredits({ authToken: 'job-token' }, 'global')
+    assert.equal(credits.state, 'ok')
+    assert.equal(credits.total, 0)
+    assert.equal(credits.planUnknown, true, '计划接口失败必须留下证据缺失标记')
+    assert.equal(credits.freePlan, undefined, '缺证据时不要编造 freePlan')
+    assert.equal(isQoderFreePlan('qoder-global', credits), true)
+    assert.equal(isExhaustedCredits(credits, 'qoder-global'), false, 'Qoder Free 的 0 不是用尽')
+  } finally {
+    globalThis.fetch = original
+  }
 })
 
 test('toModelInfo 的 name 随 showRate 变化，id 不变', () => {

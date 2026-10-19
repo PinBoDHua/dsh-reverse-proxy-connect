@@ -461,8 +461,45 @@ test('Trae：event:done 之后即使连接不关闭也能立即结束', async ()
   assert.equal(events.at(-1).kind, 'stop')
 })
 
-// ---------- 流解析 ----------
+test('Trae：event:done 带空 data 行也立即收流（合法 SSE 终态）', async () => {
+  // `event: done\ndata:\n\n` 是合法的 SSE 终态，Trae 真的会这么发。
+  // 旧实现先跳过空 payload 再判 done，于是空 done 永远收不了流，只能等
+  // 180s 的空闲看门狗判成 TIMEOUT。
+  const bytes = new TextEncoder().encode([
+    'event:output',
+    'data:{"response":"好"}',
+    '',
+    'event:done',
+    'data:',
+    '',
+  ].join('\n'))
+  let sent = false
+  const openBody = {
+    getReader() {
+      return {
+        async read() {
+          if (sent) return new Promise(() => {}) // 上游保持连接：只靠 done 结束
+          sent = true
+          return { done: false, value: bytes }
+        },
+        async cancel() {},
+      }
+    },
+  }
+  const events = await Promise.race([
+    (async () => {
+      const list = []
+      for await (const event of parseStream(openBody, undefined)) list.push(event)
+      return list
+    })(),
+    new Promise((resolve) => setTimeout(() => resolve('timeout'), 500)),
+  ])
+  assert.notEqual(events, 'timeout', '空的 event:done 也必须立即收流')
+  assert.equal(events.at(-1).type, 'finish')
+  assert.equal(events.at(-1).kind, 'stop')
+})
 
+// ---------- 流解析 ----------
 /**
  * 把一段 SSE 文本包成 `response.body` 形状。
  * @param text - SSE 文本。
@@ -661,6 +698,21 @@ test('Trae：国际版额度端点 404 是「不可读」而不是一次读取�
     assert.equal(credits.state, 'none')
     assert.equal(credits.remain, 0)
     assert.match(credits.message, /没有提供额度查询接口/)
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('Trae：国内版额度端点 404 是真失败，不能套「国际版没有接口」的说辞', async () => {
+  // 404→none 的理由只对国际版成立（那条端点本来就不存在）。国内版吃到 404
+  // 说明路由/端点变了或被网关挡住，静默当成「不可读」会把真故障藏起来。
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('not found', { status: 404 })
+  try {
+    const credits = await fetchCredits('trae', { jwt: 'jwt', userId: 'u1' })
+    assert.equal(credits.state, 'error')
+    assert.match(credits.message, /HTTP 404/)
+    assert.doesNotMatch(credits.message, /国际版/)
   } finally {
     globalThis.fetch = originalFetch
   }

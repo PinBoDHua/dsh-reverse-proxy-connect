@@ -2828,4 +2828,137 @@ function extractFn(header) {
   }
 }
 
+// 46) /status 返回 JSON null：只显示「读取失败」，不能白屏。
+{
+  const original = sandbox.fetch
+  sandbox.fetch = async () => ({ ok: true, status: 200, json: async () => null, text: async () => 'null' })
+  try {
+    let tree = await mount(card, { t: realT })
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    tree = await render(card, { t: realT })
+    const text = textOf(tree)
+    if (!text.includes(realT('statusLoadFailed'))) {
+      throw new Error('status 文档是 null 时没有落到加载失败态：' + JSON.stringify(text.slice(0, 120)))
+    }
+    console.log('✓ status 文档为 null 时显示加载失败，不再白屏')
+  } finally {
+    sandbox.fetch = original
+  }
+}
+
+// 47) modelTests 里的 null 条目不能炸掉整张卡片（typeof null === 'object'）。
+{
+  const snapshot = STATUS.providers[0].accounts[0]
+  try {
+    STATUS.providers[0].accounts[0] = { ...snapshot, modelTests: { auto: null } }
+    let tree = await mount(card, { t: realT })
+    const usageTab = find(tree, (node) => node.type === 'button'
+      && node.props?.className === 'rpc-pagetab'
+      && textOf(node).startsWith(realT('navUsage')))
+    if (usageTab === undefined) throw new Error('找不到「用量」分区按钮')
+    usageTab.props.onClick()
+    tree = await render(card, { t: realT })
+    if (!textOf(tree).includes(realT('navUsage'))) throw new Error('用量页没有渲染')
+    console.log('✓ modelTests 的 null 条目不再炸整张卡片')
+  } finally {
+    STATUS.providers[0].accounts[0] = snapshot
+  }
+}
+
+// 48) 高级设置的复选框改动不能被下一次状态轮询冲掉。
+{
+  let tree = await mount(card, { t: realT })
+  const boxOf = () => {
+    const label = find(tree, (node) => node.type === 'label' && textOf(node) === realT('advancedStats'))
+    return label === undefined ? undefined : find(label, (node) => node.type === 'input')
+  }
+  if (boxOf() === undefined) throw new Error('找不到「记录用量统计」开关')
+  if (boxOf().props.checked !== true) throw new Error('高级设置开关初始态不对')
+  boxOf().props.onChange({ target: { checked: false } })
+  tree = await render(card, { t: realT })
+  if (boxOf().props.checked !== false) throw new Error('取消勾选没有生效')
+  // 触发一次完整状态回读（模拟 20 秒轮询），未保存的勾选必须保留。
+  const refresh = findButton(tree, realT('refresh'))
+  if (refresh === undefined) throw new Error('找不到刷新按钮')
+  refresh.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  tree = await render(card, { t: realT })
+  if (boxOf().props.checked !== false) {
+    throw new Error('轮询把未保存的高级设置勾选冲掉了')
+  }
+  console.log('✓ 高级设置复选框的未保存改动不会被轮询覆盖')
+}
+
+// 49) 清除 PAT 后连草稿一起清，切走再切回不能把刚清掉的令牌填回来。
+{
+  const snapshot = STATUS.providers[2].accounts
+  try {
+    STATUS.providers[2].accounts = [
+      { id: 'default', label: '默认令牌', active: true, kind: 'pat', configured: true, source: 'pat', credits: { state: 'ok', remain: 10, total: 100, unit: 'credits' } },
+    ]
+    STATUS.settings.qoder['qoder-global'].configured = true
+    let tree = await mount(card, { t: realT })
+    findButton(tree, 'Qoder Global').props.onClick()
+    tree = await render(card, { t: realT })
+    const patInput = () => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === realT('pat'))
+    if (patInput() === undefined) throw new Error('找不到 PAT 输入框')
+    patInput().props.onChange({ target: { value: 'pt-should-be-forgotten' } })
+    tree = await render(card, { t: realT })
+    const clearButton = findAll(tree, (node) => node.type === 'button' && textOf(node) === realT('clear'))[0]
+    if (clearButton === undefined) throw new Error('找不到「清除」按钮')
+    clearButton.props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    tree = await render(card, { t: realT })
+    if (patInput().props.value !== '') throw new Error('清除后输入框仍然有值')
+    findButton(tree, 'WorkBuddy').props.onClick()
+    tree = await render(card, { t: realT })
+    findButton(tree, 'Qoder Global').props.onClick()
+    tree = await render(card, { t: realT })
+    if (patInput().props.value !== '') {
+      throw new Error('切走再切回后，被清除的 PAT 又从草稿里复活了')
+    }
+    console.log('✓ 清除 PAT 会同时清掉按 provider 记住的草稿')
+  } finally {
+    STATUS.providers[2].accounts = snapshot
+  }
+}
+
+// 50) 模型数降到 ≤6、搜索框消失后，不能再拿隐藏的搜索词过滤列表。
+{
+  const snapshot = STATUS.providers[0].models
+  try {
+    STATUS.providers[0].models = Array.from({ length: 7 }, (_, index) => (
+      { id: 'm' + index, name: 'Model ' + index, contextWindow: 1000, maxTokens: 100, supportsImages: false, reasoningEfforts: [], disabled: false }
+    ))
+    STATUS.providers[0].modelCount = 7
+    let tree = await mount(card, { t: realT })
+    const modelsTab = find(tree, (node) => node.type === 'button'
+      && node.props?.className === 'rpc-pagetab'
+      && textOf(node).startsWith(realT('navModels')))
+    modelsTab.props.onClick()
+    tree = await render(card, { t: realT })
+    const search = find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === realT('searchPlaceholder'))
+    if (search === undefined) throw new Error('7 个模型时没有渲染搜索框')
+    search.props.onChange({ target: { value: 'zzz' } })
+    tree = await render(card, { t: realT })
+    if (!textOf(tree).includes(realT('searchEmpty'))) throw new Error('搜索无匹配时没有空状态')
+    // 目录缩小到 6 个：输入框消失，隐藏的搜索词不能再过滤。
+    STATUS.providers[0].models = STATUS.providers[0].models.slice(0, 6)
+    STATUS.providers[0].modelCount = 6
+    const refresh = findButton(tree, realT('refresh'))
+    refresh.props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    tree = await render(card, { t: realT })
+    const text = textOf(tree)
+    if (text.includes(realT('searchEmpty'))) {
+      throw new Error('模型数降到 6 后仍被已隐藏的搜索词过滤')
+    }
+    if (!text.includes('Model 0')) throw new Error('模型列表没有恢复完整')
+    console.log('✓ 搜索框隐藏后不再用旧搜索词过滤模型列表')
+  } finally {
+    STATUS.providers[0].models = snapshot
+    STATUS.providers[0].modelCount = snapshot.length
+  }
+}
+
 console.log('client-credits: OK')

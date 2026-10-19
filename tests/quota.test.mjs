@@ -27,6 +27,18 @@ test('Qoder 付费套餐的 0 仍然是「用尽」，不能被 Free 判定误�
   assert.equal(isQoderFreePlan('qoder', { state: 'ok', total: 10, remain: 5, planName: 'Free' }), false)
 })
 
+test('Qoder 计划接口失败时，0 额度仍按 Free 处理（不误判用尽、不触发换号）', () => {
+  // /api/v2/user/plan 429/500/超时：三件证据（freePlan / paid / planName）全缺，
+  // usage 仍然是 Free 的 total=0 + isQuotaExceeded=true。
+  const credits = { state: 'ok', remain: 0, total: 0, used: 0, exceeded: true, planUnknown: true }
+  assert.equal(isQoderFreePlan('qoder-global', credits), true)
+  assert.equal(isExhaustedCredits(credits, 'qoder-global'), false)
+  assert.equal(creditsAlertOf(credits, { enabled: true, lowRatio: 0.15 }, 'qoder-global'), undefined)
+  // 明确是付费套餐时不因 planUnknown 兜底而被当成 Free。
+  assert.equal(isQoderFreePlan('qoder', { state: 'ok', total: 0, remain: 0, planUnknown: true, paid: true }), false)
+  assert.equal(isExhaustedCredits({ state: 'ok', total: 0, remain: 0, planUnknown: true, paid: true }, 'qoder'), true)
+})
+
 test('预警：alerts.enabled=false 关掉所有预警等级，不只是横幅', () => {
   const low = { state: 'ok', remain: 5, total: 100, planName: 'Pro', paid: true }
   assert.equal(creditsAlertOf(low, { enabled: true, lowRatio: 0.15 }, 'qoder'), 'low')
