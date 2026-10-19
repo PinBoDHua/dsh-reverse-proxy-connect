@@ -114,13 +114,14 @@ window.__ModuleLoader__.load({
           '.rpc-hero-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:2px}',
           '.rpc-hero-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;justify-content:flex-end;padding-left:8px}',
 
-          /* 服务商选择条（同时是 provider tablist） */
-          '.rpc-rail{display:flex;align-items:stretch;gap:8px;',
-          'overflow-x:auto;padding:12px 20px 13px;border-bottom:1px solid var(--rpc-border);background:var(--rpc-bg);',
-          'scrollbar-width:none;overscroll-behavior-x:contain}',
-          '.rpc-rail::-webkit-scrollbar{display:none}',
+          /* 服务商选择条（同时是 provider tablist）
+             用 auto-fit 栅格而不是横向滚动：设置弹窗只有 ~560px 宽时，
+             六家会排成 3+3，Trae / Trae Global 不会被裁到屏幕外。宽屏
+             时 auto-fit 自然回到一行六张。 */
+          '.rpc-rail{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));align-items:stretch;gap:8px;',
+          'padding:12px 20px 13px;border-bottom:1px solid var(--rpc-border);background:var(--rpc-bg);overflow:visible}',
           '.rpc-provider{position:relative;appearance:none;font:inherit;text-align:left;display:flex;flex-direction:column;gap:5px;',
-          'flex:1 1 0;min-width:132px;max-width:230px;padding:9px 11px 8px;border:1px solid var(--rpc-border);border-radius:12px;background:var(--rpc-bg);',
+          'min-width:0;max-width:none;width:100%;padding:9px 11px 8px;border:1px solid var(--rpc-border);border-radius:12px;background:var(--rpc-bg);',
           'color:var(--rpc-text);cursor:pointer;overflow:hidden;transition:background .14s ease,border-color .14s ease,box-shadow .14s ease,transform .14s ease}',
           '.rpc-provider::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;',
           'background:var(--rpc-provider-accent,var(--rpc-accent));opacity:0;transition:opacity .14s ease}',
@@ -319,8 +320,10 @@ window.__ModuleLoader__.load({
           /* 动效 / 响应式 */
           '@keyframes rpc-fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}',
           '@container (max-width:760px){.rpc-overview{grid-template-columns:1fr}.rpc-detail-head{padding-top:14px}.rpc-provider-health{display:none}}',
+          '@container (max-width:820px){.rpc-rail{grid-template-columns:repeat(3,minmax(0,1fr))}}',
+          '@container (max-width:480px){.rpc-rail{grid-template-columns:repeat(2,minmax(0,1fr))}}',
           '@container (max-width:560px){.rpc-hero{flex-wrap:wrap;padding:15px 16px 13px}.rpc-hero-actions{width:100%;justify-content:flex-start;padding-left:0}',
-          '.rpc-rail{padding:10px 14px 11px}.rpc-provider{min-width:124px}',
+          '.rpc-rail{padding:10px 14px 11px}',
           '.rpc-pagenav{margin:12px 14px 0;max-width:calc(100% - 28px)}',
           '.rpc-page{padding:12px 14px 16px}.rpc-detail-head{padding:14px 14px 0}.rpc-banner{margin:0 14px}.rpc-footer{padding:9px 14px 12px}',
           '.rpc-kv{grid-template-columns:84px minmax(0,1fr)}}',
