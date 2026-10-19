@@ -314,7 +314,13 @@ const ctx = {
 }
 captured.apply(ctx)
 
-const realT = (key) => (realLocale && realLocale.zh && realLocale.zh[key] !== undefined ? realLocale.zh[key] : key)
+const realT = (key, params) => {
+  let text = realLocale && realLocale.zh && realLocale.zh[key] !== undefined ? realLocale.zh[key] : key
+  if (params !== undefined && typeof text === 'string') {
+    text = text.replace(/\{(\w+)\}/g, (all, name) => (params[name] === undefined ? all : String(params[name])))
+  }
+  return text
+}
 
 const card = registered.find((entry) => entry.options.name === 'plugin-settings.item')?.component
 const pill = registered.find((entry) => entry.options.name === 'sidebar.footer.action')?.component
@@ -511,6 +517,64 @@ if (calls.length === beforeCheckin || !String(checkinCall.body).includes('checki
 }
 if (!String(checkinCall.body).includes('workbuddy')) throw new Error('签到请求没有带 provider')
 console.log('✓ 签到按钮会发 action=checkin')
+
+// ---------- 1b. 账号表格：固定列、每账号积分 / 状态 / 签到各自成格 ----------
+{
+  const provider = STATUS.providers[0]
+  const checkinSnapshot = provider.checkin
+  const accountsSnapshot = provider.accounts
+  const now = Date.now()
+  provider.accounts = [
+    {
+      ...accountsSnapshot[0],
+      credits: { state: 'ok', remain: 1783, total: 2400, unit: 'credits', items: [] },
+      cooldownUntil: now + 4 * 3600_000,
+      lastTest: { at: now - 3600_000, ok: false, code: 'RATE_LIMIT', model: 'glm-5.3', latencyMs: 820, error: '频率限制，将在 2026-10-19 16:48:44 重置' },
+    },
+    {
+      ...accountsSnapshot[1],
+      credits: { state: 'ok', remain: 0, total: 0, unit: 'credits', items: [] },
+      cooldownUntil: 0,
+      lastTest: { at: now - 2 * 3600_000, ok: false, code: 'RATE_LIMIT', model: 'auto', latencyMs: 310, error: 'HTTP 429' },
+    },
+  ]
+  provider.checkin = {
+    enabled: true,
+    lastRunAt: now,
+    result: {
+      claimed: 1,
+      credit: 100,
+      outcomes: [
+        { accountId: 'default', label: '本机登录', kind: 'already', streakDays: 9, credit: 200 },
+        { accountId: 'acc-2', label: '备用账号', kind: 'claimed', credit: 100 },
+      ],
+    },
+  }
+  try {
+    cardTree = await mount(card, { t: realT })
+    const table = find(cardTree, (node) => node.props?.role === 'table')
+    if (table === undefined) throw new Error('账号区没有渲染 role=table 的表格')
+    const tableText = textOf(table)
+    for (const header of ['账号', '积分', '状态 / 模型', '签到', '操作']) {
+      if (!tableText.includes(header)) throw new Error(`账号表格缺少列头：${header}`)
+    }
+    if (!tableText.includes('冷却至')) throw new Error('冷却中的账号没有显示冷却时间')
+    if (!tableText.includes('被限流')) throw new Error('最近测试 429 的账号没有显示「被限流」')
+    if (!tableText.includes('限额')) throw new Error('限流账号没有「限额」徽章')
+    if (!tableText.includes('已签到')) throw new Error('账号表格没有显示签到状态')
+    if (!tableText.includes('连续 9 天')) throw new Error('已签到账号没有显示连续天数')
+    if (!tableText.includes('+100')) throw new Error('本次签到成功的账号没有显示获得积分')
+    if (!tableText.includes('1,783')) throw new Error('账号自己的积分没有进表格')
+    if (!tableText.includes('/ 2,400')) throw new Error('账号积分分母没有进表格')
+    if (!tableText.includes('到期')) throw new Error('账号积分没有显示到期时间')
+    if (!/小时前|分钟前|刚刚/.test(tableText)) throw new Error('状态列没有显示相对时间')
+    if (!tableText.includes('解除')) throw new Error('冷却中的账号没有「解除」入口')
+    console.log('✓ 账号表格：列头、积分、限流状态、逐账号签到与冷却解除都在固定格子里')
+  } finally {
+    provider.accounts = accountsSnapshot
+    provider.checkin = checkinSnapshot
+  }
+}
 
 // ---------- 2. 小卡默认收起 ----------
 let tree = await mount(pill, { t: (key) => key, wide: true })

@@ -171,12 +171,44 @@ window.__ModuleLoader__.load({
       secAccounts: '账号',
       autoSwitch: '额度用完自动切换',
       accountsHintPat: '可以为同一个 provider 添加多个 PAT；当前账号积分用完后会按上面的开关自动切换。',
-      accountsHintDesktop: '桌面账号用上面的「浏览器登录新增账号」添加；本机已有登录会自动读取。',
+      accountsHintDesktop: '桌面账号用「浏览器登录新增账号」添加；本机已有登录会自动读取。',
       accountLabel: '账号名称',
       accountPat: '粘贴个人访问令牌（PAT）',
       accountAuthFile: '登录文件路径（留空 = 读本机登录）',
       accountSecretHint: '令牌只保存在本机设置里，不会回传到浏览器。',
       accountDefaultLabel: '新账号',
+      // 账号表格：让「还剩多少 / 现在能不能用 / 今天签没签」第一眼可见
+      accountColAccount: '账号',
+      accountColCredits: '积分',
+      accountColStatus: '状态 / 模型',
+      accountColCheckin: '签到',
+      accountColActions: '操作',
+      accountTableAria: '账号额度、状态与签到',
+      accountsEmpty: '还没有账号。用下面的方式添加一个。',
+      accountFallback: '未命名账号',
+      accountDisabled: '已禁用',
+      accountNoRequests: '还没有请求记录',
+      accountModelShort: '模型 {model}',
+      accountCooldownHint: '约 {duration} 后恢复',
+      accountCreditsExpiry: '到期 {date}',
+      accountNoExpiry: '无到期时间',
+      accountRateLimited: '被限流',
+      accountAuthFailed: '凭证失效',
+      accountTestFailed: '测试失败',
+      accountCreditsExhausted: '额度用尽',
+      accountAvailable: '可用',
+      accountCheckinOff: '已关闭',
+      accountCheckinNone: '—',
+      accountCheckinFailed: '失败',
+      accountCheckinSkipped: '未登录',
+      accountCheckinNoActivity: '无活动',
+      accountCheckinDone: '已签到',
+      accountCheckinCredit: '+{credit}',
+      accountCheckinStreak: '连续 {days} 天',
+      agoJustNow: '刚刚',
+      agoMinutes: '{count} 分钟前',
+      agoHours: '{count} 小时前',
+      agoDays: '{count} 天前',
       addAccount: '添加账号',
       useAccount: '使用',
       removeAccount: '删除',
@@ -281,6 +313,7 @@ window.__ModuleLoader__.load({
       testFailed: '失败：{reason}',
       cooldown: '冷却至 {time}',
       resetCooldown: '解除冷却',
+      resetCooldownShort: '解除',
       usageSession: '当前会话',
       usageHeatmap: '近 14 天',
       usageTopModels: '模型用量',
@@ -454,12 +487,43 @@ window.__ModuleLoader__.load({
       secAccounts: 'Accounts',
       autoSwitch: 'Switch when out of credits',
       accountsHintPat: 'Add more than one PAT per provider; when the current account runs out, it switches automatically.',
-      accountsHintDesktop: 'Add desktop accounts with “Add account via browser login” above; an existing local sign-in is picked up automatically.',
+      accountsHintDesktop: 'Add desktop accounts with “Add account via browser login”; an existing local sign-in is picked up automatically.',
       accountLabel: 'Account name',
       accountPat: 'Paste a personal access token',
       accountAuthFile: 'Sign-in file path (blank = local sign-in)',
       accountSecretHint: 'Tokens stay in the local settings file and are never sent back to the browser.',
       accountDefaultLabel: 'New account',
+      accountColAccount: 'Account',
+      accountColCredits: 'Credits',
+      accountColStatus: 'Status / model',
+      accountColCheckin: 'Check-in',
+      accountColActions: 'Actions',
+      accountTableAria: 'Account credits, status and check-in',
+      accountsEmpty: 'No accounts yet. Add one below.',
+      accountFallback: 'Unnamed account',
+      accountDisabled: 'Disabled',
+      accountNoRequests: 'No requests yet',
+      accountModelShort: 'model {model}',
+      accountCooldownHint: 'back in ~{duration}',
+      accountCreditsExpiry: 'expires {date}',
+      accountNoExpiry: 'no expiry',
+      accountRateLimited: 'Rate limited',
+      accountAuthFailed: 'Sign-in expired',
+      accountTestFailed: 'Test failed',
+      accountCreditsExhausted: 'Out of credits',
+      accountAvailable: 'Available',
+      accountCheckinOff: 'Off',
+      accountCheckinNone: '—',
+      accountCheckinFailed: 'Failed',
+      accountCheckinSkipped: 'Signed out',
+      accountCheckinNoActivity: 'No activity',
+      accountCheckinDone: 'Checked in',
+      accountCheckinCredit: '+{credit}',
+      accountCheckinStreak: '{days}-day streak',
+      agoJustNow: 'just now',
+      agoMinutes: '{count}m ago',
+      agoHours: '{count}h ago',
+      agoDays: '{count}d ago',
       addAccount: 'Add account',
       useAccount: 'Use',
       removeAccount: 'Remove',
@@ -564,6 +628,7 @@ window.__ModuleLoader__.load({
       testFailed: 'Failed: {reason}',
       cooldown: 'Cooling down until {time}',
       resetCooldown: 'Clear cooldown',
+      resetCooldownShort: 'Clear',
       usageSession: 'This session',
       usageHeatmap: 'Last 14 days',
       usageTopModels: 'Model usage',
@@ -1124,6 +1189,8 @@ window.__ModuleLoader__.load({
     // 小字可读性：≤12.5px 的说明文字统一用 label-secondary（亮色 #61666b ≈ 5.9:1），
     // 不再用 label-tertiary（亮色 #81858c ≈ 3.6:1）叠 opacity —— 后者在亮色主题下
     // 连 4.5:1 都不到，叠到 .5 只有 2~3:1。层级靠 secondary vs primary 区分。
+    /** 账号表格列宽：账号 / 积分 / 状态 / 签到 / 操作。 */
+    var ACCOUNT_COLUMNS = 'minmax(118px, 1.1fr) 108px minmax(150px, 1.5fr) 86px auto'
     var S = {
       card: {
         border: '0.5px solid var(--dsw-alias-border-l2)',
@@ -1190,6 +1257,15 @@ window.__ModuleLoader__.load({
         color: 'var(--dsh-rpc-warn, #9d5c00)',
         whiteSpace: 'nowrap',
       },
+      badgeError: {
+        fontSize: TEXT.tiny,
+        lineHeight: '18px',
+        padding: '0 7px',
+        borderRadius: 999,
+        border: '0.5px solid var(--dsw-alias-state-error-primary, #b3261e)',
+        color: 'var(--dsw-alias-state-error-primary, #b3261e)',
+        whiteSpace: 'nowrap',
+      },
       badgeSoft: {
         fontSize: TEXT.tiny,
         lineHeight: '18px',
@@ -1252,6 +1328,19 @@ window.__ModuleLoader__.load({
         whiteSpace: 'nowrap',
         flex: '0 0 auto',
       },
+      linkButton: {
+        font: 'inherit',
+        fontSize: TEXT.tiny,
+        lineHeight: '16px',
+        padding: 0,
+        border: 0,
+        background: 'transparent',
+        cursor: 'pointer',
+        color: 'var(--dsw-alias-link, var(--dsw-alias-state-business-primary, #2f6fed))',
+        textDecoration: 'underline',
+        whiteSpace: 'nowrap',
+        flex: '0 0 auto',
+      },
 
       // 输入
       field: { display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 },
@@ -1300,6 +1389,45 @@ window.__ModuleLoader__.load({
         whiteSpace: 'nowrap',
       },
 
+      // 账号表格：固定列宽让「积分 / 状态 / 签到」在纵向对齐，扫一眼就能比较。
+      accountTableScroll: { overflowX: 'auto', maxWidth: '100%' },
+      accountTable: {
+        minWidth: 680,
+        border: '0.5px solid var(--dsw-alias-border-l2)',
+        borderRadius: 10,
+        overflow: 'hidden',
+        background: 'var(--dsw-alias-bg-layer-1, transparent)',
+      },
+      accountTableHead: {
+        display: 'grid',
+        gridTemplateColumns: ACCOUNT_COLUMNS,
+        alignItems: 'center',
+        gap: 10,
+        padding: '7px 12px',
+        background: 'rgba(127,127,127,.10)',
+        borderBottom: '0.5px solid var(--dsw-alias-border-l2)',
+        fontSize: TEXT.tiny,
+        fontWeight: 600,
+        letterSpacing: '.04em',
+        color: 'var(--dsw-alias-label-secondary)',
+      },
+      accountRow: {
+        display: 'grid',
+        gridTemplateColumns: ACCOUNT_COLUMNS,
+        alignItems: 'start',
+        gap: 10,
+        padding: '9px 12px',
+        minWidth: 0,
+      },
+      accountRowDivider: { borderTop: '0.5px solid var(--dsw-alias-border-l2)' },
+      accountRowActive: {
+        background: 'var(--dsh-rpc-fill, rgba(127,127,127,.05))',
+        boxShadow: 'inset 2px 0 0 var(--dsw-alias-state-business-primary, #2f6fed)',
+      },
+      accountCell: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 },
+      accountNameRow: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
+      accountActions: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' },
+
       // 标签页：改成胶囊分段，比下划线更贴合宿主的圆角风格
       tabs: { display: 'flex', gap: 4, flexWrap: 'wrap' },
 
@@ -1325,6 +1453,8 @@ window.__ModuleLoader__.load({
 
     var DOT_OK = 'var(--dsw-alias-state-success-primary, #1a8f5f)'
     var DOT_OFF = 'var(--dsh-rpc-warn, #9d5c00)'
+    // 账号表里的「非当前账号」不是警告：用中性灰，避免整列看起来都在出问题。
+    var DOT_IDLE = 'var(--dsw-alias-label-secondary)'
 
     function tabStyle(active) {
       return {
@@ -1418,6 +1548,167 @@ window.__ModuleLoader__.load({
       var now = new Date()
       var prefix = date.getFullYear() === now.getFullYear() ? '' : String(date.getFullYear()) + '/'
       return prefix + String(date.getMonth() + 1) + '/' + String(date.getDate())
+    }
+
+    /** 相对时间：刚刚 / N 分钟前 / N 小时前 / N 天前；超过一周回短日期。 */
+    function formatAgo(ms, t) {
+      if (!isFiniteNumber(ms) || ms <= 0) return '—'
+      var diff = Date.now() - ms
+      if (!Number.isFinite(diff)) return '—'
+      if (diff < 0) diff = 0
+      var minute = 60_000
+      var hour = 60 * minute
+      var day = 24 * hour
+      if (diff < minute) return bind(t, 'agoJustNow')
+      if (diff < hour) return bind(t, 'agoMinutes', { count: Math.max(1, Math.floor(diff / minute)) })
+      if (diff < day) return bind(t, 'agoHours', { count: Math.max(1, Math.floor(diff / hour)) })
+      if (diff < 7 * day) return bind(t, 'agoDays', { count: Math.max(1, Math.floor(diff / day)) })
+      return formatShortDate(ms)
+    }
+
+    /** 额度到期：M/D HH:mm（额度通常在本年内到期，跨年不额外带年份）。 */
+    function formatMonthDayTime(ms) {
+      var full = formatTime(ms)
+      if (full === '—') return '—'
+      return full.slice(5, 10).replace('-', '/') + ' ' + full.slice(11, 16)
+    }
+
+    /** 状态色调：成功 / 警示 / 失败 / 中性。 */
+    function toneColor(tone) {
+      if (tone === 'ok') return 'var(--dsw-alias-state-success-primary, #1a8f5f)'
+      if (tone === 'warn') return 'var(--dsh-rpc-warn, #9d5c00)'
+      if (tone === 'error') return 'var(--dsw-alias-state-error-primary, #b3261e)'
+      return 'var(--dsw-alias-label-secondary)'
+    }
+
+    /** 账号来源的短文案（表格第二行没有用量时用它填位）。 */
+    function accountSourceText(account, t) {
+      var source = typeof account.source === 'string' ? account.source : ''
+      if (source === 'browser-login') return bind(t, 'accountSourceBrowser')
+      if (source === 'pat') return bind(t, 'accountSourcePat')
+      if (source === 'desktop') return bind(t, 'accountSourceDesktop')
+      return ''
+    }
+
+    /**
+     * 账号行的「状态 / 模型」列。
+     *
+     * 判断顺序与真实使用一致：未启用 → 未登录 → 冷却中 → 最近测试失败 →
+     * 额度用尽 → 可用。冷却中的账号即使 lastTest 成功也先显示冷却，因为
+     * 自动换号会跳过它。
+     */
+    function accountStatusOf(account, provider, t) {
+      var now = Date.now()
+      var lastTest = account.lastTest !== null && typeof account.lastTest === 'object' ? account.lastTest : undefined
+      var code = lastTest !== undefined && typeof lastTest.code === 'string' ? lastTest.code : ''
+      var model = lastTest !== undefined && typeof lastTest.model === 'string' && lastTest.model !== ''
+        ? lastTest.model
+        : (account.active === true && provider.usage !== null && typeof provider.usage === 'object'
+          && provider.usage.last !== null && typeof provider.usage.last === 'object'
+          && typeof provider.usage.last.model === 'string' && provider.usage.last.model !== ''
+          ? provider.usage.last.model
+          : undefined)
+      var usageAt = account.usage !== null && typeof account.usage === 'object'
+        && isFiniteNumber(account.usage.lastAt) && account.usage.lastAt > 0
+        ? account.usage.lastAt
+        : undefined
+      var at = lastTest !== undefined && isFiniteNumber(lastTest.at) && lastTest.at > 0 ? lastTest.at : usageAt
+      var detailParts = []
+      if (at !== undefined) detailParts.push(formatAgo(at, t))
+      if (model !== undefined) detailParts.push(bind(t, 'accountModelShort', { model: model }))
+      var detail = detailParts.length > 0 ? detailParts.join(' · ') : bind(t, 'accountNoRequests')
+      var title = lastTest !== undefined && typeof lastTest.error === 'string' ? lastTest.error : ''
+
+      if (account.enabled === false) {
+        return { label: bind(t, 'accountDisabled'), tone: 'muted', detail: detail, title: title }
+      }
+      if (account.configured === false) {
+        return { label: bind(t, 'accountCheckinSkipped'), tone: 'muted', detail: detail, title: title }
+      }
+      if (isFiniteNumber(account.cooldownUntil) && account.cooldownUntil > now) {
+        var left = account.cooldownUntil - now
+        var limitCode = code === 'RATE_LIMIT' || code === 'QUOTA'
+        return {
+          label: bind(t, 'cooldown', { time: formatShortTime(account.cooldownUntil) }),
+          tone: 'warn',
+          badge: limitCode ? bind(t, 'limitBadge') : undefined,
+          detail: bind(t, 'accountCooldownHint', { duration: formatCompactDuration(left) })
+            + (model === undefined ? '' : ' · ' + model),
+          title: title,
+        }
+      }
+      if (lastTest !== undefined && lastTest.ok === false) {
+        var limit = code === 'RATE_LIMIT' || code === 'QUOTA'
+        var auth = code === 'AUTH' || code === 'NO_ACCOUNT'
+        return {
+          label: bind(t, limit ? 'accountRateLimited' : auth ? 'accountAuthFailed' : 'accountTestFailed'),
+          tone: limit ? 'warn' : 'error',
+          badge: limit ? bind(t, 'limitBadge') : auth ? bind(t, 'authBadge') : undefined,
+          detail: detail,
+          title: title,
+        }
+      }
+      var credits = account.credits
+      if (credits !== undefined && credits !== null && credits.state === 'ok'
+        && credits.unlimited !== true && isFiniteNumber(credits.remain) && credits.remain <= 0
+        && !isQoderFreePlan(provider.provider, credits)) {
+        return {
+          label: bind(t, 'accountCreditsExhausted'),
+          tone: 'error',
+          detail: detail,
+          title: isFiniteNumber(credits.resetAtMs) && credits.resetAtMs > 0
+            ? bind(t, 'accountCreditsExpiry', { date: formatMonthDayTime(credits.resetAtMs) })
+            : '',
+        }
+      }
+      return { label: bind(t, 'accountAvailable'), tone: 'ok', detail: detail, title: title }
+    }
+
+    /** 账号行的签到单元格：优先按 accountId 对上本次签到结果。 */
+    function accountCheckinOf(account, provider, t) {
+      var checkin = provider.checkin
+      if (checkin === null || checkin === undefined || typeof checkin !== 'object') {
+        return { label: bind(t, 'accountCheckinNone'), tone: 'muted' }
+      }
+      if (checkin.enabled === false) return { label: bind(t, 'accountCheckinOff'), tone: 'muted' }
+      var result = checkin.result !== null && typeof checkin.result === 'object' ? checkin.result : undefined
+      var outcomes = result === undefined ? [] : safeArray(result.outcomes)
+      var outcome = outcomes.find(function (item) { return item.accountId === account.id })
+        || outcomes.find(function (item) { return item.accountId === undefined && item.label === account.label })
+      if (outcome === undefined) {
+        return {
+          label: bind(t, account.configured === false ? 'accountCheckinSkipped' : 'accountCheckinNone'),
+          tone: 'muted',
+        }
+      }
+      var title = typeof outcome.message === 'string' && outcome.message !== '' ? outcome.message : ''
+      if (typeof outcome.activityName === 'string' && outcome.activityName !== '') {
+        title = title === '' ? outcome.activityName : title + ' · ' + outcome.activityName
+      }
+      if (outcome.kind === 'claimed') {
+        return {
+          label: bind(t, 'accountCheckinDone'),
+          tone: 'ok',
+          detail: isFiniteNumber(outcome.credit) && outcome.credit > 0
+            ? bind(t, 'accountCheckinCredit', { credit: formatNumber(outcome.credit) })
+            : undefined,
+          title: title,
+        }
+      }
+      if (outcome.kind === 'already') {
+        return {
+          label: bind(t, 'accountCheckinDone'),
+          tone: 'ok',
+          detail: isFiniteNumber(outcome.streakDays) && outcome.streakDays > 0
+            ? bind(t, 'accountCheckinStreak', { days: formatNumber(outcome.streakDays) })
+            : undefined,
+          title: title,
+        }
+      }
+      if (outcome.kind === 'inactive') return { label: bind(t, 'accountCheckinNoActivity'), tone: 'muted', title: title }
+      if (outcome.kind === 'failed') return { label: bind(t, 'accountCheckinFailed'), tone: 'error', title: title }
+      if (outcome.kind === 'unconfigured') return { label: bind(t, 'accountCheckinSkipped'), tone: 'muted', title: title }
+      return { label: bind(t, 'accountCheckinNone'), tone: 'muted', title: title }
     }
 
     function formatWindow(tokens) {
@@ -2644,104 +2935,232 @@ window.__ModuleLoader__.load({
       var accountItems = accountRows.map(function (account, index) {
         var snapshot = account.credits || { state: 'none' }
         var cooling = isFiniteNumber(account.cooldownUntil) && account.cooldownUntil > Date.now()
-        var lastTest = account.lastTest
         var testKey = 'test:' + account.id
         var resetKey = 'reset:' + account.id
-        return h('li', {
-          key: account.id,
-          style: Object.assign({}, S.modelRow, { flexWrap: 'wrap' }, index > 0 ? S.modelRowDivider : {}),
+        var status = accountStatusOf(account, active, t)
+        var checkinCell = accountCheckinOf(account, active, t)
+        var parts = creditsValueParts(snapshot, t)
+        var freePlan = isQoderFreePlan(active.provider, snapshot)
+        var creditsBig = freePlan ? bind(t, 'creditsFree') : parts.big
+        var creditsSub = freePlan ? '' : parts.small
+        var creditsExpiry = ''
+        if (freePlan) {
+          creditsExpiry = bind(t, 'creditsFreeQueue')
+        } else if (snapshot.state === 'ok') {
+          creditsExpiry = isFiniteNumber(snapshot.resetAtMs) && snapshot.resetAtMs > 0
+            ? bind(t, 'accountCreditsExpiry', { date: formatMonthDayTime(snapshot.resetAtMs) })
+            : bind(t, 'accountNoExpiry')
+        }
+        var creditsAlert = alertOfCredits(snapshot, alertRatio, active.provider, alertsEnabled)
+        var creditsColor = freePlan
+          ? toneColor('ok')
+          : snapshot.state === 'none'
+            ? 'var(--dsw-alias-label-secondary)'
+            : snapshot.state === 'error'
+              ? toneColor('error')
+              : creditsAlert === undefined
+                ? 'var(--dsw-alias-label-primary)'
+                : toneColor(creditsAlert === 'exhausted' ? 'error' : 'warn')
+        var accountLabel = typeof account.label === 'string' && account.label !== ''
+          ? account.label
+          : bind(t, 'accountFallback')
+        var usage = account.usage !== null && typeof account.usage === 'object' ? account.usage : undefined
+        var usageMeta = usage !== undefined && (usage.requests || 0) > 0
+          ? formatNumber(usage.requests || 0) + ' ' + bind(t, 'usageCalls') + ' · '
+            + compactTokens(usage.totalTokens || 0) + ' ' + bind(t, 'usageTokenShort')
+          : accountSourceText(account, t)
+        var accountCell = h('div', { key: 'who', role: 'cell', style: S.accountCell },
+          h('div', { key: 'name', style: S.accountNameRow },
+            h('span', {
+              style: dot(account.active ? DOT_OK : DOT_IDLE),
+              title: account.active ? bind(t, 'currentAccount') : '',
+            }),
+            h('span', {
+              style: Object.assign({}, S.modelName, { fontWeight: account.active ? 600 : 400 }),
+              title: accountLabel,
+            }, accountLabel),
+            account.active ? h('span', { key: 'current', style: S.badgeSoft }, bind(t, 'currentAccount')) : null),
+          usageMeta === ''
+            ? null
+            : h('span', {
+                key: 'usage',
+                style: Object.assign({}, S.modelMeta, { overflow: 'hidden', textOverflow: 'ellipsis' }),
+                title: usage !== undefined && (usage.requests || 0) > 0
+                  ? bind(t, 'usageTokenShort') + ' ' + formatNumber(usage.totalTokens || 0)
+                  : usageMeta,
+              }, usageMeta))
+
+        var creditsCell = h('div', {
+          key: 'credits',
+          role: 'cell',
+          style: S.accountCell,
+          title: freePlan ? bind(t, 'creditsFreeQueue') : formatCreditsText(snapshot, t),
+        },
+        h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 4, minWidth: 0 } },
+          h('span', {
+            style: {
+              fontSize: 18,
+              lineHeight: '22px',
+              fontWeight: 600,
+              fontVariantNumeric: 'tabular-nums',
+              color: creditsColor,
+              opacity: snapshot.stale === true ? 0.65 : 1,
+            },
+          }, creditsBig),
+          creditsSub === ''
+            ? null
+            : h('span', { style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, creditsSub)),
+        creditsExpiry === ''
+          ? null
+          : h('span', {
+              style: {
+                fontSize: 10.5,
+                lineHeight: '15px',
+                color: 'var(--dsw-alias-label-secondary)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              },
+              title: creditsExpiry,
+            }, creditsExpiry))
+
+        var statusCell = h('div', {
+          key: 'status',
+          role: 'cell',
+          style: S.accountCell,
+          title: status.title === '' ? undefined : status.title,
+        },
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flexWrap: 'wrap' } },
+          h('span', {
+            style: { fontSize: TEXT.body, fontWeight: 500, color: toneColor(status.tone), whiteSpace: 'nowrap' },
+          }, status.label),
+          status.badge === undefined
+            ? null
+            : h('span', {
+                key: 'badge',
+                style: status.tone === 'error' ? S.badgeError : S.badgeWarn,
+              }, status.badge),
+          cooling
+            ? h('button', {
+                key: 'reset',
+                type: 'button',
+                style: S.linkButton,
+                disabled: isBusy(resetKey),
+                onClick: function () { resetCooldown(active.provider, account.id) },
+              }, bind(t, 'resetCooldownShort'))
+            : null),
+        h('span', {
+          style: {
+            fontSize: 10.5,
+            lineHeight: '15px',
+            color: 'var(--dsw-alias-label-secondary)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          },
+          title: status.detail,
+        }, status.detail))
+
+        var checkinTone = checkinCell.tone
+        var checkinCellNode = h('div', {
+          key: 'checkin',
+          role: 'cell',
+          style: S.accountCell,
+          title: checkinCell.title === undefined || checkinCell.title === '' ? undefined : checkinCell.title,
         },
         h('span', {
-          style: dot(account.active ? DOT_OK : DOT_OFF),
-          title: account.active ? bind(t, 'currentAccount') : '',
-        }),
-        h('span', {
-          style: Object.assign({}, S.modelName, { fontWeight: account.active ? 600 : 400 }),
-          title: account.label,
-        }, account.label),
-        account.active ? h('span', { style: S.badgeSoft }, bind(t, 'currentAccount')) : null,
-        // 每个账号自己的累计用量：即使「账号 × 模型」里没有历史交叉拆分，
-        // 也能先看到这个账号一共发了多少请求、用了多少 token。
-        account.usage !== undefined && account.usage !== null && (account.usage.requests || 0) > 0
-          ? h('span', {
-              style: Object.assign({}, S.modelMeta, { whiteSpace: 'nowrap' }),
-              title: bind(t, 'usageTokenShort') + ' ' + formatNumber(account.usage.totalTokens || 0),
-            }, formatNumber(account.usage.requests || 0) + ' ' + bind(t, 'usageCalls') + ' · '
-              + compactTokens(account.usage.totalTokens || 0) + ' ' + bind(t, 'usageTokenShort'))
-          : null,
-        cooling
-          ? h('span', {
-              style: S.badgeWarn,
-              title: bind(t, 'cooldown', { time: formatTime(account.cooldownUntil) }),
-            }, bind(t, 'cooldown', { time: formatShortTime(account.cooldownUntil) }))
-          : null,
-        h('span', { style: S.grow }),
-        lastTest !== undefined && lastTest !== null
-          ? h('span', {
-              style: Object.assign({}, S.modelMeta, { color: lastTest.ok ? healthColor('ok') : healthColor('degraded') }),
-              title: lastTest.error === undefined ? '' : String(lastTest.error),
-            }, lastTest.ok
-              ? bind(t, 'testOk', { ms: formatLatency(lastTest.latencyMs) })
-              : bind(t, 'testFailed', { reason: shortErrorMessage(lastTest.error, t) }))
-          : null,
-        h('span', { style: S.modelMeta }, creditsText(snapshot)),
-        cooling
-          ? h('button', {
-              type: 'button',
-              style: S.buttonGhost,
-              disabled: isBusy(resetKey),
-              onClick: function () { resetCooldown(active.provider, account.id) },
-            }, bind(t, 'resetCooldown'))
-          : null,
-        h('button', {
+          style: {
+            fontSize: TEXT.body,
+            color: toneColor(checkinTone),
+            fontWeight: checkinTone === 'ok' ? 500 : 400,
+            whiteSpace: 'nowrap',
+          },
+        }, checkinCell.label),
+        checkinCell.detail === undefined
+          ? null
+          : h('span', {
+              style: { fontSize: 10.5, lineHeight: '15px', color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' },
+            }, checkinCell.detail))
+
+        var actionButtons = []
+        if (account.active !== true) {
+          actionButtons.push(h('button', {
+            key: 'use',
+            type: 'button',
+            style: Object.assign({}, S.buttonGhost, {
+              color: 'var(--dsw-alias-state-business-primary, #2f6fed)',
+              borderColor: 'var(--dsw-alias-state-business-primary, #2f6fed)',
+            }, account.configured === false ? { opacity: 0.55 } : {}),
+            disabled: isBusy('save') || account.configured === false,
+            title: account.configured === false ? bind(t, 'creditsNeedLogin') : undefined,
+            onClick: function () {
+              var patch = { activeAccount: {} }
+              patch.activeAccount[active.provider] = account.id
+              mutate(patch)
+            },
+          }, bind(t, 'useAccount')))
+        }
+        actionButtons.push(h('button', {
+          key: 'test',
           type: 'button',
           style: S.buttonGhost,
           disabled: isBusy(testKey),
           title: bind(t, 'testAccount'),
           onClick: function () { testAccount(active.provider, account.id) },
-        }, isBusy(testKey) ? bind(t, 'testing') : bind(t, 'testAccount')),
-        account.active
-          ? null
-          : h('button', {
-              type: 'button',
-              style: S.buttonGhost,
-              disabled: isBusy('save'),
-              onClick: function () {
-                var patch = { activeAccount: {} }
-                patch.activeAccount[active.provider] = account.id
-                mutate(patch)
-              },
-            }, bind(t, 'useAccount')),
-        accountRows.length > 1
-          ? h('button', {
-              type: 'button',
-              style: Object.assign({}, S.buttonGhost, deleteConfirm === account.id
-                ? { color: 'var(--dsw-alias-state-error-primary, #b3261e)', borderColor: 'var(--dsw-alias-state-error-primary, #b3261e)' }
-                : {}),
-              disabled: isBusy('save'),
-              // 多账号时多个按钮都叫「删除」，用 aria-label/title 带上账号名，读屏与悬停都不混淆。
-              'aria-label': bind(t, 'removeAccountAria', { name: account.label }),
-              title: bind(t, 'removeAccountAria', { name: account.label }),
-              onClick: function () {
-                if (deleteConfirm !== account.id) {
-                  armDeleteConfirm(account.id)
-                  return
-                }
-                clearDeleteConfirm()
-                // 删除用显式 id，而不是回传一个「少了这一条」的列表：
-                // 列表可能是轮询前的旧快照，整表覆盖会把刚登录的账号一起冲掉。
-                var remaining = accountRows.filter(function (row) { return row.id !== account.id })
-                var patch = { removedAccounts: {} }
-                patch.removedAccounts[active.provider] = [account.id]
-                if (account.active === true && remaining.length > 0) {
-                  patch.activeAccount = {}
-                  patch.activeAccount[active.provider] = remaining[0].id
-                }
-                mutate(patch)
-              },
-            }, deleteConfirm === account.id ? bind(t, 'removeConfirm') : bind(t, 'removeAccount'))
-          : null)
+        }, isBusy(testKey) ? bind(t, 'testing') : bind(t, 'testAccount')))
+        if (accountRows.length > 1) {
+          actionButtons.push(h('button', {
+            key: 'remove',
+            type: 'button',
+            style: Object.assign({}, S.buttonGhost, deleteConfirm === account.id
+              ? { color: 'var(--dsw-alias-state-error-primary, #b3261e)', borderColor: 'var(--dsw-alias-state-error-primary, #b3261e)' }
+              : {}),
+            disabled: isBusy('save'),
+            // 多账号时多个按钮都叫「删除」，用 aria-label/title 带上账号名，读屏与悬停都不混淆。
+            'aria-label': bind(t, 'removeAccountAria', { name: accountLabel }),
+            title: bind(t, 'removeAccountAria', { name: accountLabel }),
+            onClick: function () {
+              if (deleteConfirm !== account.id) {
+                armDeleteConfirm(account.id)
+                return
+              }
+              clearDeleteConfirm()
+              // 删除用显式 id，而不是回传一个「少了这一条」的列表：
+              // 列表可能是轮询前的旧快照，整表覆盖会把刚登录的账号一起冲掉。
+              var remaining = accountRows.filter(function (row) { return row.id !== account.id })
+              var patch = { removedAccounts: {} }
+              patch.removedAccounts[active.provider] = [account.id]
+              if (account.active === true && remaining.length > 0) {
+                patch.activeAccount = {}
+                patch.activeAccount[active.provider] = remaining[0].id
+              }
+              mutate(patch)
+            },
+          }, deleteConfirm === account.id ? bind(t, 'removeConfirm') : bind(t, 'removeAccount')))
+        }
+        var actionsCell = h('div', { key: 'actions', role: 'cell', style: S.accountActions }, ...actionButtons)
+
+        return h('div', {
+          key: account.id,
+          role: 'row',
+          style: Object.assign({}, S.accountRow, index > 0 ? S.accountRowDivider : {}, account.active === true ? S.accountRowActive : {}),
+        }, accountCell, creditsCell, statusCell, checkinCellNode, actionsCell)
       })
+
+      var accountTableHead = h('div', { key: 'head', role: 'row', style: S.accountTableHead },
+        h('span', { role: 'columnheader' }, bind(t, 'accountColAccount')),
+        h('span', { role: 'columnheader' }, bind(t, 'accountColCredits')),
+        h('span', { role: 'columnheader' }, bind(t, 'accountColStatus')),
+        h('span', { role: 'columnheader' }, bind(t, 'accountColCheckin')),
+        h('span', { role: 'columnheader', style: { textAlign: 'right' } }, bind(t, 'accountColActions')))
+      var accountTable = accountRows.length === 0
+        ? h('p', { key: 'empty', style: S.hintTiny }, bind(t, 'accountsEmpty'))
+        : h('div', { key: 'scroll', style: S.accountTableScroll },
+            h('div', {
+              role: 'table',
+              'aria-label': bind(t, 'accountTableAria'),
+              style: S.accountTable,
+            }, accountTableHead, ...accountItems))
 
       var addAccount = function () {
         // 保存请求在飞时再点一次会创建两个同密钥账号（旧代码的 disabled
@@ -2844,6 +3263,7 @@ window.__ModuleLoader__.load({
               ? h('span', { style: S.modelMeta }, bind(t, 'checkinLastAt', { time: formatTime(checkin.lastRunAt) }))
               : null),
           h('p', { key: 'checkinhint', style: S.hintTiny }, bind(t, 'checkinAutoHint')),
+          accountTable,
           h('p', { key: 'hint', style: S.hintTiny }, bind(t, isPatProvider ? 'accountsHintPat' : 'accountsHintDesktop')),
           // 桌面 provider：一键打开 App 登录，登录成功后自动导入账号。
           isPatProvider
@@ -2875,7 +3295,6 @@ window.__ModuleLoader__.load({
                       onClick: function () { cancelLogin(active.provider) },
                     }, bind(t, 'loginCancel'))
                   : null),
-          h('ul', { key: 'list', style: S.modelList }, accountItems),
           // 桌面 provider 的新增账号只有「浏览器登录」这一条路 —— 手动填登录文件
           // 路径既容易和本机自动发现重复，也会让用户以为需要自己找文件。
           // Qoder 没有浏览器登录，仍然保留「名称 + PAT」的手动添加。
