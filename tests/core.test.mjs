@@ -415,6 +415,26 @@ test('OpenAI SSE：finish_reason 之后的 usage 不会丢失，finish 永远在
   assert.equal(events[2].kind, 'stop')
 })
 
+test('OpenAI SSE：chunk 里的 "error": null 不是错误，不能被当成流内失败', async () => {
+  // 有些 OpenAI 兼容网关在**每一帧**里都带 `"error": null`（正常响应）。
+  // JSON 语义上 null 就是「没有错误」，但旧判断只写 `!== undefined`，
+  // 于是正常回答被整条判成 SERVER 失败。Qoder 那一侧的同名判断早就判了 null。
+  const encoder = new TextEncoder()
+  const body = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"hi"}}],"error":null}\n\n'))
+      controller.enqueue(encoder.encode('data: {"choices":[{"delta":{},"finish_reason":"stop"}],"error":null}\n\n'))
+      controller.enqueue(encoder.encode('data: [DONE]\n\n'))
+      controller.close()
+    },
+  })
+  const events = []
+  for await (const event of parseOpenAiSse(body)) events.push(event)
+  assert.deepEqual(events.map((event) => event.type), ['text', 'finish'])
+  assert.equal(events[0].text, 'hi')
+  assert.equal(events[1].kind, 'stop')
+})
+
 test('Qoder SSE：finish_reason 之后的 usage 不会丢，finish 永远在最后且只出现一次', async () => {
   const encoder = new TextEncoder()
   const inner = (value) => `data: ${JSON.stringify({ statusCodeValue: 200, body: JSON.stringify(value) })}\n\n`

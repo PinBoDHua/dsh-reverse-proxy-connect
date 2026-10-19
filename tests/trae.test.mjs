@@ -187,6 +187,39 @@ test('Trae：needsRefresh 按 1 天余量判断，缺过期时间时视为要续
   assert.equal(needsRefresh(undefined, now), true)
 })
 
+test('Trae：续期返回 TokenExpireAt=0（字段缺省即 Go 零值）时，新令牌不能被记成「立刻过期」', async () => {
+  // 上游的 Result 是 Go 结构体：字段缺失时 TokenExpireAt 就是数字 0。
+  // 旧实现只判 `typeof === 'number'`，于是把刚换到的 7 天令牌记成 expiresAtMs=0；
+  // needsRefresh(0) 恒为 true，下一次凭证解析又会续期一次 —— 每个请求都打一次
+  // ExchangeToken 并写回一次设置。同一文件里的 generateTempToken 早就按 `> 0` 兜底。
+  const original = globalThis.fetch
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async text() {
+      return JSON.stringify({ Result: { Token: 'new-jwt', RefreshToken: 'new-refresh', TokenExpireAt: 0 } })
+    },
+  })
+  try {
+    const refreshed = await exchangeRefreshToken('trae', 'refresh-token', 'uid-1')
+    assert.equal(needsRefresh(refreshed.expiresAtMs), false, '刚续期成功就不该再判为需要续期')
+    assert.ok(refreshed.expiresAtMs > Date.now() + 6 * 24 * 3600_000, '缺省过期时间要按 7 天兜底')
+
+    // 字段整个缺失时行为必须一致（typeof undefined !== 'number' 已兜底，不能只修这一半）。
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({ Result: { Token: 'new-jwt', RefreshToken: 'new-refresh' } })
+      },
+    })
+    const missing = await exchangeRefreshToken('trae', 'refresh-token', 'uid-1')
+    assert.equal(needsRefresh(missing.expiresAtMs), false)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
 test('Trae：换令牌与续期都要求 ClientSecret，缺字段时上游判无效参数', async () => {
   // 这两条不真的打网络：只断言请求体形状（上游对形状很挑）。
   const original = globalThis.fetch
@@ -615,6 +648,38 @@ test('Trae：event:error 帧按 code 分类（1005 额度、3003 服务端）', 
   const server = ['event:error', 'data:{"code":3003,"message":"model service is unavailable"}', ''].join('\n')
   await assert.rejects(async () => {
     for await (const _event of parseStream(bodyOf(server), undefined)) {
+      /* 只关心抛错 */
+    }
+  }, (error) => error.kind === 'server')
+})
+
+test('Trae：event:error 帧缺 message 时仍然是失败，不能变成「成功的空回答」', async () => {
+  // 真实帧形状是 `event: error` + `data: {"code":1005}`：`message` 由上游按需给出，
+  // 1005 的 message 常常是空串（已在上一例覆盖），但字段**缺失**同样合法。
+  // 旧实现要求 `message !== undefined` 才认错误帧，于是整帧被静默丢掉：流以
+  // `finish: stop` 收场，runtime 只能把它归成 EMPTY_RESPONSE（见不到 1005/3003）。
+  const quota = ['event:error', 'data:{"code":1005}', '', 'event:done', 'data:{"finish_reason":"stop"}', ''].join('\n')
+  await assert.rejects(async () => {
+    for await (const _event of parseStream(bodyOf(quota), undefined)) {
+      /* 只关心抛错 */
+    }
+  }, (error) => error.kind === 'quota' && error.status === 402)
+
+  // 更糟的一种：错误帧出现在正文之后。旧实现会把已经吐出的半截回答当成正常结束
+  // （sawContent 已经是 true，runtime 不会再兜成 EMPTY_RESPONSE），统计记成功。
+  const afterContent = [
+    'event:output',
+    'data:{"response":"half"}',
+    '',
+    'event:error',
+    'data:{"code":3003}',
+    '',
+    'event:done',
+    'data:{}',
+    '',
+  ].join('\n')
+  await assert.rejects(async () => {
+    for await (const _event of parseStream(bodyOf(afterContent), undefined)) {
       /* 只关心抛错 */
     }
   }, (error) => error.kind === 'server')
