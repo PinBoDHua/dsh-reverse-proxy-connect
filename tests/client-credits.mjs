@@ -1963,19 +1963,26 @@ try {
 
 // 29) 时间格式化：无效/超范围时间戳绝不产出 "Invalid Date" 或 "NaN"（本轮修的坑）。
 {
-  const extract = (header) => {
+  const functionText = (header) => {
     const start = source.indexOf(header)
     if (start < 0) throw new Error(`client.js 里找不到 ${header}`)
-    const name = header.slice('function '.length, header.indexOf('('))
     let depth = 0
     let end = start
     for (let i = source.indexOf('{', start); i < source.length; i++) {
       if (source[i] === '{') depth++
       else if (source[i] === '}') { depth--; if (depth === 0) { end = i + 1; break } }
     }
-    return new Function(`${source.slice(start, end)}; return ${name}`)()
+    return source.slice(start, end)
   }
-  const fShortTime = extract('function formatShortTime(ms) {')
+  const extract = (header) => {
+    const name = header.slice('function '.length, header.indexOf('('))
+    return new Function(`${functionText(header)}; return ${name}`)()
+  }
+  // formatShortTime 跨天时会调用 formatTime；只抽它自己会让用例在「当天」通过、
+  // 第二天因 ReferenceError 失败。两个函数放进同一个作用域再测。
+  const fShortTime = new Function(
+    `${functionText('function formatTime(ms) {')}; ${functionText('function formatShortTime(ms) {')}; return formatShortTime`,
+  )()
   const fShortDate = extract('function formatShortDate(ms) {')
   const bad = [undefined, null, Number.NaN, Number.POSITIVE_INFINITY, 8.64e15 + 1, '2026-10-18', {}, true]
   for (const v of bad) {
