@@ -325,7 +325,7 @@ function provider(overrides) {
     health: { state: 'ok', consecutiveFailures: 0, lastErrorAt: 0, lastSuccessAt: NOW - 60000 },
     usage: { requests: 1013, ok: 1001, failed: 12, totalTokens: 1820034, avgDurationMs: 2400, successRate: 0.988,
       today: { requests: 1013, totalTokens: 18200 },
-      last: { at: NOW - 60000, model: 'deepseek-v4', kind: 'stop', durationMs: 1200, totalTokens: 120 } },
+      last: { at: NOW - 60000, accountId: 'default', model: 'deepseek-v4.1-flash', kind: 'stop', durationMs: 1200, totalTokens: 120 } },
     models: [],
     modelCount: 19,
     ...overrides,
@@ -335,7 +335,7 @@ function provider(overrides) {
 const STATUS = {
   version: 8,
   key: 'preview',
-  plugin: { name: 'dsh-reverse-proxy-connect', version: '0.4.3', host: 'in-process', api: 8, node: '24.0.0' },
+  plugin: { name: 'dsh-reverse-proxy-connect', version: '0.6.0', host: 'in-process', api: 8, node: '24.0.0' },
   host: { images: true, stats: true, catalogCache: true },
   probe: { enabled: true, lastRunAt: NOW - 300000, results: {} },
   settings: {
@@ -353,8 +353,12 @@ const STATUS = {
       credential: { status: 'signed-in', uid: 'u-1', source: 'desktop', message: '' },
       credits: { state: 'ok', remain: 735, total: 1300, unit: 'credits', planName: 'Pro', resetAtMs: NOW + 86400000, fetchedAt: NOW, items: [], trend: { sampleCount: 42, spentToday: 64, spent7d: 320, burnPerHour: 12, etaMs: 52 * 3600000, points: points(760, 24) } },
       accounts: [
-        { id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: true, source: 'desktop', credits: { state: 'ok', remain: 735, total: 1300, unit: 'credits', trend: { sampleCount: 42, spentToday: 64, points: points(760, 24) } } },
-        { id: 'acc-2', label: '浏览器登录 · 备用', active: false, kind: 'desktop', configured: true, source: 'browser-login', credits: { state: 'ok', remain: 52, total: 1300, unit: 'credits' }, cooldownUntil: NOW + 45000, lastTest: { ok: false, latencyMs: 380, error: 'HTTP 429' } },
+        { id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: true, source: 'desktop',
+          usage: { requests: 911, totalTokens: 303700000, lastAt: NOW - 2 * 3600000 },
+          credits: { state: 'ok', remain: 735, total: 1300, unit: 'credits', resetAtMs: NOW + 86400000, trend: { sampleCount: 42, spentToday: 64, points: points(760, 24) } } },
+        { id: 'acc-2', label: '风雪', active: false, kind: 'desktop', configured: true, source: 'browser-login',
+          usage: { requests: 1336, totalTokens: 401100000 },
+          credits: { state: 'ok', remain: 2336, total: 6700, unit: 'credits', resetAtMs: NOW + 11 * 86400000 }, cooldownUntil: NOW + 45000, lastTest: { ok: false, latencyMs: 380, error: 'HTTP 429' } },
       ],
       checkin: { enabled: true, lastRunAt: NOW - 4 * 3600000, result: { provider: 'workbuddy', claimed: 2, credit: 200, outcomes: [{ accountId: 'default', kind: 'claimed', credit: 100 }, { accountId: 'acc-2', kind: 'claimed', credit: 100 }] } },
       models: [
@@ -363,7 +367,7 @@ const STATUS = {
         { id: 'kimi-k3', name: 'Kimi-K3', contextWindow: 200000, maxTokens: 16384, supportsImages: false, reasoningEfforts: [], credits: 'x1.2', disabled: true },
       ],
       autoSwitch: true,
-      usage: { requests: 1013, ok: 1001, failed: 12, totalTokens: 1820034, avgDurationMs: 2400, successRate: 0.988, today: { requests: 1013, totalTokens: 18200 }, last: { at: NOW - 60000, model: 'deepseek-v4', kind: 'stop', durationMs: 1200, totalTokens: 120 } },
+      usage: { requests: 1013, ok: 1001, failed: 12, totalTokens: 1820034, avgDurationMs: 2400, successRate: 0.988, today: { requests: 1013, totalTokens: 18200 }, last: { at: NOW - 60000, accountId: 'default', model: 'deepseek-v4.1-flash', kind: 'stop', durationMs: 1200, totalTokens: 120 } },
     }),
     provider({
       provider: 'workbuddy-ai', displayName: 'WorkBuddy AI', enabled: true,
@@ -421,14 +425,17 @@ const STATUS = {
     providers: { workbuddy: { requests: 900, ok: 890, failed: 10, totalTokens: 1600000, avgDurationMs: 2400, successRate: 0.988 } },
     providerToday: { workbuddy: { requests: 900, totalTokens: 16000, date: '2026-10-19' } },
     accounts: { 'workbuddy::default': { requests: 800, totalTokens: 1400000, avgDurationMs: 2100 } },
-    models: { 'workbuddy::deepseek-v4': { requests: 800, totalTokens: 1400000, avgDurationMs: 2100 } },
+    models: {
+      'workbuddy::deepseek-v4.1-flash': { requests: 2246, totalTokens: 704773415, avgDurationMs: 6900 },
+      'workbuddy::hy3': { requests: 1, totalTokens: 109, avgDurationMs: 1400 },
+    },
     accountModels: {
-      'workbuddy::default::deepseek-v4': { provider: 'workbuddy', accountId: 'default', model: 'deepseek-v4', requests: 600, totalTokens: 1200000, avgDurationMs: 2100 },
-      'workbuddy::acc-2::deepseek-v4': { provider: 'workbuddy', accountId: 'acc-2', model: 'deepseek-v4', requests: 200, totalTokens: 200000, avgDurationMs: 2600 },
+      'workbuddy::default::deepseek-v4.1-flash': { provider: 'workbuddy', accountId: 'default', model: 'deepseek-v4.1-flash', requests: 1500, totalTokens: 400000000, avgDurationMs: 9800 },
+      'workbuddy::acc-2::deepseek-v4.1-flash': { provider: 'workbuddy', accountId: 'acc-2', model: 'deepseek-v4.1-flash', requests: 500, totalTokens: 150000000, avgDurationMs: 6000 },
     },
     accountModelToday: {
-      'workbuddy::default::deepseek-v4': { provider: 'workbuddy', accountId: 'default', model: 'deepseek-v4', requests: 60, totalTokens: 12000, avgDurationMs: 2100 },
-      'workbuddy::acc-2::deepseek-v4': { provider: 'workbuddy', accountId: 'acc-2', model: 'deepseek-v4', requests: 20, totalTokens: 2000, avgDurationMs: 2600 },
+      'workbuddy::default::deepseek-v4.1-flash': { provider: 'workbuddy', accountId: 'default', model: 'deepseek-v4.1-flash', requests: 744, totalTokens: 200794754, avgDurationMs: 10500 },
+      'workbuddy::acc-2::deepseek-v4.1-flash': { provider: 'workbuddy', accountId: 'acc-2', model: 'deepseek-v4.1-flash', requests: 269, totalTokens: 103725914, avgDurationMs: 5900 },
     },
     daily: [
       { date: '2026-10-13', requests: 88, totalTokens: 120000 },
@@ -449,8 +456,8 @@ const STATUS = {
     providerCurrentSession: { workbuddy: { id: 's-1', requests: 18, totalTokens: 52000, avgDurationMs: 2200, successRate: 1 } },
     health: { workbuddy: { state: 'ok' } },
     recent: [
-      { at: NOW - 60000, provider: 'workbuddy', accountId: 'default', model: 'deepseek-v4', kind: 'stop', durationMs: 1200, totalTokens: 120 },
-      { at: NOW - 300000, provider: 'workbuddy', accountId: 'default', model: 'deepseek-v4', kind: 'error', code: 'RATE_LIMIT', durationMs: 300, totalTokens: 0, message: 'HTTP 429 Too Many Requests' },
+      { at: NOW - 60000, provider: 'workbuddy', accountId: 'default', model: 'deepseek-v4.1-flash', kind: 'stop', durationMs: 1200, totalTokens: 120 },
+      { at: NOW - 300000, provider: 'workbuddy', accountId: 'default', model: 'deepseek-v4.1-flash', kind: 'error', code: 'RATE_LIMIT', durationMs: 300, totalTokens: 0, message: 'HTTP 429 Too Many Requests' },
     ],
   },
 }
@@ -469,6 +476,13 @@ const variants = [
   { name: 'qoder-global-overview', provider: 'qoder-global', page: '概览' },
   { name: 'trae-overview', provider: 'trae', page: '概览' },
   { name: 'overview-narrow', provider: 'workbuddy', page: '概览', width: 620 },
+  // 设置弹窗里的实际容器宽度约 470–500px：这两组变体专门盯窄屏表格。
+  { name: 'accounts-narrow', provider: 'workbuddy', page: '账号', width: 530 },
+  { name: 'usage-narrow', provider: 'workbuddy', page: '用量', width: 530 },
+  { name: 'accounts-mid', provider: 'workbuddy', page: '账号', width: 780 },
+  { name: 'usage-mid', provider: 'workbuddy', page: '用量', width: 780 },
+  { name: 'accounts-narrow-dark', provider: 'workbuddy', page: '账号', width: 530, dark: true },
+  { name: 'usage-narrow-dark', provider: 'workbuddy', page: '用量', width: 530, dark: true },
   { name: 'overview-dark', provider: 'workbuddy', page: '概览', dark: true },
 ]
 

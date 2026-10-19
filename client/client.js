@@ -292,6 +292,29 @@ window.__ModuleLoader__.load({
           '.rpc-mini-bar{display:block;height:3px;width:100%;max-width:104px;border-radius:999px;background:var(--rpc-surface-2);overflow:hidden;margin-top:3px}',
           '.rpc-mini-bar>i{display:block;height:100%;border-radius:inherit;opacity:.85}',
 
+          /* 账号表：宽容器是五列表格，窄容器（设置弹窗约 470–700px）改成
+             「身份+积分 / 状态 / 签到+操作」三段卡片。以前窄容器里表格固定
+             600px 宽，操作列直接掉到横向滚动外面，用户只能看到半个签到。 */
+          '.rpc-account-head,.rpc-account-row{grid-template-columns:minmax(108px,1.15fr) 96px minmax(140px,1.5fr) 84px 144px}',
+          '.rpc-account-row{grid-template-areas:"who credits status checkin actions"}',
+          '.rpc-acc-who{grid-area:who}',
+          '.rpc-acc-credits{grid-area:credits;align-items:flex-start}',
+          '.rpc-acc-status{grid-area:status}',
+          '.rpc-acc-checkin{grid-area:checkin}',
+          '.rpc-acc-actions{grid-area:actions}',
+          '.rpc-acc-credits-label{display:none;font-size:10px;line-height:14px;font-weight:650;letter-spacing:.05em;color:var(--rpc-faint)}',
+          '.rpc-acc-usage,.rpc-acc-expiry{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}',
+          /* 状态明细（「2 小时前 · 模型 xxx」）是用户判断账号在干什么的唯一线索，
+             宽屏也允许换行：截成「deepseek-v4.1-fl…」等于没显示。 */
+          '.rpc-acc-status-detail{display:flex;flex-wrap:wrap;align-items:baseline;column-gap:4px;row-gap:1px;white-space:normal;overflow:visible;text-overflow:clip}',
+          '.rpc-acc-detail-part{white-space:nowrap}',
+          '.rpc-acc-status-detail>.rpc-acc-detail-part:only-child{white-space:normal;overflow-wrap:anywhere}',
+
+          /* 用量表：表头与数据行共用 CSS 变量里的列模板；窄容器改成
+             带行内标签的列表，避免「平均耗时 / 状态」被切掉。 */
+          '.rpc-usage-head,.rpc-usage-row{display:grid;grid-template-columns:var(--rpc-cols);align-items:center;min-width:0}',
+          '.rpc-usage-label{display:none;margin-right:4px;font-size:10.5px;line-height:15px;font-weight:500;color:var(--rpc-faint)}',
+
           /* 列表 / 模型 / 事件 */
           '.rpc-list{border:1px solid var(--rpc-border);border-radius:12px;overflow:hidden;background:var(--rpc-bg);min-width:0}',
           '.rpc-list-row{display:flex;align-items:center;gap:9px;padding:9px 12px;min-width:0;font-size:13px;line-height:20px;',
@@ -394,6 +417,40 @@ window.__ModuleLoader__.load({
           '.rpc-pagenav{margin:12px 14px 0;max-width:calc(100% - 28px)}',
           '.rpc-page{padding:12px 14px 16px}.rpc-detail-head{padding:14px 14px 0}.rpc-banner{margin:0 14px}.rpc-footer{padding:9px 14px 12px}',
           '.rpc-kv{grid-template-columns:84px minmax(0,1fr)}}',
+          /* 设置弹窗（约 470–500px）与插件详情页（约 760px）走同一份组件：
+             730px 以下表格收起表头、改成卡片/列表，所有列都能完整读到。 */
+          '@container (max-width:730px){',
+          '.rpc-table-scroll{overflow:visible}',
+          '.rpc-account-head{display:none}',
+          '.rpc-account-table{min-width:0}',
+          '.rpc-account-row{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"who credits" "status checkin" "status actions";',
+          'column-gap:14px;row-gap:6px;padding:12px 14px}',
+          '.rpc-acc-credits{align-items:flex-end;text-align:right}',
+          '.rpc-acc-credits-label{display:inline}',
+          '.rpc-acc-usage,.rpc-acc-expiry{white-space:normal!important}',
+          '.rpc-acc-usage,.rpc-acc-status-detail,.rpc-acc-expiry{overflow:visible;text-overflow:clip;overflow-wrap:anywhere}',
+          '.rpc-acc-checkin{flex-direction:row!important;align-items:baseline!important;gap:6px;flex-wrap:wrap}',
+          '.rpc-acc-actions{justify-content:flex-end}',
+          '.rpc-acc-credits .rpc-mini-bar{margin-left:auto}',
+          '.rpc-usage-head{display:none}',
+          '.rpc-usage-frame{overflow:visible!important}',
+          '.rpc-usage-row.rpc-usage-models{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"model model model" "calls tokens avg";',
+          'column-gap:12px;row-gap:3px;padding:10px 12px}',
+          '.rpc-usage-row.rpc-usage-pairs{display:grid;grid-template-columns:auto minmax(0,1fr) auto;grid-template-areas:"account model status" "calls tokens avg";',
+          'column-gap:12px;row-gap:3px;padding:10px 12px}',
+          '.rpc-usage-models>span,.rpc-usage-pairs>span{padding:0!important}',
+          '.rpc-usage-label{display:inline}',
+          '.rpc-usage-model{grid-area:model;min-width:0}',
+          '.rpc-model-calls{grid-area:calls;text-align:left!important}',
+          '.rpc-model-tokens{grid-area:tokens;text-align:left!important}',
+          '.rpc-model-avg{grid-area:avg;text-align:right!important}',
+          '.rpc-pair-account{grid-area:account;max-width:140px;padding:1px 8px!important;border-radius:999px;background:var(--rpc-surface-2);color:var(--rpc-muted)!important}',
+          '.rpc-pair-model{grid-area:model;min-width:0}',
+          '.rpc-pair-calls{grid-area:calls;text-align:left!important}',
+          '.rpc-pair-tokens{grid-area:tokens;text-align:left!important}',
+          '.rpc-pair-avg{grid-area:avg;text-align:right!important}',
+          '.rpc-pair-status{grid-area:status;justify-self:end}',
+          '}',
           '@media (prefers-reduced-motion:reduce){.dsh-rpc *{animation:none!important;transition:none!important}}',
           '.dsh-rpc *::-webkit-scrollbar{width:8px;height:8px}',
           '.dsh-rpc *::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--rpc-faint) 35%,transparent);border-radius:999px}',
@@ -1880,8 +1937,6 @@ window.__ModuleLoader__.load({
     // 小字可读性：≤12.5px 的说明文字统一用 label-secondary（亮色 #61666b ≈ 5.9:1），
     // 不再用 label-tertiary（亮色 #81858c ≈ 3.6:1）叠 opacity —— 后者在亮色主题下
     // 连 4.5:1 都不到，叠到 .5 只有 2~3:1。层级靠 secondary vs primary 区分。
-    /** 账号表格列宽：账号 / 积分 / 状态 / 签到 / 操作。 */
-    var ACCOUNT_COLUMNS = 'minmax(108px, 1.2fr) 96px minmax(136px, 1.5fr) 78px auto'
     var S = {
       card: {
         display: 'flex',
@@ -2130,18 +2185,16 @@ window.__ModuleLoader__.load({
         whiteSpace: 'nowrap',
       },
 
-      // 账号表格：固定列宽让「积分 / 状态 / 签到」在纵向对齐，扫一眼就能比较。
-      accountTableScroll: { overflowX: 'auto', maxWidth: '100%' },
+      // 账号表格：宽容器保持五列（列宽在 CSS 里）；窄容器改成三段式卡片，
+      // 「操作 / 签到」不再掉到横向滚动外面。
+      accountTableScroll: { maxWidth: '100%' },
       accountTable: {
-        minWidth: 600,
         border: '1px solid var(--rpc-border, var(--dsw-alias-border-l2))',
         borderRadius: 12,
         overflow: 'hidden',
         background: 'var(--rpc-bg, transparent)',
       },
       accountTableHead: {
-        display: 'grid',
-        gridTemplateColumns: ACCOUNT_COLUMNS,
         alignItems: 'center',
         gap: 10,
         padding: '8px 13px',
@@ -2153,10 +2206,7 @@ window.__ModuleLoader__.load({
         color: 'var(--rpc-muted, var(--dsw-alias-label-secondary))',
       },
       accountRow: {
-        display: 'grid',
-        gridTemplateColumns: ACCOUNT_COLUMNS,
         alignItems: 'start',
-        gap: 10,
         padding: '12px 13px',
         minWidth: 0,
       },
@@ -4179,7 +4229,7 @@ window.__ModuleLoader__.load({
           ? formatNumber(usage.requests || 0) + ' ' + bind(t, 'usageCalls') + ' · '
             + compactTokens(usage.totalTokens || 0)
           : accountSourceText(account, t)
-        var accountCell = h('div', { key: 'who', role: 'cell', className: 'rpc-cell', style: S.accountCell },
+        var accountCell = h('div', { key: 'who', role: 'cell', className: 'rpc-cell rpc-acc-who', style: S.accountCell },
           h('div', { key: 'name', className: 'rpc-account-name', style: S.accountNameRow },
             h('span', {
               className: 'rpc-account-dot',
@@ -4195,8 +4245,8 @@ window.__ModuleLoader__.load({
             ? null
             : h('span', {
                 key: 'usage',
-                className: 'rpc-tiny',
-                style: Object.assign({}, S.modelMeta, { overflow: 'hidden', textOverflow: 'ellipsis' }),
+                className: 'rpc-tiny rpc-acc-usage',
+                style: S.modelMeta,
                 title: usage !== undefined && (usage.requests || 0) > 0
                   ? bind(t, 'usageTokenShort') + ' ' + formatNumber(usage.totalTokens || 0)
                   : usageMeta,
@@ -4205,11 +4255,14 @@ window.__ModuleLoader__.load({
         var creditsCell = h('div', {
           key: 'credits',
           role: 'cell',
-          className: 'rpc-cell',
+          className: 'rpc-cell rpc-acc-credits',
           style: S.accountCell,
           title: freePlan ? bind(t, 'creditsFreeQueue') : formatCreditsText(snapshot, t),
         },
+        // 表头在窄容器里隐藏了，这里补一个只在小屏出现的「积分」小标，
+        // 让 735 / 1,300 不至于变成两个没有上下文的数字。
         h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 4, minWidth: 0 } },
+          h('span', { key: 'label', className: 'rpc-acc-credits-label' }, bind(t, 'accountColCredits')),
           h('span', {
             style: {
               fontSize: 18,
@@ -4226,13 +4279,11 @@ window.__ModuleLoader__.load({
         creditsExpiry === ''
           ? null
           : h('span', {
+              className: 'rpc-acc-expiry',
               style: {
                 fontSize: 10.5,
                 lineHeight: '15px',
                 color: 'var(--dsw-alias-label-secondary)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
               },
               title: creditsExpiry,
             }, creditsExpiry),
@@ -4257,7 +4308,7 @@ window.__ModuleLoader__.load({
         var statusCell = h('div', {
           key: 'status',
           role: 'cell',
-          className: 'rpc-cell',
+          className: 'rpc-cell rpc-acc-status',
           style: S.accountCell,
           title: status.title === '' ? undefined : status.title,
         },
@@ -4281,22 +4332,30 @@ window.__ModuleLoader__.load({
               }, bind(t, 'resetCooldownShort'))
             : null),
         h('span', {
+          className: 'rpc-acc-status-detail',
           style: {
             fontSize: 10.5,
             lineHeight: '15px',
             color: 'var(--dsw-alias-label-secondary)',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
           },
           title: status.detail,
-        }, status.detail))
+        }, (function () {
+          // 把「2 小时前 · 模型 xxx」拆成可换行的两段：宽屏列窄时在「·」处
+          // 换行，而不是把模型名从中间劈成两半（deepseek-v4.1- / flash）。
+          var parts = String(status.detail).split(' · ')
+          return parts.map(function (part, index) {
+            return h('span', {
+              key: 'd' + index,
+              className: 'rpc-acc-detail-part',
+            }, index < parts.length - 1 ? part + ' ·' : part)
+          })
+        })()))
 
         var checkinTone = checkinCell.tone
         var checkinCellNode = h('div', {
           key: 'checkin',
           role: 'cell',
-          className: 'rpc-cell',
+          className: 'rpc-cell rpc-acc-checkin',
           style: S.accountCell,
           title: checkinCell.title === undefined || checkinCell.title === '' ? undefined : checkinCell.title,
         },
@@ -4311,6 +4370,7 @@ window.__ModuleLoader__.load({
         checkinCell.detail === undefined
           ? null
           : h('span', {
+              className: 'rpc-acc-checkin-detail',
               style: { fontSize: 10.5, lineHeight: '15px', color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' },
             }, checkinCell.detail))
 
@@ -4370,18 +4430,18 @@ window.__ModuleLoader__.load({
             },
           }, deleteConfirm === deleteConfirmKey ? bind(t, 'removeConfirm') : bind(t, 'removeAccount')))
         }
-        var actionsCell = h('div', { key: 'actions', role: 'cell', className: 'rpc-cell-actions', style: S.accountActions }, ...actionButtons)
+        var actionsCell = h('div', { key: 'actions', role: 'cell', className: 'rpc-cell-actions rpc-acc-actions', style: S.accountActions }, ...actionButtons)
 
         return h('div', {
           key: account.id,
           role: 'row',
-          className: 'rpc-table-row',
+          className: 'rpc-table-row rpc-account-row',
           'data-active': account.active === true ? 'true' : 'false',
           style: Object.assign({}, S.accountRow, index > 0 ? S.accountRowDivider : {}, account.active === true ? S.accountRowActive : {}),
         }, accountCell, creditsCell, statusCell, checkinCellNode, actionsCell)
       })
 
-      var accountTableHead = h('div', { key: 'head', role: 'row', className: 'rpc-table-head', style: S.accountTableHead },
+      var accountTableHead = h('div', { key: 'head', role: 'row', className: 'rpc-table-head rpc-account-head', style: S.accountTableHead },
         h('span', { role: 'columnheader' }, bind(t, 'accountColAccount')),
         h('span', { role: 'columnheader' }, bind(t, 'accountColCredits')),
         h('span', { role: 'columnheader' }, bind(t, 'accountColStatus')),
@@ -4393,7 +4453,7 @@ window.__ModuleLoader__.load({
             h('div', {
               role: 'table',
               'aria-label': bind(t, 'accountTableAria'),
-              className: 'rpc-table',
+              className: 'rpc-table rpc-account-table',
               style: S.accountTable,
             }, accountTableHead, ...accountItems))
 
@@ -5210,8 +5270,11 @@ window.__ModuleLoader__.load({
           usageBody.push(
             h('div', { key: 'topmodels', className: 'rpc-subsection' },
               h('span', { style: S.sectionTitle }, rpcIcon('cube', 13), bind(t, 'usageTopModels')),
-              h('div', { className: 'rpc-table-frame', style: usageTableFrame },
-                h('div', { style: { display: 'grid', gridTemplateColumns: modelColumns, minWidth: 360, background: 'var(--rpc-surface-2)' } },
+              h('div', { className: 'rpc-table-frame rpc-usage-frame', style: usageTableFrame },
+                h('div', {
+                  className: 'rpc-usage-head rpc-usage-models',
+                  style: { '--rpc-cols': modelColumns, background: 'var(--rpc-surface-2)' },
+                },
                   usageHead('m0', bind(t, 'usageModel')),
                   usageHead('m1', bind(t, 'usageModelCalls'), true),
                   usageHead('m2', bind(t, 'usageModelTokens'), true),
@@ -5219,12 +5282,19 @@ window.__ModuleLoader__.load({
                 modelStats.map(function (entry, index) {
                   return h('div', {
                     key: 'm' + index,
-                    style: Object.assign({ display: 'grid', gridTemplateColumns: modelColumns, alignItems: 'center' }, index > 0 ? usageRowLine : {}),
+                    className: 'rpc-usage-row rpc-usage-models',
+                    style: Object.assign({ '--rpc-cols': modelColumns }, index > 0 ? usageRowLine : {}),
                   },
-                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--rpc-text)', fontWeight: 500 }), title: entry.model }, entry.model || '—'),
-                  h('span', { style: usageNumberCell }, formatNumber(entry.counters.requests || 0)),
-                  h('span', { style: usageNumberCell }, formatNumber(entry.counters.totalTokens || 0)),
-                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--rpc-muted)' }) }, formatDuration(entry.counters.avgDurationMs)))
+                  h('span', { className: 'rpc-usage-model', style: Object.assign({}, usageCell, { color: 'var(--rpc-text)', fontWeight: 500 }), title: entry.model }, entry.model || '—'),
+                  h('span', { className: 'rpc-model-calls', style: usageNumberCell },
+                    h('span', { className: 'rpc-usage-label' }, bind(t, 'usageModelCalls')),
+                    formatNumber(entry.counters.requests || 0)),
+                  h('span', { className: 'rpc-model-tokens', style: usageNumberCell },
+                    h('span', { className: 'rpc-usage-label' }, bind(t, 'usageModelTokens')),
+                    formatNumber(entry.counters.totalTokens || 0)),
+                  h('span', { className: 'rpc-model-avg', style: Object.assign({}, usageNumberCell, { color: 'var(--rpc-muted)' }) },
+                    h('span', { className: 'rpc-usage-label' }, bind(t, 'usageAvg')),
+                    formatDuration(entry.counters.avgDurationMs)))
                 }))),
           )
         }
@@ -5322,7 +5392,6 @@ window.__ModuleLoader__.load({
           })
           : undefined
         if (accountModelRows.length > 0) {
-          var accountModelColumns = 'minmax(78px, .9fr) minmax(126px, 1.8fr) minmax(40px, .55fr) minmax(60px, .8fr) minmax(50px, .65fr) minmax(104px, 1.1fr)'
           var accountById = {}
           safeArray(active.accounts).forEach(function (account) {
             if (account !== null && typeof account === 'object' && typeof account.id === 'string') accountById[account.id] = account
@@ -5339,7 +5408,7 @@ window.__ModuleLoader__.load({
             }
             return undefined
           }
-          var modelTestCell = function (entry) {
+          var modelStatusBadge = function (entry) {
             var account = accountById[entry.accountId]
             var test = account !== undefined && account.modelTests !== null && typeof account.modelTests === 'object'
               ? account.modelTests[entry.model]
@@ -5382,12 +5451,23 @@ window.__ModuleLoader__.load({
                 ].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
               }, bind(t, 'limitBadge'))
             }
-            // 这里只展示最近一次测试/真实请求的结论。手动「检测」按钮已移除：
-            // 概览的「可用性测试」可以选择任意账号和模型，功能更完整，避免两处重复。
+            return badge
+          }
+          // 这里只展示最近一次测试/真实请求的结论。手动「检测」按钮已移除：
+          // 概览的「可用性测试」可以选择任意账号和模型，功能更完整，避免两处重复。
+          var pairStatusCell = function (badge) {
             return h('div', {
+              className: 'rpc-pair-status',
               style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 5, flexWrap: 'wrap', minWidth: 0 },
             }, badge)
           }
+          // 所有行都没有测试徽章时不再留一列空白的「状态」——窄屏下列宽本来就
+          // 紧张，空列只会把模型名挤成省略号。
+          var pairStatusBadges = accountModelRows.map(function (entry) { return modelStatusBadge(entry) })
+          var hasPairStatus = pairStatusBadges.some(function (badge) { return badge !== null })
+          var accountModelColumns = hasPairStatus
+            ? 'minmax(78px, .9fr) minmax(126px, 1.8fr) minmax(40px, .55fr) minmax(60px, .8fr) minmax(50px, .65fr) minmax(104px, 1.1fr)'
+            : 'minmax(78px, .9fr) minmax(126px, 1.8fr) minmax(40px, .55fr) minmax(60px, .8fr) minmax(50px, .65fr)'
           // 切换按钮：两个口径的起点不同（今日 vs 累计），必须让用户能选，
           // 而不是只能看一个然后怀疑数字。老宿主没有今日数据时渲染按钮会把
           // 「今日」画成选中却显示累计，所以干脆不渲染。
@@ -5421,27 +5501,37 @@ window.__ModuleLoader__.load({
               accountModelFallback
                 ? h('p', { key: 'fallback', className: 'rpc-tiny', style: S.hintTiny, title: bind(t, 'usageAccountModelCoverageHint') }, bind(t, 'usageAccountModelTodayEmpty'))
                 : null,
-              h('div', { className: 'rpc-table-frame', style: usageTableFrame },
-                h('div', { style: { display: 'grid', gridTemplateColumns: accountModelColumns, minWidth: 540, background: 'var(--rpc-surface-2)' } },
+              h('div', { className: 'rpc-table-frame rpc-usage-frame', style: usageTableFrame },
+                h('div', {
+                  className: 'rpc-usage-head rpc-usage-pairs',
+                  style: { '--rpc-cols': accountModelColumns, background: 'var(--rpc-surface-2)' },
+                },
                   usageHead('a0', bind(t, 'usageAccountCol')),
                   usageHead('a1', bind(t, 'usageModel')),
                   usageHead('a2', bind(t, 'usageModelCalls'), true),
                   usageHead('a3', bind(t, 'usageModelTokens'), true),
                   usageHead('a4', bind(t, 'usageAvg'), true),
-                  usageHead('a5', bind(t, 'usageAccountModelStatus'), true)),
+                  hasPairStatus ? usageHead('a5', bind(t, 'usageAccountModelStatus'), true) : null),
                 accountModelRows.map(function (entry, index) {
                   if (accountModelExpanded !== true && index >= ACCOUNT_MODEL_ROWS) return null
                   return h('div', {
                     key: 'am' + index,
                     'data-pair-row': 'true',
-                    style: Object.assign({ display: 'grid', gridTemplateColumns: accountModelColumns, alignItems: 'center' }, index > 0 ? usageRowLine : {}),
+                    className: 'rpc-usage-row rpc-usage-pairs',
+                    style: Object.assign({ '--rpc-cols': accountModelColumns }, index > 0 ? usageRowLine : {}),
                   },
-                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--rpc-muted)' }), title: entry.label }, entry.label || '—'),
-                  h('span', { style: Object.assign({}, usageCell, { color: 'var(--rpc-text)', fontWeight: 500 }), title: entry.model }, entry.model || '—'),
-                  h('span', { style: usageNumberCell }, formatNumber(entry.counters.requests || 0)),
-                  h('span', { style: usageNumberCell }, formatNumber(entry.counters.totalTokens || 0)),
-                  h('span', { style: Object.assign({}, usageNumberCell, { color: 'var(--rpc-muted)' }) }, formatDuration(entry.counters.avgDurationMs)),
-                  modelTestCell(entry))
+                  h('span', { className: 'rpc-pair-account', style: Object.assign({}, usageCell, { color: 'var(--rpc-muted)' }), title: entry.label }, entry.label || '—'),
+                  h('span', { className: 'rpc-pair-model', style: Object.assign({}, usageCell, { color: 'var(--rpc-text)', fontWeight: 500 }), title: entry.model }, entry.model || '—'),
+                  h('span', { className: 'rpc-pair-calls', style: usageNumberCell },
+                    h('span', { className: 'rpc-usage-label' }, bind(t, 'usageModelCalls')),
+                    formatNumber(entry.counters.requests || 0)),
+                  h('span', { className: 'rpc-pair-tokens', style: usageNumberCell },
+                    h('span', { className: 'rpc-usage-label' }, bind(t, 'usageModelTokens')),
+                    formatNumber(entry.counters.totalTokens || 0)),
+                  h('span', { className: 'rpc-pair-avg', style: Object.assign({}, usageNumberCell, { color: 'var(--rpc-muted)' }) },
+                    h('span', { className: 'rpc-usage-label' }, bind(t, 'usageAvg')),
+                    formatDuration(entry.counters.avgDurationMs)),
+                  hasPairStatus ? pairStatusCell(pairStatusBadges[index]) : null)
                 })),
               // 折叠时明确说出「还有多少行」并给一个展开入口。旧实现直接
               // `slice(0, 8)`：15 行数据只画 8 行，另外 7 行**没有任何提示**，
