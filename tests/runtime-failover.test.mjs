@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { Runtime, failureCodeOf, isProviderScopedFailure, parseOpenAiSse, qoderQueueFailure, resetHintOf } from '../lib/runtime.js'
+import { Runtime, failureCodeOf, isProviderScopedFailure, parseOpenAiSse, qoderQueueFailure, resetHintOf, retryQueued } from '../lib/runtime.js'
 import { EventLog } from '../lib/events.js'
 import { Stats } from '../lib/stats.js'
 import { defaults } from '../lib/settings.js'
@@ -409,6 +409,70 @@ test('Qoder 排队：首轮只发过保活帧（heartbeat）时仍然允许重�
     globalThis.fetch = originalFetch
     rmSync(dir, { recursive: true, force: true })
   }
+})
+
+test('Qoder 流中排队：重开只能拿「从现在起还剩多少」的预算，不能整份重新计', async () => {
+  // 用户可见行为：高级里配的 `qoderQueueWaitMs` 是**整次请求**的排队预算。
+  // 旧实现把「流阶段开始时还剩多少」原样当成新预算交给 reopen，而 #openQoderQueued
+  // 的契约是「从现在起算」—— 于是每重开一次就多出一份完整预算，实际等待可以
+  // 超过用户设置（却仍报告「超过本地 60 秒上限」）。
+  const encoder = new TextEncoder()
+  const queued = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ statusCodeValue: 200, body: '{}' })}\n\n`))
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ statusCodeValue: 403, body: JSON.stringify({ code: 10605, retryAfterSeconds: 0.5, isQueued: true }) })}\n\n`))
+      controller.close()
+    },
+  })
+  const ok = new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ statusCodeValue: 200, body: JSON.stringify({ choices: [{ delta: { content: 'ok' }, finish_reason: 'stop' }] }) })}\n\n`))
+      controller.close()
+    },
+  })
+  const budgets = []
+  const startedAt = Date.now() - 20_000
+  const events = []
+  for await (const event of retryQueued(
+    (budget) => {
+      budgets.push(budget)
+      return Promise.resolve({ body: ok })
+    },
+    queued,
+    AbortSignal.timeout(10_000),
+    { startedAt, budgetMs: 60_000 },
+  )) events.push(event)
+  assert.equal(budgets.length, 1, '应该重开一次')
+  assert.ok(
+    budgets[0] <= 41_000 && budgets[0] >= 39_000,
+    `reopen 收到的预算应为「从现在起还剩约 40 秒」，实际 ${String(budgets[0])}`,
+  )
+  assert.equal(events.filter((event) => event.type === 'text').map((event) => event.text).join(''), 'ok')
+})
+
+test('Qoder 流中排队：整次请求的预算用尽后不再重开，结论是 RATE_LIMIT', async () => {
+  const encoder = new TextEncoder()
+  const queued = () => new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(`data: ${JSON.stringify({ statusCodeValue: 403, body: JSON.stringify({ code: 10605, isQueued: true, retryAfterSeconds: 0.5 }) })}\n\n`))
+      controller.close()
+    },
+  })
+  let reopened = 0
+  await assert.rejects(async () => {
+    for await (const _event of retryQueued(
+      () => {
+        reopened += 1
+        return Promise.resolve({ body: queued() })
+      },
+      queued(),
+      AbortSignal.timeout(10_000),
+      { startedAt: Date.now() - 61_000, budgetMs: 60_000 },
+    )) {
+      /* 只关心抛错 */
+    }
+  }, (error) => failureCodeOf(error) === 'RATE_LIMIT')
+  assert.equal(reopened, 0, '预算已用尽时不该再打上游')
 })
 
 test('正常完成：宿主收到 finish 后立即停止消费，统计仍记 stop 而不是中断', async () => {

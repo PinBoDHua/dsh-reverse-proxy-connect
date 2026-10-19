@@ -1,9 +1,13 @@
 import assert from 'node:assert/strict'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 
 import {
   accountsFor,
   activeAccountFor,
+  applyLoginAccount,
   isAccountUsable,
   isBelowThreshold,
   isExhausted,
@@ -14,6 +18,7 @@ import {
   pickFailoverCandidates,
   pickSwitchTarget,
 } from '../lib/accounts.js'
+import { SettingsStore } from '../lib/settings.js'
 import { PROVIDERS } from '../lib/protocol.js'
 
 const WB = PROVIDERS.workbuddy
@@ -273,5 +278,61 @@ test('凭证 reason 分类：只有静态未配置才算 unconfigured，瞬时�
     {},
   ]) {
     assert.equal(isUnconfiguredCredential(reason), false, `${String(reason)} 不得视为「未配置」`)
+  }
+})
+
+test('登录导入必须走写锁内 upsert：CLI 在两步之间写入的账号不能被整表替换掉', () => {
+  const token = (uid) => ({
+    accessToken: `tok-${uid}`,
+    refreshToken: '',
+    expiresAtMs: Date.now() + 3600_000,
+    refreshExpiresAtMs: 0,
+    domain: '',
+    uid,
+    enterpriseId: '',
+  })
+  const newDir = () => mkdtempSync(join(tmpdir(), 'dsh-rpc-login-'))
+  const hostToken = token('u-host')
+  const cliRow = (uid) => ({ id: `acc-cli-${uid}`, label: `CLI ${uid}`, enabled: true, token: token(uid) })
+
+  // 1) 旧写法：宿主 sync 出的整份账号表 → patch 整表替换。
+  //    只要另一个进程（CLI login / 令牌续期）在这两步之间写过账号，它就消失。
+  const firstDir = newDir()
+  try {
+    const file = join(firstDir, 'settings.json')
+    const host = new SettingsStore(file)
+    const cli = new SettingsStore(file)
+    const staleList = accountsFor(WB, host.sync()).map((account) => ({
+      id: account.id,
+      label: account.label,
+      enabled: account.enabled !== false,
+      ...(account.token === undefined ? {} : { token: account.token }),
+    }))
+    cli.patch({ accounts: { [WB]: [cliRow('1')] } })
+    host.patch({ accounts: { [WB]: staleList }, activeAccount: { [WB]: 'default' } })
+    assert.equal(
+      accountsFor(WB, new SettingsStore(file).sync()).some((account) => account.id === 'acc-cli-1'),
+      false,
+      '旧写法会把并发写入的账号覆盖掉（这条断言固定的是缺陷本身，用于对比）',
+    )
+  } finally {
+    rmSync(firstDir, { recursive: true, force: true })
+  }
+
+  // 2) 现写法：applyLoginAccount 在写锁内取最新快照再 upsert，CLI 的账号必须还在。
+  const secondDir = newDir()
+  try {
+    const file = join(secondDir, 'settings.json')
+    const host = new SettingsStore(file)
+    const cli = new SettingsStore(file)
+    host.sync()
+    cli.patch({ accounts: { [WB]: [cliRow('2')] } })
+    const landed = applyLoginAccount(host, WB, { uid: 'u-host', label: '浏览器登录', token: hostToken })
+    const after = accountsFor(WB, new SettingsStore(file).sync())
+    assert.ok(after.some((account) => account.id === 'acc-cli-2'), '并发写入的账号不能被覆盖')
+    assert.ok(after.some((account) => account.id === landed), '本次登录的账号要落地')
+    assert.equal(after.find((account) => account.id === landed).label, '浏览器登录')
+  } finally {
+    rmSync(secondDir, { recursive: true, force: true })
   }
 })
