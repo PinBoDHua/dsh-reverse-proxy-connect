@@ -2890,6 +2890,29 @@ window.__ModuleLoader__.load({
       }, [status])
 
       /**
+       * 切换服务商 / 卸载时清掉「删除确认」态。
+       *
+       * 确认键里带了 provider，切走再切回来时旧确认态会原样复活 —— 用户看到
+       * 一个自己几十秒前点开、早已忘掉的「再次点击确认删除」，下一次点击就
+       * 直接删账号了。
+       *
+       * **必须放在 `if (active === undefined) return …` 之前**：这个组件在
+       * 首帧（status 还没回来）会提前 return，hook 数量比后续渲染少；把任何
+       * hook 写在提前 return 之后，状态一到 React 就会抛
+       * 「Rendered more hooks than during the previous render」，整张卡片被
+       * 宿主的错误边界替换成空白。
+       */
+      useEffect(function () {
+        return function () {
+          if (deleteConfirmTimer.current !== undefined) {
+            clearTimeout(deleteConfirmTimer.current)
+            deleteConfirmTimer.current = undefined
+          }
+          setDeleteConfirm(undefined)
+        }
+      }, [activeTab])
+
+      /**
        * 本地已生效、但服务端还没回来的模型开关。
        *
        * 为什么需要：`toggleModel()` 每次都回传**完整的** `disabledModels`，而它是
@@ -3966,18 +3989,6 @@ window.__ModuleLoader__.load({
           setDeleteConfirm(undefined)
         }, 3000)
       }
-      // 切换服务商时清掉删除确认态：确认键里带了 provider，切走再切回来时
-      // 旧确认态会原样复活 —— 用户看到一个自己 30 秒前点开、早已忘掉的
-      // 「再次点击确认删除」，下一次点击就直接删账号了。
-      useEffect(function () {
-        return function () {
-          if (deleteConfirmTimer.current !== undefined) {
-            clearTimeout(deleteConfirmTimer.current)
-            deleteConfirmTimer.current = undefined
-          }
-          setDeleteConfirm(undefined)
-        }
-      }, [activeTab])
       var accountItems = accountRows.map(function (account, index) {
         var snapshot = account.credits || { state: 'none' }
         var cooling = isFiniteNumber(account.cooldownUntil) && account.cooldownUntil > Date.now()

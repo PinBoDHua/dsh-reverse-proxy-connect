@@ -36,17 +36,59 @@ let dirty = false
 let ownerSeq = 0
 let activeOwner = 0
 let dirtyOwners = new Set()
+/** 本次渲染已调用的 hook 数量，以及上一次渲染的总数（用于顺序校验）。 */
+let hookCallCount = 0
+let lastHookCallCount = null
 
 function beginRender() {
   activeOwner = ++ownerSeq
   hookIndex = 0
   refIndex = 0
+  hookCallCount = 0
   effects = []
   dirty = false
   return activeOwner
 }
 
+/**
+ * 记录一次 hook 调用，并校验「两次渲染之间 hook 数量不增加」。
+ *
+ * React 要求同一个组件每次渲染调用**相同数量、相同顺序**的 hook；违反时会抛
+ * "Rendered more hooks than during the previous render"，宿主的错误边界把整张
+ * 卡片替换成空白。之前的迷你 React 只按序号取值、没有这个约束，于是「hook 写在
+ * 条件 return 之后」这类真实事故测不出来（0.4.2 就踩了：首帧 status 未到提前
+ * return，状态到达后多调用一个 useEffect，设置卡片整块空白）。
+ *
+ * @param kind - hook 名称，仅用于报错信息。
+ */
+function countHook(kind) {
+  hookCallCount += 1
+  if (lastHookCallCount !== null && hookCallCount > lastHookCallCount) {
+    throw new Error(
+      `hook 数量在两次渲染之间增加了（第 ${hookCallCount} 个 ${kind}）：`
+      + '说明有 hook 写在条件 return 之后，真实 React 会整卡崩溃',
+    )
+  }
+}
+
+/**
+ * 一次渲染结束时校验 hook 总数与上次**完全相同**。
+ *
+ * React 对「变少」同样报错（Rendered fewer hooks than expected），两种方向都会
+ * 让宿主的错误边界把整张卡片替换成空白，所以两边都要拦。
+ */
+function assertHookCountStable() {
+  if (lastHookCallCount === null) return
+  if (hookCallCount !== lastHookCallCount) {
+    throw new Error(
+      `hook 数量在两次渲染之间变化（${lastHookCallCount} -> ${hookCallCount}）：`
+      + '说明有 hook 写在条件 return 之后，真实 React 会整卡崩溃',
+    )
+  }
+}
+
 function useState(initial) {
+  countHook('useState')
   const index = hookIndex++
   if (!(index in hookStates)) hookStates[index] = { value: typeof initial === 'function' ? initial() : initial, owner: activeOwner }
   const slot = hookStates[index]
@@ -77,6 +119,7 @@ function createElement(type, props, ...children) {
 let refSlots = {}
 let refIndex = 0
 function useRef(initial) {
+  countHook('useRef')
   const index = refIndex++
   if (!(index in refSlots)) refSlots[index] = { current: initial }
   return refSlots[index]
@@ -86,9 +129,18 @@ const React = {
   createElement,
   Fragment: 'Fragment',
   useState,
-  useEffect: (fn) => effects.push(fn),
-  useCallback: (fn) => fn,
-  useMemo: (fn) => fn(),
+  useEffect: (fn) => {
+    countHook('useEffect')
+    effects.push(fn)
+  },
+  useCallback: (fn) => {
+    countHook('useCallback')
+    return fn
+  },
+  useMemo: (fn) => {
+    countHook('useMemo')
+    return fn()
+  },
   useRef,
 }
 
@@ -342,6 +394,9 @@ async function render(component, props, skipEffects) {
   for (let pass = 0; pass < 6; pass++) {
     beginRender()
     tree = component(props)
+    // 每次渲染结束校验 hook 总数：必须与上一次完全相同（React 的 hooks 规则）。
+    assertHookCountStable()
+    lastHookCallCount = hookCallCount
     if (skipEffects !== true) {
       for (const effect of effects) effect()
     }
@@ -360,6 +415,7 @@ async function render(component, props, skipEffects) {
 function mount(component, props) {
   hookStates = []
 refSlots = {}
+  lastHookCallCount = null
   return render(component, props)
 }
 
