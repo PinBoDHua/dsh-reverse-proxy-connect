@@ -126,7 +126,7 @@ const STATUS = {
     {
       provider: 'workbuddy-ai', displayName: 'WorkBuddy AI', kind: 'desktop', enabled: true,
       catalogSource: 'live', fetchedAt: 1792234000000,
-      health: { state: 'degraded', consecutiveFailures: 2, lastErrorAt: 1792234000000 },
+      health: { state: 'degraded', consecutiveFailures: 2, lastErrorAt: Date.now() },
       usage: { requests: 2, ok: 1, failed: 1, totalTokens: 40, avgDurationMs: 800, successRate: 0.5, today: { requests: 1, totalTokens: 20 } },
       models: [{ id: 'glm-5.3', name: 'GLM-5.3', contextWindow: 1000000, maxTokens: 48000, supportsImages: true, reasoningEfforts: ['low'], credits: 'x0.79', disabled: false }],
       modelCount: 1,
@@ -876,6 +876,43 @@ for (const header of ['usageAvg', 'usageTime', 'usageTokenShort']) {
 const usageGrid = find(cardTree, (node) => typeof node.props?.style?.gridTemplateColumns === 'string' && node.props.style.gridTemplateColumns.includes('minmax'))
 if (usageGrid === undefined) throw new Error('用量区块没有表格栅格')
 console.log('✓ 健康状态、图片能力与用量区块都渲染出来了')
+
+// 7b. 健康状态是历史证据：连续失败如果是 2 小时前，不能继续断言「不可用」。
+//     展示层应降级为「待验证」，并说明最近成功/失败的时间；只有近期失败
+//     （30 分钟内）才显示 healthDown。
+{
+  const provider = STATUS.providers[0]
+  const healthSnapshot = provider.health
+  try {
+    provider.health = {
+      state: 'down',
+      consecutiveFailures: 6,
+      lastErrorAt: Date.now() - 2 * 60 * 60_000,
+      lastSuccessAt: Date.now() - 3 * 60 * 60_000,
+    }
+    cardTree = await mount(card, { t: (key) => key })
+    const staleText = textOf(cardTree)
+    if (!staleText.includes('healthStale')) throw new Error('过期健康证据没有降级成「待验证」')
+    if (staleText.includes('healthDown')) throw new Error('2 小时前的连续失败仍显示「连续失败」')
+    if (!staleText.includes('healthStaleHint')) throw new Error('「待验证」没有说明原因')
+    if (!staleText.includes('lastSuccessAtLabel')) throw new Error('没有显示最近成功时间')
+
+    provider.health = {
+      state: 'down',
+      consecutiveFailures: 3,
+      lastErrorAt: Date.now() - 60_000,
+      lastSuccessAt: Date.now() - 2 * 60_000,
+    }
+    cardTree = await mount(card, { t: (key) => key })
+    const freshText = textOf(cardTree)
+    if (!freshText.includes('healthDown')) throw new Error('30 分钟内的连续失败没有显示 healthDown')
+    if (freshText.includes('healthStale')) throw new Error('近期失败不应显示「待验证」')
+    console.log('✓ 健康状态按时间降级：过期连续失败显示待验证，近期失败才显示连续失败')
+  } finally {
+    provider.health = healthSnapshot
+    cardTree = await mount(card, { t: (key) => key })
+  }
+}
 
 // 自动签到开关：界面上可见、可点，并且会发 checkin 补丁。
 if (!v4Text.includes('checkinAuto') || !v4Text.includes('checkinAutoHint')) {

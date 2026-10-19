@@ -41,6 +41,13 @@ window.__ModuleLoader__.load({
     var TEST_RESULT_TTL_MS = 30 * 60 * 1000
 
     /**
+     * 健康状态同样会「过期」：连续失败 3 次会一直保持 down，直到下一次成功。
+     * 一个 22 小时前的 429 不能证明账号现在不可用；超过这个时长只显示
+     * 「待验证」，提示用户发一次消息或点账号测试重新确认。
+     */
+    var HEALTH_EVIDENCE_TTL_MS = 30 * 60 * 1000
+
+    /**
      * 插件自带的两组主题自适应属性。
      *
      * 宿主 0.2.1 的 ui-theme 里没有 `--dsw-alias-bg-l2` / `--dsw-alias-state-warning-primary`
@@ -531,9 +538,14 @@ window.__ModuleLoader__.load({
       loginOpenManually: '没有自动打开？点这里',
       // 1.0.0 新增：健康、用量、高级
       healthOk: '正常',
-      healthDegraded: '降级',
-      healthDown: '不可用',
+      healthDegraded: '近期波动',
+      healthDown: '连续失败',
+      healthStale: '待验证',
       healthUnknown: '无记录',
+      healthStaleHint: '最后一次请求失败已超过 30 分钟，之后没有成功记录；发一次消息，或到「账号」页点测试可重新验证。',
+      lastFailureAt: '最近失败',
+      lastSuccessAtLabel: '最近成功',
+      neverSucceeded: '还没有成功记录',
       usage: '用量',
       usageToday: '今日',
       usageTotal: '累计',
@@ -868,9 +880,14 @@ window.__ModuleLoader__.load({
       loginOpenManually: 'Not opened? Click here',
       // 1.0.0 additions: health, usage, advanced
       healthOk: 'Healthy',
-      healthDegraded: 'Degraded',
-      healthDown: 'Unavailable',
+      healthDegraded: 'Flaky',
+      healthDown: 'Failing',
+      healthStale: 'Needs check',
       healthUnknown: 'No data',
+      healthStaleHint: 'The last request failed more than 30 minutes ago and no success has been recorded since. Send a message or test the account on the Accounts page to verify.',
+      lastFailureAt: 'Last failure',
+      lastSuccessAtLabel: 'Last success',
+      neverSucceeded: 'No success recorded yet',
       usage: 'Usage',
       usageToday: 'Today',
       usageTotal: 'All time',
@@ -1409,22 +1426,36 @@ window.__ModuleLoader__.load({
       if (state === 'ok') return 'healthOk'
       if (state === 'degraded') return 'healthDegraded'
       if (state === 'down') return 'healthDown'
+      if (state === 'stale') return 'healthStale'
       return 'healthUnknown'
+    }
+
+    /**
+     * 展示用健康状态：失败证据超过 30 分钟就不再断言「不可用」，
+     * 改为 stale（待验证）。健康状态本身仍保留，供 title/账号测试使用。
+     */
+    function displayHealthState(health) {
+      if (health === null || typeof health !== 'object') return 'unknown'
+      var state = typeof health.state === 'string' ? health.state : 'unknown'
+      if (state !== 'down' && state !== 'degraded') return state
+      var lastErrorAt = health.lastErrorAt
+      if (isFiniteNumber(lastErrorAt) && lastErrorAt > 0 && Date.now() - lastErrorAt > HEALTH_EVIDENCE_TTL_MS) return 'stale'
+      return state
     }
 
     /** 健康状态的颜色。 */
     function healthColor(state) {
       if (state === 'ok') return 'var(--dsw-alias-state-success-primary, #1a8f5f)'
-      if (state === 'degraded') return 'var(--dsh-rpc-warn, #9d5c00)'
+      if (state === 'degraded' || state === 'stale') return 'var(--dsh-rpc-warn, #9d5c00)'
       if (state === 'down') return 'var(--dsw-alias-state-error-primary, #b3261e)'
       return 'var(--dsw-alias-label-secondary)'
     }
 
-    /** 健康状态 → chip 色调（down 用错误色，degraded 用警告色）。 */
+    /** 健康状态 → chip 色调（down 用错误色，degraded/stale 用警告色）。 */
     function rpcHealthTone(state) {
       if (state === 'ok') return 'ok'
       if (state === 'down') return 'error'
-      if (state === 'degraded') return 'warn'
+      if (state === 'degraded' || state === 'stale') return 'warn'
       return 'muted'
     }
 
@@ -3127,6 +3158,9 @@ window.__ModuleLoader__.load({
       // 概览，也是 provider tab。
       var providerCards = providers.map(function (entry) {
         var health = entry.health || { state: 'unknown' }
+        // 健康状态可能是几小时前的连续失败；展示层用 displayHealthState
+        // 把过期证据降级成「待验证」，避免在已登录、额度可读时误报不可用。
+        var healthState = displayHealthState(health)
         var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
         var credits = entry.credits || { state: 'none' }
         var today = (entry.usage && entry.usage.today) || {}
@@ -3150,7 +3184,7 @@ window.__ModuleLoader__.load({
         if (credits.state === 'ok' && credits.unlimited !== true && isFiniteNumber(credits.total) && credits.total > 0 && isFiniteNumber(credits.remain)) {
           ratio = Math.max(0, Math.min(1, credits.remain / credits.total))
         }
-        var healthTone = signed ? healthColor(health.state) : DOT_OFF
+        var healthTone = signed ? healthColor(healthState) : DOT_OFF
         return h(
           'button',
           {
@@ -3174,13 +3208,13 @@ window.__ModuleLoader__.load({
             h('span', {
               className: 'rpc-provider-dot',
               style: { background: healthTone },
-              title: bind(t, healthTextKey(health.state)),
+              title: bind(t, healthTextKey(healthState)),
             }),
             h('span', { className: 'rpc-provider-name' }, entry.displayName),
             h('span', {
               className: 'rpc-provider-health',
-              style: { color: healthColor(health.state) },
-            }, bind(t, healthTextKey(health.state)))),
+              style: { color: healthColor(healthState) },
+            }, bind(t, healthTextKey(healthState)))),
           h('span', { className: 'rpc-provider-value' },
             h('span', {
               // 读不到额度时不要用品牌色画「—」：中性色 + 悬停原因。
@@ -3326,6 +3360,12 @@ window.__ModuleLoader__.load({
       // ── 状态 ────────────────────────────────────────────────────
       var credential = active.credential || {}
       var activeHealth = active.health || { state: 'unknown' }
+      var activeHealthState = displayHealthState(activeHealth)
+      var healthLastErrorAt = isFiniteNumber(activeHealth.lastErrorAt) ? activeHealth.lastErrorAt : 0
+      var healthLastSuccessAt = isFiniteNumber(activeHealth.lastSuccessAt) ? activeHealth.lastSuccessAt : 0
+      // 只有「最后一次失败之后还没成功过」时才需要把上次成功也摆出来；
+      // 正常 provider 的最近成功时间对排障没有帮助，反而增加一行噪音。
+      var showLastSuccess = healthLastErrorAt > 0 && !(healthLastSuccessAt > healthLastErrorAt)
       var catalogText =
         active.catalogSource === 'live'
           ? bind(t, 'catalogLive') + ' · ' + formatTime(active.fetchedAt)
@@ -3374,13 +3414,7 @@ window.__ModuleLoader__.load({
           h('div', { className: 'rpc-detail-title' },
             h('h4', {}, active.displayName),
             h('span', { className: 'rpc-chip' }, kindLabel),
-            h('span', { className: rpcChipClass(credentialTone) }, credentialLabel),
-            h('span', {
-              className: rpcChipClass(rpcHealthTone(activeHealth.state)),
-              title: isFiniteNumber(activeHealth.consecutiveFailures) && activeHealth.consecutiveFailures > 0
-                ? bind(t, 'consecutiveFailures', { count: activeHealth.consecutiveFailures })
-                : '',
-            }, bind(t, healthTextKey(activeHealth.state)))),
+            h('span', { className: rpcChipClass(credentialTone) }, credentialLabel)),
           h('div', { className: 'rpc-detail-meta' },
             h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 } }, rpcIcon('clock', 12), catalogText),
             credential.status === 'signed-in' && credential.email
@@ -3409,11 +3443,11 @@ window.__ModuleLoader__.load({
           h('div', { key: 'h', style: S.sectionHead },
             h('span', { style: S.sectionTitle }, rpcIcon('shield', 14), bind(t, 'secStatus')),
             h('span', {
-              className: rpcChipClass(rpcHealthTone(activeHealth.state)),
+              className: rpcChipClass(rpcHealthTone(activeHealthState)),
               title: isFiniteNumber(activeHealth.consecutiveFailures) && activeHealth.consecutiveFailures > 0
                 ? bind(t, 'consecutiveFailures', { count: activeHealth.consecutiveFailures })
                 : '',
-            }, bind(t, healthTextKey(activeHealth.state))),
+            }, bind(t, healthTextKey(activeHealthState))),
             h('span', { style: S.grow }),
             h('span', { className: 'rpc-chip' }, active.images === true ? bind(t, 'imagesShort') : bind(t, 'imagesShortOff'))),
           h('dl', { className: 'rpc-kv' },
@@ -3428,6 +3462,14 @@ window.__ModuleLoader__.load({
               : null,
             credential.status === 'signed-in' && credential.email
               ? h('dd', {}, credential.email)
+              : null,
+            showLastSuccess
+              ? h('dt', {}, bind(t, 'lastSuccessAtLabel'))
+              : null,
+            showLastSuccess
+              ? h('dd', {}, healthLastSuccessAt > 0
+                  ? formatTime(healthLastSuccessAt) + ' · ' + formatAgo(healthLastSuccessAt, t)
+                  : bind(t, 'neverSucceeded'))
               : null),
           credentialMessage !== undefined
             ? h('p', { key: 'why', className: 'rpc-warn-text' }, credentialMessage)
@@ -3445,6 +3487,9 @@ window.__ModuleLoader__.load({
                 time: formatTime(lastFailure.at),
                 model: lastFailure.model || '—',
               }))
+            : null,
+          activeHealthState === 'stale'
+            ? h('p', { key: 'stale', className: 'rpc-inline-note' }, rpcIcon('clock', 13), bind(t, 'healthStaleHint'))
             : null,
           extraMessage !== undefined ? h('p', { key: 'msg', className: 'rpc-warn-text' }, extraMessage) : null),
       )
