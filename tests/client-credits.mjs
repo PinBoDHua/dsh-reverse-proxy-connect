@@ -937,6 +937,7 @@ console.log('✓ 健康状态、图片能力与用量区块都渲染出来了')
   const provider = STATUS.providers[0]
   const healthSnapshot = provider.health
   const accountsSnapshot = provider.accounts
+  const tokensOf = (text) => text.split(' | ')
   try {
     provider.health = {
       state: 'down',
@@ -944,26 +945,36 @@ console.log('✓ 健康状态、图片能力与用量区块都渲染出来了')
       lastErrorAt: Date.now() - 2 * 60 * 60_000,
       lastSuccessAt: Date.now() - 3 * 60 * 60_000,
     }
+    provider.accounts = accountsSnapshot
+    cardTree = await mount(card, { t: (key) => key })
+    const staleText = textOf(cardTree)
+    const staleTokens = tokensOf(staleText)
+    if (!staleTokens.includes('healthStale')) throw new Error('过期健康证据没有降级成「待验证」')
+    if (staleTokens.includes('healthDown')) throw new Error('2 小时前的连续失败仍显示「连续失败」')
+    if (!staleTokens.includes('healthStaleHint')) throw new Error('「待验证」没有说明原因')
+    if (!staleTokens.includes('lastSuccessAtLabel')) throw new Error('没有显示最近成功时间')
+    if (staleTokens.includes('testedAvailableShort')) throw new Error('没有测试结果时不应显示「刚测可用」')
+
     provider.accounts = accountsSnapshot.map((account, index) => index === 0
       ? { ...account, modelTests: { auto: { at: Date.now() - 60_000, ok: true, latencyMs: 900, model: 'auto' } } }
       : account)
     cardTree = await mount(card, { t: (key) => key })
-    const staleText = textOf(cardTree)
-    if (!staleText.includes('healthStale')) throw new Error('过期健康证据没有降级成「待验证」')
-    if (staleText.includes('healthDown')) throw new Error('2 小时前的连续失败仍显示「连续失败」')
-    if (!staleText.includes('healthStaleHint') && !staleText.includes('healthStaleTestOkHint')) throw new Error('「待验证」没有说明原因')
-    if (!staleText.includes('lastSuccessAtLabel')) throw new Error('没有显示最近成功时间')
-    if (!staleText.includes('testedAvailableShort')) throw new Error('最近测试通过没有回写到状态卡')
-    if (!staleText.includes('healthStaleTestOkHint')) throw new Error('最近测试通过后没有更新待验证说明')
+    const okText = textOf(cardTree)
+    const okTokens = tokensOf(okText)
+    if (!okTokens.includes('testedAvailableShort')) throw new Error('最近测试通过没有回写到状态卡')
+    if (!okTokens.includes('healthStaleTestOkHint')) throw new Error('最近测试通过后没有更新待验证说明')
+    if (okTokens.includes('healthStale')) throw new Error('有近期测试结果时仍同时显示「待验证」，状态互相矛盾')
 
     provider.accounts = accountsSnapshot.map((account, index) => index === 0
       ? { ...account, modelTests: { auto: { at: Date.now() - 60_000, ok: false, code: 'RATE_LIMIT', latencyMs: 250, model: 'auto', error: 'HTTP 429', resetHint: '2026-10-19 20:00' } } }
       : account)
     cardTree = await mount(card, { t: (key) => key })
     const limitedText = textOf(cardTree)
-    if (!limitedText.includes('testedLimitedShort')) throw new Error('最近测试限额没有回写到状态卡')
-    if (!limitedText.includes('healthStaleTestLimitHint')) throw new Error('最近测试限额后没有更新待验证说明')
+    const limitedTokens = tokensOf(limitedText)
+    if (!limitedTokens.includes('testedLimitedShort')) throw new Error('最近测试限额没有回写到状态卡')
+    if (!limitedTokens.includes('healthStaleTestLimitHint')) throw new Error('最近测试限额后没有更新待验证说明')
 
+    provider.accounts = accountsSnapshot
     provider.health = {
       state: 'down',
       consecutiveFailures: 3,
@@ -972,9 +983,10 @@ console.log('✓ 健康状态、图片能力与用量区块都渲染出来了')
     }
     cardTree = await mount(card, { t: (key) => key })
     const freshText = textOf(cardTree)
-    if (!freshText.includes('healthDown')) throw new Error('30 分钟内的连续失败没有显示 healthDown')
-    if (freshText.includes('healthStale')) throw new Error('近期失败不应显示「待验证」')
-    console.log('✓ 健康状态按时间降级，并把最近一次模型测试结果回写到状态卡')
+    const freshTokens = tokensOf(freshText)
+    if (!freshTokens.includes('healthDown')) throw new Error('30 分钟内的连续失败没有显示 healthDown')
+    if (freshTokens.includes('healthStale')) throw new Error('近期失败不应显示「待验证」')
+    console.log('✓ 健康状态按时间降级，最近测试结果合并为单一状态')
   } finally {
     provider.health = healthSnapshot
     provider.accounts = accountsSnapshot
@@ -1601,11 +1613,9 @@ for (const label of ['usageAccountCol', 'usageAccountModelsHint', 'usageModelCal
   if (!pairText.includes(label)) throw new Error(`账号 × 模型表缺少 ${label}`)
 }
 
-/** 账号 × 模型的数据行（表头与数据行共用同一套 gridTemplateColumns，按文本筛掉表头）。 */
+/** 账号 × 模型的数据行（显式 data 标记，列宽调整不再影响测试）。 */
 const pairRowNodes = (tree) => findAll(tree, (node) => node.type === 'div'
-  && typeof node.props?.style?.gridTemplateColumns === 'string'
-  && node.props.style.gridTemplateColumns === 'minmax(78px, 1fr) minmax(92px, 1.3fr) minmax(40px, .55fr) minmax(60px, .8fr) minmax(50px, .65fr) minmax(104px, 1.15fr)'
-  && !textOf(node).includes('usageAccountCol'))
+  && node.props?.['data-pair-row'] === 'true')
 
 // 默认口径必须是「今日」：卡片上方写的是「今日 4 次」，交叉表也必须按今日，
 // 否则两处数字对不上（交叉维度是升级后才开始累积的，累计值天然更小）。

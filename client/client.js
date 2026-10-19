@@ -557,6 +557,8 @@ window.__ModuleLoader__.load({
       healthStaleTestLimitHint: '最近一次模型测试显示该模型被限额（{model}，{time}；{reset}）。',
       testedAvailableShort: '刚测可用',
       testedLimitedShort: '刚测限额',
+      testedAuthShort: '刚测失效',
+      testedFailedShort: '刚测失败',
       lastFailureAt: '最近失败',
       lastSuccessAtLabel: '最近成功',
       neverSucceeded: '还没有成功记录',
@@ -642,9 +644,10 @@ window.__ModuleLoader__.load({
       usageHeatmap: '近 14 天',
       usageTopModels: '模型用量',
       usageAccountModels: '账号 × 模型用量',
-      usageAccountModelsHint: '同一个模型可能被多个账号用过；这一栏按账号分开算 token。',
-      usageAccountModelCoverage: '已记录 {covered} / {total} 次（{percent}%）：历史请求拆不出账号，只从 1.9.x 起累积',
-      usageAccountModelTodayEmpty: '今天这个账号还没有新的请求记录；下表是累计数据（账号 × 模型从 1.9.x 起累积，历史请求拆不出账号）。',
+      usageAccountModelsHint: '同一模型可能被多个账号使用；按账号拆分 token。',
+      usageAccountModelCoverage: '覆盖 {percent}%（{covered}/{total} 次）',
+      usageAccountModelCoverageHint: '账号 × 模型交叉维度从 1.9.x 起累积，历史请求拆不出账号；覆盖率因此小于 100%。',
+      usageAccountModelTodayEmpty: '今天暂无新请求，下表为累计数据。',
       usageAccountModelStatus: '状态',
       modelTest: '检测',
       modelTesting: '检测中…',
@@ -912,6 +915,8 @@ window.__ModuleLoader__.load({
       healthStaleTestLimitHint: 'The latest model test shows this model is rate limited ({model}, {time}; {reset}).',
       testedAvailableShort: 'Tested OK',
       testedLimitedShort: 'Tested limited',
+      testedAuthShort: 'Tested auth fail',
+      testedFailedShort: 'Tested failed',
       lastFailureAt: 'Last failure',
       lastSuccessAtLabel: 'Last success',
       neverSucceeded: 'No success recorded yet',
@@ -997,9 +1002,10 @@ window.__ModuleLoader__.load({
       usageHeatmap: 'Last 14 days',
       usageTopModels: 'Model usage',
       usageAccountModels: 'Account × model usage',
-      usageAccountModelsHint: 'The same model can be used by several accounts; this table splits tokens per account.',
-      usageAccountModelCoverage: 'Recorded {covered} of {total} requests ({percent}%): older requests carry no account split',
-      usageAccountModelTodayEmpty: 'No new requests for this account today; showing cumulative data (account × model only accumulates from 1.9.x).',
+      usageAccountModelsHint: 'One model can be shared by several accounts; tokens are split per account.',
+      usageAccountModelCoverage: 'Coverage {percent}% ({covered}/{total} requests)',
+      usageAccountModelCoverageHint: 'The account × model split only accumulates from 1.9.x; older requests carry no account data, so coverage is below 100%.',
+      usageAccountModelTodayEmpty: 'No new requests today; showing cumulative data.',
       usageAccountModelStatus: 'Status',
       modelTest: 'Test',
       modelTesting: 'Testing…',
@@ -1463,7 +1469,58 @@ window.__ModuleLoader__.load({
       if (state === 'degraded') return 'healthDegraded'
       if (state === 'down') return 'healthDown'
       if (state === 'stale') return 'healthStale'
+      if (state === 'testedOk') return 'testedAvailableShort'
+      if (state === 'testedLimited') return 'testedLimitedShort'
+      if (state === 'testedAuth') return 'testedAuthShort'
+      if (state === 'testedFailed') return 'testedFailedShort'
       return 'healthUnknown'
+    }
+
+    /** 一次模型测试结果 → 展示状态。 */
+    function testedHealthState(result) {
+      if (result === null || typeof result !== 'object') return undefined
+      if (result.ok === true) return 'testedOk'
+      if (result.code === 'RATE_LIMIT' || result.code === 'QUOTA') return 'testedLimited'
+      if (result.code === 'AUTH') return 'testedAuth'
+      return 'testedFailed'
+    }
+
+    /**
+     * 找一个 provider 下最近一次「账号 × 模型」测试。
+     * 返回 {result, modelId, modelName, accountId, accountLabel, state}；
+     * 只作为展示证据，不写回 provider 历史 health。
+     */
+    function latestModelTestOf(entry) {
+      var latest
+      safeArray(entry && entry.accounts).forEach(function (account) {
+        var tests = account.modelTests
+        if (tests === null || typeof tests !== 'object') return
+        Object.keys(tests).forEach(function (modelId) {
+          var result = tests[modelId]
+          if (result === null || typeof result !== 'object' || !isFiniteNumber(result.at)) return
+          if (latest === undefined || result.at > latest.result.at) {
+            var model = safeArray(entry.models).filter(function (item) { return item.id === modelId })[0]
+            latest = {
+              result: result,
+              modelId: modelId,
+              modelName: model !== undefined && (model.name || model.id) ? (model.name || model.id) : modelId,
+              accountId: typeof account.id === 'string' ? account.id : undefined,
+              accountLabel: typeof account.label === 'string' && account.label !== '' ? account.label : '',
+              state: testedHealthState(result),
+            }
+          }
+        })
+      })
+      return latest
+    }
+
+    /** 最近测试是否仍可作为当前证据（30 分钟内）。 */
+    function freshModelTestOf(entry) {
+      var latest = latestModelTestOf(entry)
+      if (latest === undefined) return undefined
+      if (!(latest.result.at > 0)) return undefined
+      if (Date.now() - latest.result.at >= TEST_RESULT_TTL_MS) return undefined
+      return latest
     }
 
     /**
@@ -1481,17 +1538,17 @@ window.__ModuleLoader__.load({
 
     /** 健康状态的颜色。 */
     function healthColor(state) {
-      if (state === 'ok') return 'var(--dsw-alias-state-success-primary, #1a8f5f)'
-      if (state === 'degraded' || state === 'stale') return 'var(--dsh-rpc-warn, #9d5c00)'
+      if (state === 'ok' || state === 'testedOk') return 'var(--dsw-alias-state-success-primary, #1a8f5f)'
+      if (state === 'degraded' || state === 'stale' || state === 'testedLimited' || state === 'testedAuth' || state === 'testedFailed') return 'var(--dsh-rpc-warn, #9d5c00)'
       if (state === 'down') return 'var(--dsw-alias-state-error-primary, #b3261e)'
       return 'var(--dsw-alias-label-secondary)'
     }
 
-    /** 健康状态 → chip 色调（down 用错误色，degraded/stale 用警告色）。 */
+    /** 健康状态 → chip 色调（down 用错误色，degraded/stale/最近测试失败用警告色）。 */
     function rpcHealthTone(state) {
-      if (state === 'ok') return 'ok'
+      if (state === 'ok' || state === 'testedOk') return 'ok'
       if (state === 'down') return 'error'
-      if (state === 'degraded' || state === 'stale') return 'warn'
+      if (state === 'degraded' || state === 'stale' || state === 'testedLimited' || state === 'testedAuth' || state === 'testedFailed') return 'warn'
       return 'muted'
     }
 
@@ -3208,9 +3265,12 @@ window.__ModuleLoader__.load({
       // 概览，也是 provider tab。
       var providerCards = providers.map(function (entry) {
         var health = entry.health || { state: 'unknown' }
-        // 健康状态可能是几小时前的连续失败；展示层用 displayHealthState
-        // 把过期证据降级成「待验证」，避免在已登录、额度可读时误报不可用。
-        var healthState = displayHealthState(health)
+        // 最近一次模型测试比历史 health 更及时；有 30 分钟内的结果时，
+        // provider 卡也显示「刚测可用 / 刚测限额」，而不是继续挂「待验证」。
+        var cardTest = freshModelTestOf(entry)
+        var healthState = cardTest !== undefined && cardTest.state !== undefined
+          ? cardTest.state
+          : displayHealthState(health)
         var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
         var credits = entry.credits || { state: 'none' }
         var today = (entry.usage && entry.usage.today) || {}
@@ -3417,60 +3477,40 @@ window.__ModuleLoader__.load({
       // 正常 provider 的最近成功时间对排障没有帮助，反而增加一行噪音。
       var showLastSuccess = healthLastErrorAt > 0 && !(healthLastSuccessAt > healthLastErrorAt)
       // 最近一次「账号 × 模型」可用性测试（可能来自任意账号/模型）。
-      // 它比历史健康更及时：把它作为一个独立的「刚测…」证据挂到状态卡，
-      // 但不覆盖 provider 级历史 health，避免用一次模型测试冒充整体健康。
-      var latestModelTestEvidence
-      safeArray(active.accounts).forEach(function (account) {
-        var tests = account.modelTests
-        if (tests === null || typeof tests !== 'object') return
-        Object.keys(tests).forEach(function (modelId) {
-          var result = tests[modelId]
-          if (result === null || typeof result !== 'object' || !isFiniteNumber(result.at)) return
-          if (latestModelTestEvidence === undefined || result.at > latestModelTestEvidence.result.at) {
-            var model = safeArray(active.models).filter(function (entry) { return entry.id === modelId })[0]
-            latestModelTestEvidence = {
-              result: result,
-              modelId: modelId,
-              modelName: model !== undefined && (model.name || model.id) ? (model.name || model.id) : modelId,
-              accountId: typeof account.id === 'string' ? account.id : undefined,
-              accountLabel: typeof account.label === 'string' && account.label !== '' ? account.label : bind(t, 'accountFallback'),
-            }
-          }
-        })
-      })
+      // 它比历史健康更及时：状态卡只显示一个当前 chip —— 有 30 分钟内的测试
+      // 结果就以「刚测可用/限额/失效/失败」为准，否则退回历史「待验证/连续失败」。
+      // 历史 health 仍保留在下方「最近成功/最近失败」里，不丢信息。
+      var latestModelTestEvidence = freshModelTestOf(active)
       var latestModelTestFresh = latestModelTestEvidence !== undefined
-        && latestModelTestEvidence.result.at > 0
-        && Date.now() - latestModelTestEvidence.result.at < TEST_RESULT_TTL_MS
-      var latestModelTestOk = latestModelTestFresh && latestModelTestEvidence.result.ok === true
+      var latestModelTestResult = latestModelTestFresh ? latestModelTestEvidence.result : undefined
+      var latestModelTestOk = latestModelTestFresh && latestModelTestResult.ok === true
       var latestModelTestLimit = latestModelTestFresh
-        && (latestModelTestEvidence.result.code === 'RATE_LIMIT' || latestModelTestEvidence.result.code === 'QUOTA')
-      var latestModelTestAuth = latestModelTestFresh && latestModelTestEvidence.result.code === 'AUTH'
-      var latestModelTestLabel = latestModelTestOk
-        ? 'testedAvailableShort'
-        : latestModelTestLimit ? 'testedLimitedShort' : latestModelTestAuth ? 'authBadge' : 'modelTestFailed'
+        && (latestModelTestResult.code === 'RATE_LIMIT' || latestModelTestResult.code === 'QUOTA')
       var latestModelTestTitle = latestModelTestFresh
         ? [
             latestModelTestEvidence.modelName,
-            latestModelTestEvidence.accountLabel,
-            formatTime(latestModelTestEvidence.result.at),
-            latestModelTestEvidence.result.code,
-            latestModelTestEvidence.result.error,
+            latestModelTestEvidence.accountLabel || bind(t, 'accountFallback'),
+            formatTime(latestModelTestResult.at),
+            latestModelTestResult.code,
+            latestModelTestResult.error,
           ].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · ')
         : ''
-      var showLatestTestChip = latestModelTestFresh && (!latestModelTestOk || activeHealthState !== 'ok')
+      var statusChipState = latestModelTestFresh && latestModelTestEvidence.state !== undefined
+        ? latestModelTestEvidence.state
+        : activeHealthState
       var latestTestStaleHint
       if (activeHealthState === 'stale' && latestModelTestFresh) {
         if (latestModelTestOk) {
           latestTestStaleHint = bind(t, 'healthStaleTestOkHint', {
             model: latestModelTestEvidence.modelName,
-            time: formatAgo(latestModelTestEvidence.result.at, t),
+            time: formatAgo(latestModelTestResult.at, t),
           })
         } else if (latestModelTestLimit) {
           latestTestStaleHint = bind(t, 'healthStaleTestLimitHint', {
             model: latestModelTestEvidence.modelName,
-            time: formatAgo(latestModelTestEvidence.result.at, t),
-            reset: typeof latestModelTestEvidence.result.resetHint === 'string' && latestModelTestEvidence.result.resetHint !== ''
-              ? latestModelTestEvidence.result.resetHint
+            time: formatAgo(latestModelTestResult.at, t),
+            reset: typeof latestModelTestResult.resetHint === 'string' && latestModelTestResult.resetHint !== ''
+              ? latestModelTestResult.resetHint
               : '—',
           })
         }
@@ -3552,17 +3592,13 @@ window.__ModuleLoader__.load({
           h('div', { key: 'h', style: S.sectionHead },
             h('span', { style: S.sectionTitle }, rpcIcon('shield', 14), bind(t, 'secStatus')),
             h('span', {
-              className: rpcChipClass(rpcHealthTone(activeHealthState)),
-              title: isFiniteNumber(activeHealth.consecutiveFailures) && activeHealth.consecutiveFailures > 0
-                ? bind(t, 'consecutiveFailures', { count: activeHealth.consecutiveFailures })
-                : '',
-            }, bind(t, healthTextKey(activeHealthState))),
-            showLatestTestChip
-              ? h('span', {
-                  className: rpcChipClass(latestModelTestOk ? 'ok' : 'warn'),
-                  title: latestModelTestTitle,
-                }, bind(t, latestModelTestLabel))
-              : null,
+              className: rpcChipClass(rpcHealthTone(statusChipState)),
+              title: latestModelTestFresh
+                ? latestModelTestTitle
+                : isFiniteNumber(activeHealth.consecutiveFailures) && activeHealth.consecutiveFailures > 0
+                  ? bind(t, 'consecutiveFailures', { count: activeHealth.consecutiveFailures })
+                  : '',
+            }, bind(t, healthTextKey(statusChipState))),
             h('span', { style: S.grow }),
             h('span', { className: 'rpc-chip' }, active.images === true ? bind(t, 'imagesShort') : bind(t, 'imagesShortOff'))),
           h('dl', { className: 'rpc-kv' },
@@ -4744,7 +4780,7 @@ window.__ModuleLoader__.load({
           })
           : undefined
         if (accountModelRows.length > 0) {
-          var accountModelColumns = 'minmax(78px, 1fr) minmax(92px, 1.3fr) minmax(40px, .55fr) minmax(60px, .8fr) minmax(50px, .65fr) minmax(104px, 1.15fr)'
+          var accountModelColumns = 'minmax(78px, .9fr) minmax(126px, 1.8fr) minmax(40px, .55fr) minmax(60px, .8fr) minmax(50px, .65fr) minmax(104px, 1.1fr)'
           var accountById = {}
           safeArray(active.accounts).forEach(function (account) {
             if (account !== null && typeof account === 'object' && typeof account.id === 'string') accountById[account.id] = account
@@ -4829,24 +4865,23 @@ window.__ModuleLoader__.load({
           usageBody.push(
             h('div', { key: 'accountmodels', className: 'rpc-subsection' },
               h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
-                h('span', { style: S.sectionTitle }, rpcIcon('users', 13), bind(t, 'usageAccountModels')),
+                h('span', { style: S.sectionTitle, title: bind(t, 'usageAccountModelsHint') }, rpcIcon('users', 13), bind(t, 'usageAccountModels')),
                 showRangeToggle ? rangeButton('today', bind(t, 'usageToday'), 'today') : null,
                 showRangeToggle ? rangeButton('all', bind(t, 'usageTotal'), 'all') : null,
                 showRangeToggle
                   ? null
                   : h('span', { className: 'rpc-chip' }, bind(t, effectiveAccountModelRange === 'all' ? 'usageTotal' : 'usageToday')),
-                // 覆盖率：这批数字只覆盖升级之后的请求，缺口要写明。
-                // 不写的话，用户拿它和上方的「今日 N 次」对比只会觉得坏了。
+                // 覆盖率：短 chip + 悬停完整解释，避免把两行长文案塞进表头。
                 accountModelCoverage === undefined
                   ? null
                   : h('span', {
-                      title: bind(t, 'usageAccountModelsHint'),
+                      title: bind(t, 'usageAccountModelCoverageHint'),
                       className: 'rpc-chip rpc-chip-warn',
                     }, accountModelCoverage),
-                h('span', { style: S.grow }),
-                h('span', { className: 'rpc-tiny', title: bind(t, 'usageAccountModelsHint') }, bind(t, 'usageAccountModelsHint'))),
+                h('span', { style: S.grow })),
+              h('p', { key: 'accountmodelshint', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'usageAccountModelsHint')),
               accountModelFallback
-                ? h('p', { key: 'fallback', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'usageAccountModelTodayEmpty'))
+                ? h('p', { key: 'fallback', className: 'rpc-tiny', style: S.hintTiny, title: bind(t, 'usageAccountModelCoverageHint') }, bind(t, 'usageAccountModelTodayEmpty'))
                 : null,
               h('div', { className: 'rpc-table-frame', style: usageTableFrame },
                 h('div', { style: { display: 'grid', gridTemplateColumns: accountModelColumns, minWidth: 540, background: 'var(--rpc-surface-2)' } },
@@ -4859,6 +4894,7 @@ window.__ModuleLoader__.load({
                 accountModelRows.map(function (entry, index) {
                   return h('div', {
                     key: 'am' + index,
+                    'data-pair-row': 'true',
                     style: Object.assign({ display: 'grid', gridTemplateColumns: accountModelColumns, alignItems: 'center' }, index > 0 ? usageRowLine : {}),
                   },
                   h('span', { style: Object.assign({}, usageCell, { color: 'var(--rpc-muted)' }), title: entry.label }, entry.label || '—'),
