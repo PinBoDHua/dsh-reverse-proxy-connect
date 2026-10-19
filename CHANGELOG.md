@@ -1,5 +1,30 @@
 # 更新记录
 
+## 0.6.4 — 2026-10-20
+
+第八轮审计：**没有发现可修缺陷**。这一版把本轮的取证方式沉淀成回归、并把结论记
+下来，避免下一轮重复同样的排查。状态接口仍是 v8，设置文件仍是 v2。
+
+### 取证
+
+- 用后端真实产出的 `/status`（全新安装、已隔离本机登录态）核对契约形状：六家的
+  `credits` 是 `state:'none'` **且带 `error`**、`models` 取内置兜底、`account.usage`
+  与 `lastTest` 整个字段缺失、`modelTests` 是空对象、`stats` 全零。客户端对每一处
+  都有守卫（`isFiniteNumber` / `safeArray` / `typeof === 'object'`），无字段错配。
+- 对同一份真实文档做 41 处字段级变异（`credits=null`、`models=[null]`、
+  `accounts=[null]`、`stats=null`、`settings.alerts=null`、`events.items=[null]`、
+  `providers[1]=null` …），逐个渲染卡片的六个分区与侧栏胶囊：**0 次异常**。
+- 另核对四处枚举/同源规则：签到 outcome 种类（生产 5 种 × 三处消费者）、13 种事件
+  类型 × 三处标签映射、`stats` 的删除墓碑与跨进程合并、`displayHealthState` 与服务端
+  `healthOf` 的 30 分钟 stale 规则 —— 均对齐。
+
+### 测试
+
+- 新增「全新安装（六家全空）」回归：卡片六个分区 + 侧栏胶囊都要能渲染，且不出现
+  `NaN` / `undefined` / `[object Object]`；夹具形状取自上述真实文档，不是手编的。
+- 后端 `node --test tests/*.test.mjs` **317 项**、`tests/client-credits.mjs`
+  **100 项**（原 99）全部通过。
+
 ## 0.6.3 — 2026-10-20
 
 第七轮审计：一条前端缺陷。状态接口仍是 v8，设置文件仍是 v2。

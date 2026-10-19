@@ -3011,4 +3011,114 @@ function extractFn(header) {
   }
 }
 
+// 52) 全新安装（六家都没有凭证、没有目录、没有统计）：卡片六个分区与侧栏胶囊
+//     都要能渲染。这一份形状取自后端真实产出的 /status（冷启动、隔离了本机
+//     登录态），不是手编的：credits 是 `state:'none'` 且带 `error`、models 为空、
+//     account.usage / lastTest 整个字段缺失、modelTests 是空对象、stats 全零。
+{
+  const providersSnapshot = STATUS.providers
+  const statsSnapshot = STATUS.stats
+  const counters = () => ({
+    requests: 0, ok: 0, failed: 0, aborted: 0, incomplete: 0,
+    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, reasoningTokens: 0,
+    durationMs: 0, maxDurationMs: 0, lastAt: 0, lastOkAt: 0, lastErrorAt: 0, consecutiveFailures: 0,
+    avgDurationMs: 0, totalTokens: 0,
+  })
+  const trend = { points: [], spentToday: 0, spent7d: 0, topupToday: 0, topup7d: 0, sampleCount: 0, lastAt: 0, firstAt: 0 }
+  const reason = '没有找到 Trae 的登录文件（已查找 1 个位置）。请先打开 Trae 并登录，或在连接设置里指定 storage.json 的路径。'
+  try {
+    STATUS.providers = ['workbuddy', 'workbuddy-ai', 'qoder', 'qoder-global', 'trae', 'trae-global'].map((provider) => {
+      const creditsOf = () => ({ state: 'none', remain: 0, total: 0, unit: 'credits', items: [], fetchedAt: 0, error: reason, trend })
+      return {
+        provider,
+        displayName: provider,
+        kind: provider.startsWith('qoder') ? 'pat' : 'desktop',
+        enabled: true,
+        catalogSource: 'builtin',
+        fetchedAt: 0,
+        accountId: 'default',
+        models: [],
+        modelCount: 0,
+        credits: creditsOf(),
+        accounts: [{
+          id: 'default',
+          label: '本机登录',
+          enabled: true,
+          kind: 'desktop',
+          active: true,
+          configured: false,
+          authFile: '',
+          source: 'desktop',
+          credits: creditsOf(),
+          cooldownUntil: 0,
+          modelTests: {},
+        }],
+        checkin: {
+          enabled: true,
+          lastRunAt: 0,
+          completedOn: '2026-10-20',
+          completedToday: true,
+          lastAttemptAt: 0,
+          result: {
+            provider,
+            claimed: 0,
+            credit: 0,
+            outcomes: [{ accountId: 'default', label: '本机登录', kind: 'unconfigured', message: reason }],
+          },
+        },
+        autoSwitch: true,
+        credential: { status: 'signed-out', reason: 'no-credential', message: reason },
+        health: { state: 'unknown', consecutiveFailures: 0, lastErrorAt: 0, lastSuccessAt: 0 },
+        usage: { ...counters(), today: counters() },
+        images: true,
+      }
+    })
+    STATUS.stats = {
+      enabled: true,
+      since: 1792234000000,
+      totals: counters(),
+      today: counters(),
+      providers: {},
+      providerToday: {},
+      accounts: {},
+      models: {},
+      accountModels: {},
+      accountModelToday: {},
+      daily: [],
+      providerDaily: {},
+      providerCurrentSession: {},
+      health: {},
+      recent: [],
+    }
+
+    let tree = await mount(card, { t: realT })
+    assertNoBadNumbers(tree, '全新安装：卡片')
+    const text = textOf(tree)
+    for (const bad of ['undefined', '[object Object]', 'NaN']) {
+      if (text.includes(bad)) throw new Error(`全新安装的空态渲染出 ${bad}`)
+    }
+    // 六个分区逐个切过去：模型清单为空、额度未读取、签到今天已判过，都不能抛。
+    const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    if (tabs.length !== 6) throw new Error(`应有 6 个分区，实际 ${String(tabs.length)}`)
+    for (const tab of tabs) {
+      tab.props.onClick()
+      tree = await render(card, { t: realT })
+      assertNoBadNumbers(tree, '全新安装：分区')
+    }
+
+    // 侧栏胶囊：六家都是 none → 落到「未读取」，而不是空白或坏值。
+    await mount(pill, { t: (key) => key, wide: true })
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    const pillTree = await render(pill, { t: (key) => key, wide: true })
+    if (!textOf(pillTree).includes('creditsNone')) {
+      throw new Error(`全新安装时胶囊没有说明「未读取」：${JSON.stringify(textOf(pillTree).slice(0, 120))}`)
+    }
+    assertNoBadNumbers(pillTree, '全新安装：侧栏胶囊')
+    console.log('✓ 全新安装（六家全空）时六个分区与胶囊都能渲染，不出现坏值')
+  } finally {
+    STATUS.providers = providersSnapshot
+    STATUS.stats = statsSnapshot
+  }
+}
+
 console.log('client-credits: OK')
