@@ -4837,18 +4837,11 @@ window.__ModuleLoader__.load({
                 ].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
               }, bind(t, 'limitBadge'))
             }
-            var busyKey = 'model-test:' + entry.accountId + ':' + entry.model
+            // 这里只展示最近一次测试/真实请求的结论。手动「检测」按钮已移除：
+            // 概览的「可用性测试」可以选择任意账号和模型，功能更完整，避免两处重复。
             return h('div', {
               style: { display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 5, flexWrap: 'wrap', minWidth: 0 },
-            },
-            badge,
-            h('button', {
-              type: 'button',
-              className: 'rpc-btn rpc-btn-sm',
-              disabled: isBusy(busyKey),
-              title: bind(t, 'modelTest'),
-              onClick: function () { testAccountModel(active.provider, entry.accountId, entry.model) },
-            }, isBusy(busyKey) ? bind(t, 'modelTesting') : bind(t, 'modelTest')))
+            }, badge)
           }
           // 切换按钮：两个口径的起点不同（今日 vs 累计），必须让用户能选，
           // 而不是只能看一个然后怀疑数字。老宿主没有今日数据时渲染按钮会把

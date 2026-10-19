@@ -1884,7 +1884,8 @@ try {
   STATUS.providers[0].accounts = accountUsageSnapshot
 }
 
-// 8) 账号 × 模型可以现场「检测」：429 要打「限额」徽章，按钮发 test-model。
+// 8) 账号 × 模型只展示测试结果徽章；重复的「检测」按钮已移除。
+//    自定义模型测试统一走概览的「可用性测试」。
 const modelTestSnapshot = STATUS.providers[0].accounts
 STATUS.providers[0].accounts = STATUS.providers[0].accounts.map((account) => ({
   ...account,
@@ -1909,23 +1910,15 @@ try {
   if (!textOf(limitedRow).includes('limitBadge')) {
     throw new Error('429 的模型测试结果没有渲染「限额」徽章')
   }
-  const limitChip = find(limitedRow, (node) => textOf(node) === 'limitBadge')
+  const limitChip = find(limitedRow, (node) => node.type === 'span' && textOf(node) === 'limitBadge')
   if (limitChip === undefined || !String(limitChip.props?.title ?? '').includes('limitUntil')) {
     throw new Error('限额徽章的悬停提示缺少重置时间')
   }
-  const testModelButton = find(limitedRow, (node) => node.type === 'button' && textOf(node) === 'modelTest')
-  if (testModelButton === undefined) throw new Error('账号 × 模型行缺少「检测」按钮')
-  const beforeModelTest = calls.length
-  testModelButton.props.onClick()
-  const modelTestCall = calls[calls.length - 1]
-  if (calls.length === beforeModelTest || !String(modelTestCall.body).includes('"action":"test-model"')) {
-    throw new Error('点「检测」没有发 test-model 请求')
+  const duplicateTestButton = find(limitedRow, (node) => node.type === 'button' && textOf(node) === 'modelTest')
+  if (duplicateTestButton !== undefined) {
+    throw new Error('账号 × 模型行仍有重复的「检测」按钮，应统一走可用性测试')
   }
-  if (!String(modelTestCall.body).includes('"model":"auto"') || !String(modelTestCall.body).includes('"accountId":"default"')) {
-    throw new Error(`test-model 请求缺少账号或模型：${String(modelTestCall.body)}`)
-  }
-  await render(card, { t: (key) => key })
-  console.log('✓ 账号 × 模型可现场检测，429 显示「限额」徽章')
+  console.log('✓ 账号 × 模型只展示测试结果徽章，重复的「检测」按钮已移除')
 } finally {
   STATUS.providers[0].accounts = modelTestSnapshot
 }
