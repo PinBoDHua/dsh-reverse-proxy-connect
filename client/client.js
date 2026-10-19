@@ -3119,7 +3119,11 @@ window.__ModuleLoader__.load({
         pendingProviderEnabled.current[entry.provider] = next
         var providersPatch = {}
         providersPatch[entry.provider] = { enabled: next }
-        mutate({ providers: providersPatch })
+        mutate({ providers: providersPatch }, {
+          // 保存失败时丢掉本地猜测：否则开关会停在「用户点出来的值」上，
+          // 看起来已经生效，实际服务端没变，直到下一轮轮询才翻回去。
+          onError: function () { delete pendingProviderEnabled.current[entry.provider] },
+        })
       }
 
       var toggleModel = function (entry, model) {
