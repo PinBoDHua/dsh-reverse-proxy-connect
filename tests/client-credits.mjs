@@ -521,9 +521,15 @@ console.log('✓ 卡片分组、总览与模型列表都渲染出来了')
 // 1a. 信息架构：六个分区只显示当前页，且不是所有内容都堆进概览。
 //     这里同时验证「真实 React 会把 key 从 props 摘到 element.key」——
 //     如果按 props.key 归页，所有分区都会落到概览。
+//
+//     分区用 `role="group"` 而不是 `role="tabpanel"`：它们是「页内导航」的六页，
+//     共享同一个 provider tablist 的 panel（`dsh-rpc-detail`）。以前把这六页
+//     标成 tabpanel，于是 tab 的 `aria-controls="dsh-rpc-detail"` 指向一个
+//     没有 role 的容器、六个真 tabpanel 又没有 tab 指向它们 —— tabs 语义两头
+//     都不成立。第 1a-1 段专门守这条契约。
 {
-  const panels = findAll(cardTree, (node) => node.props?.role === 'tabpanel'
-    && typeof node.props?.id === 'string' && node.props.id.startsWith('dsh-rpc-page-'))
+  const panels = findAll(cardTree, (node) => typeof node.props?.id === 'string'
+    && node.props.id.startsWith('dsh-rpc-page-'))
   if (panels.length !== 6) throw new Error(`应有 6 个详情分区，实际 ${panels.length}`)
   const visible = panels.filter((node) => node.props.style?.display !== 'none')
   if (visible.length !== 1) throw new Error(`同一时间应只有 1 个分区可见，实际 ${visible.length}`)
@@ -534,6 +540,29 @@ console.log('✓ 卡片分组、总览与模型列表都渲染出来了')
   }
   for (const hidden of ['usageHeatmap', 'eventTitle', 'secConnection', 'modelRateToggle']) {
     if (overviewText.includes(hidden)) throw new Error(`不属于概览的内容被堆进了概览：${hidden}`)
+  }
+
+  // 1a-1. tabs 契约：每个 tab 的 aria-controls 必须解析到唯一的 role=tabpanel，
+  //       且那个 panel 的 aria-labelledby 指回当前选中的 tab。
+  const tabs = findAll(cardTree, (node) => node.props?.role === 'tab')
+  if (tabs.length === 0) throw new Error('找不到服务商 tab')
+  const tabpanels = findAll(cardTree, (node) => node.props?.role === 'tabpanel')
+  if (tabpanels.length !== 1) throw new Error(`服务商 tablist 应只有一个 tabpanel，实际 ${tabpanels.length}`)
+  const panelId = tabpanels[0].props.id
+  if (typeof panelId !== 'string' || panelId === '') throw new Error('tabpanel 缺少 id')
+  const selectedTab = tabs.find((node) => node.props['aria-selected'] === true)
+  if (selectedTab === undefined) throw new Error('没有 aria-selected 的 tab')
+  for (const tab of tabs) {
+    if (tab.props['aria-controls'] !== panelId) {
+      throw new Error(`tab ${tab.props.id} 的 aria-controls 指向 ${String(tab.props['aria-controls'])}，应为 ${panelId}`)
+    }
+  }
+  if (tabpanels[0].props['aria-labelledby'] !== selectedTab.props.id) {
+    throw new Error(`tabpanel 的 aria-labelledby 应指回选中的 tab ${selectedTab.props.id}，实际 ${String(tabpanels[0].props['aria-labelledby'])}`)
+  }
+  // 页内六页不能同时又是 tabpanel：那会让上面的「唯一 tabpanel」断言失效。
+  for (const panel of panels) {
+    if (panel.props.role === 'tabpanel') throw new Error(`${panel.props.id} 不应是 role=tabpanel（它是页内分区，不是 tablist 的 panel）`)
   }
   // 点击「账号」页：只切换可见性，不丢失其它分区。
   const accountsTab = find(cardTree, (node) => node.type === 'button'
@@ -3115,6 +3144,234 @@ function extractFn(header) {
     }
     assertNoBadNumbers(pillTree, '全新安装：侧栏胶囊')
     console.log('✓ 全新安装（六家全空）时六个分区与胶囊都能渲染，不出现坏值')
+  } finally {
+    STATUS.providers = providersSnapshot
+    STATUS.stats = statsSnapshot
+  }
+}
+
+// ---------- 第七轮审计（0.6.6）的前端回归 ----------
+//
+// 每条都对应一个用真实输入复现过的缺陷；改成旧写法会立刻红。
+{
+  const providersSnapshot = STATUS.providers
+  const statsSnapshot = STATUS.stats
+  try {
+    // 1) 整轮签到失败时宿主只给 `accountId: '*'` 的兜底 outcome。
+    //    旧实现按 accountId/label 匹配，'*' 两头不命中 → 横幅说「失败」、
+    //    每行签到列却都是「—」，同一份数据两个结论。
+    const base = providersSnapshot[0]
+    STATUS.providers = [
+      {
+        ...base,
+        checkin: {
+          enabled: true,
+          completedOn: '',
+          completedToday: false,
+          lastRunAt: 1792234000000,
+          result: {
+            provider: base.provider,
+            claimed: 0,
+            credit: 0,
+            at: 1792234000000,
+            outcomes: [{ accountId: '*', label: '全部账号', kind: 'failed', message: 'settings.json 正被另一个进程写入' }],
+          },
+        },
+        accounts: JSON.parse(JSON.stringify(base.accounts)).map((account) => ({ ...account, active: false })),
+      },
+      ...providersSnapshot.slice(1),
+    ]
+    let tree = await mount(card, { t: realT })
+    const accountTabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    accountTabs.find((node) => textOf(node).startsWith(realT('navAccounts'))).props.onClick()
+    tree = await render(card, { t: realT })
+    const checkinCells = findAll(tree, (node) => typeof node.props?.className === 'string'
+      && node.props.className.includes('rpc-acc-checkin'))
+      .map((node) => textOf(node))
+      .filter((text) => text !== '')
+    if (checkinCells.length === 0) throw new Error('账号页没有签到单元格')
+    for (const cell of checkinCells) {
+      if (!cell.includes(realT('accountCheckinFailed')) && !cell.includes('—')) {
+        throw new Error(`整轮签到失败时账号行没有结论：${JSON.stringify(cell)}`)
+      }
+    }
+    if (!checkinCells.some((cell) => cell.includes(realT('accountCheckinFailed')))) {
+      throw new Error(`整轮签到失败没有落到账号行（仍是 —）：${JSON.stringify(checkinCells)}`)
+    }
+    console.log('✓ 整轮签到失败的 `accountId: "*"` 兜底结论会落到每个账号行')
+
+    // 2) Qoder 计划接口失败（planUnknown）不能被读成「额度已用尽」：
+    //    服务端按 Free 处理（不预警、不换号），客户端必须同一口径。
+    STATUS.providers = [
+      {
+        ...base,
+        provider: 'qoder-global',
+        displayName: 'Qoder Global',
+        kind: 'pat',
+        credits: { state: 'ok', remain: 0, total: 0, used: 0, unit: 'credits', planUnknown: true, exceeded: true, items: [], fetchedAt: 1792234000000 },
+        accounts: [{ id: 'default', label: '默认令牌', labelKey: 'accountDefaultPat', active: true, kind: 'pat', configured: true, source: 'pat', credits: { state: 'ok', remain: 0, total: 0, unit: 'credits', planUnknown: true, exceeded: true, items: [], fetchedAt: 1792234000000 } }],
+        checkin: { enabled: true },
+        credential: { status: 'signed-in' },
+      },
+      ...providersSnapshot.slice(1),
+    ]
+    tree = await mount(card, { t: realT })
+    const qoderText = textOf(tree)
+    if (qoderText.includes(realT('creditsExhausted'))) {
+      throw new Error('planUnknown 的 Qoder 被渲染成「额度已用尽」，与服务端的 Free 判定矛盾')
+    }
+    if (!qoderText.includes(realT('creditsFreeQueue')) && !qoderText.includes(realT('creditsFree'))) {
+      throw new Error('planUnknown 的 Qoder 既不是「用尽」也不是「免费」')
+    }
+    console.log('✓ Qoder 的 planUnknown 与服务端同判为 Free，不再显示「额度已用尽」')
+
+    // 3) 美元计价的额度要显示 $，不能一律写成「积分」。
+    //    服务端 lib/trae/transport.js 在按美元计费时下发 `unit: 'usd'`。
+    STATUS.providers = [
+      {
+        ...base,
+        credits: { state: 'ok', remain: 12.5, total: 100, used: 87.5, unit: 'usd', items: [{ name: 'Pro pack', remain: 12.5, total: 100 }], fetchedAt: 1792234000000 },
+        accounts: JSON.parse(JSON.stringify(base.accounts)).map((account, index) => ({
+          ...account,
+          credits: { state: 'ok', remain: 12.5, total: 100, unit: 'usd', items: [], fetchedAt: 1792234000000 },
+          active: index === 0,
+        })),
+        checkin: { enabled: true },
+        credential: { status: 'signed-in' },
+      },
+      ...providersSnapshot.slice(1),
+    ]
+    tree = await mount(card, { t: realT })
+    const usdText = textOf(tree)
+    if (!usdText.includes('$')) throw new Error('美元计价的额度没有显示 $')
+    if (usdText.includes('12.5 / 100 ' + realT('creditsUnit'))) {
+      throw new Error('美元计价的额度被写成了「积分」')
+    }
+    // 账号页的额度单元格也要跟着换单位。
+    const usdTabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    usdTabs.find((node) => textOf(node).startsWith(realT('navAccounts'))).props.onClick()
+    tree = await render(card, { t: realT })
+    const usdAccountText = textOf(tree)
+    if (!usdAccountText.includes('$')) throw new Error('账号页的额度单元格没有显示 $')
+    console.log('✓ 美元计价的额度显示 $，不再冒充「积分」')
+
+    // 4) 模型名是对象/缺失时不能渲染 [object Object]（坏缓存、手改目录）。
+    STATUS.providers = [
+      {
+        ...base,
+        models: [
+          { id: 'auto', name: { bogus: true }, contextWindow: 200000, maxTokens: 8192, supportsImages: false, reasoningEfforts: [], disabled: false },
+          { id: 'glm', name: 'GLM-5.3', contextWindow: 100000, maxTokens: 8192, supportsImages: false, reasoningEfforts: [], disabled: false },
+        ],
+        modelCount: 2,
+      },
+      ...providersSnapshot.slice(1),
+    ]
+    tree = await mount(card, { t: realT })
+    const modelTabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    modelTabs.find((node) => textOf(node).startsWith(realT('navModels'))).props.onClick()
+    tree = await render(card, { t: realT })
+    const modelText = textOf(tree)
+    if (modelText.includes('[object Object]')) throw new Error('坏模型名被渲染成 [object Object]')
+    if (!modelText.includes('auto')) throw new Error('坏模型名没有回落到模型 id')
+    console.log('✓ 坏模型名（对象/缺失）回落到 id，不渲染 [object Object]')
+
+    // 5) 「立即生效」的复选框：点完不能立刻弹回原值，连点两次必须发出两个
+    //    相反的值（第二次是撤销）。旧实现直接读服务端字段、也没有本地意图：
+    //    ① POST 在飞时 checked 仍是旧值（用户看不到自己刚点的结果）；
+    //    ② 连点两次都从同一份旧 status 出发，发出**同一个**补丁。
+    STATUS.providers = providersSnapshot
+    tree = await mount(card, { t: realT })
+    const settingsTabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    settingsTabs.find((node) => textOf(node).startsWith(realT('navSettings'))).props.onClick()
+    tree = await render(card, { t: realT })
+    const checkLabels = findAll(tree, (node) => node.type === 'label' && node.props?.className === 'rpc-check-label')
+    const findBox = (needle) => {
+      const label = checkLabels.find((node) => textOf(node).includes(realT(needle)))
+      if (label === undefined) throw new Error(`找不到开关：${needle}`)
+      return { label, box: label.children.find((child) => child && child.type === 'input') }
+    }
+    const usageToggle = findBox('usageShowInSidebar')
+    if (usageToggle.box.props.checked !== true) throw new Error('侧栏用量开关初始应为勾选')
+    const beforeUsage = calls.filter((call) => call.method === 'POST' && String(call.url).includes('/settings')).length
+    // 让 /settings 挂住不返回：真实宿主保存时要 await 一轮目录 + 额度刷新，
+    // 最长 90 秒，这正是「用户点完看不到结果」的窗口。请求仍然记进 `calls`，
+    // 只是永不 resolve —— 与真实慢保存一致。
+    const heldFetch = sandbox.fetch
+    sandbox.fetch = (url, init) => {
+      if (!String(url).includes('/settings')) return heldFetch(url, init)
+      calls.push({ url: String(url), method: init?.method ?? 'GET', body: init?.body })
+      return new Promise(() => {})
+    }
+    try {
+      usageToggle.box.props.onChange()
+      tree = await render(card, { t: realT })
+      const afterUsage = findAll(tree, (node) => node.type === 'label' && node.props?.className === 'rpc-check-label')
+        .find((node) => textOf(node).includes(realT('usageShowInSidebar')))
+        .children.find((child) => child && child.type === 'input')
+      if (afterUsage.props.checked !== false) {
+        throw new Error('点完「侧栏显示今日用量」后复选框弹回勾选（POST 还没回来就用了旧的服务端值）')
+      }
+
+      // 连点两次：两次必须发相反的值（第二次把第一次撤销掉）。
+      const rateToggle = findBox('modelRateToggle')
+      const beforeRate = calls.filter((call) => call.method === 'POST' && String(call.url).includes('/settings')).length
+      rateToggle.box.props.onChange()
+      tree = await render(card, { t: realT })
+      const rateBox2 = findAll(tree, (node) => node.type === 'label' && node.props?.className === 'rpc-check-label')
+        .find((node) => textOf(node).includes(realT('modelRateToggle')))
+        .children.find((child) => child && child.type === 'input')
+      rateBox2.props.onChange()
+      const ratePosts = calls.filter((call) => call.method === 'POST' && String(call.url).includes('/settings')).slice(beforeRate)
+      if (ratePosts.length !== 2) throw new Error(`连点两次应发两个补丁，实际 ${ratePosts.length}`)
+      const firstRate = JSON.parse(ratePosts[0].body).display?.showRateInModelName
+      const secondRate = JSON.parse(ratePosts[1].body).display?.showRateInModelName
+      if (firstRate === secondRate) {
+        throw new Error(`连点两次发出了一样的值（${String(firstRate)}），第二次撤销丢失`)
+      }
+    } finally {
+      sandbox.fetch = heldFetch
+    }
+    const usagePosts = calls.filter((call) => call.method === 'POST' && String(call.url).includes('/settings')).slice(beforeUsage)
+    if (usagePosts.length < 1) throw new Error('一次点击应只发一个补丁')
+    if (JSON.parse(usagePosts[0].body).display?.showUsageInSidebar !== false) {
+      throw new Error(`补丁内容不对：${usagePosts[0].body}`)
+    }
+    console.log('✓ 立即生效的开关点完立刻反映，连点两次能正确撤销')
+
+    // 6) 接入开关的本地意图不能被一次 /status 轮询清掉。
+    //    /settings 会等一轮目录 + 额度刷新（最长 90 秒），期间必然穿插轮询；
+    //    旧实现在 `useEffect([status])` 里无条件清空意图，开关会自己弹回「开」。
+    tree = await mount(card, { t: (key) => key })
+    const beforeToggle = calls.filter((call) => call.method === 'POST' && String(call.url).includes('/settings')).length
+    const switchOf = (node) => find(node, (item) => item.type === 'input' && item.props?.className === 'rpc-switch-input')
+    const switchInput = switchOf(tree)
+    if (switchInput === undefined) throw new Error('找不到接入开关')
+    if (switchInput.props.checked !== true) throw new Error('接入开关初始应为开')
+    // 同样让 /settings 挂住：PATCH 在飞时才可能被轮询「翻回去」。
+    const heldFetch2 = sandbox.fetch
+    sandbox.fetch = (url, init) => {
+      if (!String(url).includes('/settings')) return heldFetch2(url, init)
+      calls.push({ url: String(url), method: init?.method ?? 'GET', body: init?.body })
+      return new Promise(() => {})
+    }
+    try {
+      switchInput.props.onChange()
+      tree = await render(card, { t: (key) => key })
+      if (switchOf(tree).props.checked !== false) throw new Error('关掉接入后开关没有立刻变成关闭')
+      // 模拟 PATCH 还没回来时的一次轮询（同样的 status 送达，effect 重跑）。
+      tree = await render(card, { t: (key) => key })
+      if (switchOf(tree).props.checked !== false) {
+        throw new Error('一次 /status 轮询把接入开关的本地意图清掉了（开关弹回「开」）')
+      }
+    } finally {
+      sandbox.fetch = heldFetch2
+    }
+    const togglePosts = calls.filter((call) => call.method === 'POST' && String(call.url).includes('/settings')).slice(beforeToggle)
+    if (togglePosts.length !== 1 || JSON.parse(togglePosts[0].body).providers?.workbuddy?.enabled !== false) {
+      throw new Error(`接入开关的补丁不对：${JSON.stringify(togglePosts.map((call) => call.body))}`)
+    }
+    console.log('✓ 接入开关的本地意图不会在 /status 轮询时被清掉')
   } finally {
     STATUS.providers = providersSnapshot
     STATUS.stats = statsSnapshot

@@ -1484,7 +1484,14 @@ window.__ModuleLoader__.load({
       if (credits.freePlan === true) return true
       if (credits.paid === false) return true
       var plan = typeof credits.planName === 'string' ? credits.planName.toLowerCase() : ''
-      return plan === 'free' || plan.indexOf('free') !== -1 || plan.indexOf('免费') !== -1
+      if (plan === 'free' || plan.indexOf('free') !== -1 || plan.indexOf('免费') !== -1) return true
+      // 计划接口失败（`planUnknown`）时三件证据全缺：Free 套餐的 `total` 本来就是 0，
+      // 不能因为「不知道套餐」就把它读成「额度用尽」。服务端 lib/quota.js 的同名
+      // 判定就是这么处理的（`planUnknown === true && paid !== true` → 按 Free 处理），
+      // 客户端漏了这一支，于是同一份快照在卡片上是红色「额度已用尽」、在预警
+      // 逻辑里却「不预警、不换号」—— 用户看到的结论与插件自己的行为相反。
+      if (credits.planUnknown === true && credits.paid !== true) return true
+      return false
     }
 
     /**
@@ -1599,6 +1606,29 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 一份额度快照的货币/单位（用于所有展示位置）。
+     *
+     * 上游不只有「积分」：Trae 在按美元计费时下发 `unit: 'usd'`
+     * （lib/trae/transport.js），12.5 美元被写成「12.5 / 100 积分」是实打实的
+     * 金额错标。旧实现 `formatCreditsText` 对非 `credits` 直接置空单位，而
+     * 卡片/账号表/侧栏胶囊又硬编码 `creditsUnit`，两处都不对。未知单位原样
+     * 显示，也比静默换成「积分」或留空强。
+     *
+     * @param credits - 额度快照。
+     * @param t - 文案绑定。
+     * @returns 单位文本（可能是空串：没有单位信息）。
+     */
+    function creditsUnitOf(credits, t) {
+      var unit = credits !== null && typeof credits === 'object' && typeof credits.unit === 'string'
+        ? credits.unit.trim().toLowerCase()
+        : ''
+      if (unit === '' || unit === 'credits' || unit === 'credit') return bind(t, 'creditsUnit')
+      if (unit === 'usd' || unit === 'dollar' || unit === 'dollars') return '$'
+      if (unit === 'cny' || unit === 'rmb') return '¥'
+      return unit
+    }
+
+    /**
      * 把额度拆成「大数字 + 小分母 + 单位」，给侧栏面板做层级。
      *
      * 旧版把「775 / 1,300 积分」塞进一个 12.5px 的粗体串里，三个数字一样重，
@@ -1612,11 +1642,11 @@ window.__ModuleLoader__.load({
           unit: '',
         }
       }
-      if (credits.unlimited === true) return { big: '∞', small: '', unit: bind(t, 'creditsUnit') }
+      if (credits.unlimited === true) return { big: '∞', small: '', unit: creditsUnitOf(credits, t) }
       return {
         big: formatNumber(credits.remain),
         small: isFiniteNumber(credits.total) && credits.total > 0 ? '/ ' + formatNumber(credits.total) : '',
-        unit: bind(t, 'creditsUnit'),
+        unit: creditsUnitOf(credits, t),
       }
     }
 
@@ -1678,8 +1708,30 @@ window.__ModuleLoader__.load({
       if (credits.unlimited === true) return bind(t, 'creditsUnlimited')
       var remain = formatNumber(credits.remain)
       var total = isFiniteNumber(credits.total) && credits.total > 0 ? ' / ' + formatNumber(credits.total) : ''
-      var unit = credits.unit === 'credits' ? bind(t, 'creditsUnit') : ''
-      return remain + total + ' ' + unit
+      // 单位按快照自己的 `unit` 走（`usd` → `$`，未知单位原样显示）。
+      // 旧实现只认 `credits`，其余一律置空 —— 美元计费的账号会被读成「积分」。
+      var unit = creditsUnitOf(credits, t)
+      return (remain + total + ' ' + unit).trim()
+    }
+
+    /**
+     * 模型在界面上的可显示名字。
+     *
+     * 目录可能来自手改/降级的缓存，`name` 有可能是对象、数字或缺失：
+     * 直接把它交给 React 会渲染成 `[object Object]`，或者整张卡片被错误边界
+     * 替换成空白。所有展示模型名的地方都必须走这里，不要各自写
+     * `model.name || model.id`。
+     *
+     * @param model - 目录行。
+     * @param fallback - 全都取不到时的兜底（默认 'model'）。
+     * @returns 可显示的字符串。
+     */
+    function modelLabelOf(model, fallback) {
+      var label = typeof fallback === 'string' && fallback !== '' ? fallback : 'model'
+      if (model === null || model === undefined || typeof model !== 'object') return label
+      if (typeof model.name === 'string' && model.name !== '') return model.name
+      if (typeof model.id === 'string' && model.id !== '') return model.id
+      return label
     }
 
     /** 健康状态的文案键。 */
@@ -1722,7 +1774,7 @@ window.__ModuleLoader__.load({
             latest = {
               result: result,
               modelId: modelId,
-              modelName: model !== undefined && (model.name || model.id) ? (model.name || model.id) : modelId,
+              modelName: modelLabelOf(model, modelId),
               accountId: typeof account.id === 'string' ? account.id : undefined,
               accountLabel: typeof account.label === 'string' && account.label !== '' ? account.label : '',
               state: testedHealthState(result),
@@ -2482,8 +2534,14 @@ window.__ModuleLoader__.load({
       if (checkin.enabled === false) return { label: bind(t, 'accountCheckinOff'), tone: 'muted' }
       var result = checkin.result !== null && typeof checkin.result === 'object' ? checkin.result : undefined
       var outcomes = result === undefined ? [] : safeArray(result.outcomes)
+      // 宿主在整轮签到抛错时只有一个兜底 outcome：`accountId: '*'`
+      // （读设置/写盘直接失败，根本走不到账号循环）。旧实现只按 accountId /
+      // label 匹配，`'*'` 两条都不命中 → 横幅写「签到失败」，表格两行却都是
+      // 「—」，同一份数据两个结论。这里把 `'*'` 当成所有账号的兜底结论。
+      var wildcard = outcomes.find(function (item) { return item.accountId === '*' })
       var outcome = outcomes.find(function (item) { return item.accountId === account.id })
         || outcomes.find(function (item) { return item.accountId === undefined && item.label === account.label })
+        || wildcard
       if (outcome === undefined) {
         return {
           label: bind(t, account.configured === false ? 'accountCheckinSkipped' : 'accountCheckinNone'),
@@ -2994,9 +3052,6 @@ window.__ModuleLoader__.load({
       // 高级设置：只要用户没在编辑，就跟随宿主每次下发的值（含外部修改）。
       useEffect(function () {
         if (status === undefined || !status.settings) return
-        // 新一轮状态已到（无论是保存回读还是轮询）：把 provider 开关的本地意图
-        // 交还给服务端值。否则一次失败的保存会让开关永远停在用户点出来的值上。
-        pendingProviderEnabled.current = {}
         if (advDirty.current === true) return
         var advanced = status.settings.advanced || {}
         // 非有限值不能进输入框：`NaN / 1000` 会显示字面「NaN」，`Infinity * 100`
@@ -3122,6 +3177,16 @@ window.__ModuleLoader__.load({
             setError(undefined)
             endBusy('save')
             if (options !== undefined && options.clearPatDraft === true) setPatDraft('')
+            // 这一次写入已经落地：把对应的本地意图交还给服务端值。
+            // 用「写入响应」而不是「任意一次 /status」触发，才能保证
+            // 20 秒轮询不会在 PATCH 还在飞时把开关弹回旧值。
+            if (options !== undefined && typeof options.settle === 'function') {
+              try {
+                options.settle()
+              } catch (_) {
+                /* 回调失败不该再产生一个未处理拒绝 */
+              }
+            }
             if (options !== undefined && typeof options.onSuccess === 'function') options.onSuccess()
             return document
           })
@@ -3162,6 +3227,46 @@ window.__ModuleLoader__.load({
       // 期间连点两次都从旧 status 的 `!entry.enabled` 出发会发同一个值，
       // 「关掉再打开」最后仍停在关闭。这里按 provider 记住最后一次意图。
       var pendingProviderEnabled = useRef({})
+      /**
+       * 其它「立即生效」开关（自动换号 / 自动签到 / 展示偏好）的本地意图。
+       *
+       * 与 `pendingProviderEnabled` 同一套理由，只是这些开关没有一个统一的
+       * entry 对象可以挂：键是补丁字段路径（例如 `checkin`、
+       * `display.showUsageInSidebar`）。没有它时：
+       * - 点一下复选框立刻弹回原值（`checked` 直接读服务端字段，POST 还在飞）；
+       * - 连点两次发出两个**完全相同**的补丁，第二次「撤销」丢失。
+       *
+       * 每个键记 `{value, seq}`：值用于渲染，seq 用于「只有最后一次点击的
+       * 响应才能清掉意图」。否则先发的慢响应会把后点的意图一起抹掉 —— 那正是
+       * `writeSeq` 在整份状态上防住的问题，在单个开关上也得防。
+       */
+      var pendingToggles = useRef({})
+      var toggleSeq = useRef(0)
+      /** 读一个开关的当前值（含本地未落盘的意图）。 */
+      var toggleValue = function (key, serverValue) {
+        var pending = pendingToggles.current[key]
+        return pending === undefined ? serverValue === true : pending.value === true
+      }
+      /**
+       * 翻转一个开关并提交。
+       *
+       * @param key - 本地意图的键（与补丁字段一一对应）。
+       * @param serverValue - 服务端当前的布尔值。
+       * @param patchOf - `(next) => 补丁`。
+       */
+      var flipToggle = function (key, serverValue, patchOf) {
+        var next = !toggleValue(key, serverValue)
+        toggleSeq.current += 1
+        var seq = toggleSeq.current
+        pendingToggles.current[key] = { value: next, seq }
+        var settle = function () {
+          var pending = pendingToggles.current[key]
+          // 期间又点过一次：这次响应已经过期，不能清掉更新的意图。
+          if (pending !== undefined && pending.seq !== seq) return
+          delete pendingToggles.current[key]
+        }
+        mutate(patchOf(next), { onError: settle, settle: settle })
+      }
       var toggleProvider = function (entry) {
         if (busyNow('save')) return
         var pending = pendingProviderEnabled.current[entry.provider]
@@ -3173,6 +3278,13 @@ window.__ModuleLoader__.load({
           // 保存失败时丢掉本地猜测：否则开关会停在「用户点出来的值」上，
           // 看起来已经生效，实际服务端没变，直到下一轮轮询才翻回去。
           onError: function () { delete pendingProviderEnabled.current[entry.provider] },
+          // 成功时**由这次写入的响应**清掉意图（见 mutate 的 onSettled）。
+          // 不能在 `useEffect([status])` 里清：那个 effect 对每一次轮询都会跑，
+          // 而 /settings 要等一轮目录 + 额度刷新才回（最长 90 秒），期间必然穿插
+          // 若干次 20 秒轮询。旧实现一有轮询就清空意图，下一次重渲染又用旧
+          // `active.enabled` 重算 checked —— 用户刚关掉的开关会自己弹回「开」，
+          // 而且 `disabled=true` 让他当场无法纠正。
+          settle: function () { delete pendingProviderEnabled.current[entry.provider] },
         })
       }
 
@@ -3767,6 +3879,12 @@ window.__ModuleLoader__.load({
             type: 'button',
             role: 'tab',
             'aria-selected': selected,
+            // 服务商 tablist 控制的**只有一个**详情区（`dsh-rpc-detail`），
+            // 页内那六个分区（概览/账号/用量/…）是页内导航，不是这个 tablist
+            // 的 panel。旧实现把 `role="tabpanel"` 挂在六个页分区上，于是
+            // 「tab 指向的 id 没有 role、有 role 的 id 没有 tab 指向」两头都错；
+            // 现在 role/aria-labelledby 落在 detail 容器上，tab 指向它，
+            // 六个页分区退回普通 section。
             'aria-controls': 'dsh-rpc-detail',
             // 标准 tabs 模式：只有当前 tab 进 Tab 键序列，方向键在 tab 间移动。
             tabIndex: selected ? 0 : -1,
@@ -4252,6 +4370,12 @@ window.__ModuleLoader__.load({
                   : usageMeta,
               }, usageMeta))
 
+        // 表头在窄容器里隐藏了，这里补一个只在小屏出现的单位小标，
+        // 让 735 / 1,300 不至于变成两个没有上下文的数字。
+        // 单位跟快照走：按美元计费的 Trae 账号显示「$」，不再是硬编码的「积分」。
+        var creditsUnitLabel = freePlan || snapshot.state !== 'ok'
+          ? bind(t, 'accountColCredits')
+          : creditsUnitOf(snapshot, t)
         var creditsCell = h('div', {
           key: 'credits',
           role: 'cell',
@@ -4259,10 +4383,8 @@ window.__ModuleLoader__.load({
           style: S.accountCell,
           title: freePlan ? bind(t, 'creditsFreeQueue') : formatCreditsText(snapshot, t),
         },
-        // 表头在窄容器里隐藏了，这里补一个只在小屏出现的「积分」小标，
-        // 让 735 / 1,300 不至于变成两个没有上下文的数字。
         h('div', { style: { display: 'flex', alignItems: 'baseline', gap: 4, minWidth: 0 } },
-          h('span', { key: 'label', className: 'rpc-acc-credits-label' }, bind(t, 'accountColCredits')),
+          h('span', { key: 'label', className: 'rpc-acc-credits-label' }, creditsUnitLabel),
           h('span', {
             style: {
               fontSize: 18,
@@ -4553,11 +4675,14 @@ window.__ModuleLoader__.load({
               h('input', {
                 type: 'checkbox',
                 className: 'rpc-check',
-                checked: active.autoSwitch !== false,
-                // 保存期间禁用：/settings 要等一轮目录 + 额度刷新，连点两次会
-                // 用同一份旧 status 算出同一个值，第二次（想撤销的那次）丢失。
-                disabled: isBusy('save'),
-                onChange: function () { mutate({ autoSwitch: { enabled: active.autoSwitch === false } }) },
+                // 复选框读「含本地意图」的值：POST 在飞时服务端字段还是旧值，
+                // 直接读它会让用户点完立刻看到勾选状态弹回去。
+                checked: toggleValue('autoSwitch', active.autoSwitch !== false),
+                onChange: function () {
+                  flipToggle('autoSwitch', active.autoSwitch !== false, function (next) {
+                    return { autoSwitch: { enabled: next } }
+                  })
+                },
               }),
               bind(t, 'autoSwitch'))),
           h('div', { key: 'checkin', className: 'rpc-checkin' },
@@ -4575,8 +4700,12 @@ window.__ModuleLoader__.load({
               h('input', {
                 type: 'checkbox',
                 className: 'rpc-check',
-                checked: checkin.enabled !== false,
-                onChange: function () { mutate({ checkin: { enabled: checkin.enabled === false } }) },
+                checked: toggleValue('checkin', checkin.enabled !== false),
+                onChange: function () {
+                  flipToggle('checkin', checkin.enabled !== false, function (next) {
+                    return { checkin: { enabled: next } }
+                  })
+                },
               }),
               bind(t, 'checkinAuto')),
             h('span', { style: S[checkinTone], title: checkinFailureRaw !== '' ? checkinFailureRaw : '' }, checkinLabel),
@@ -4708,7 +4837,7 @@ window.__ModuleLoader__.load({
         testModelResultNode = h('div', { key: 'never', className: 'rpc-testresult' },
           h('span', { className: 'rpc-chip' }, bind(t, 'testModelNever')),
           h('span', { style: S.grow }),
-          h('span', { style: S.modelMeta }, chosenTestModel.name || chosenTestModel.id))
+          h('span', { style: S.modelMeta }, modelLabelOf(chosenTestModel)))
       } else {
         var testLimitCodes = { RATE_LIMIT: true, QUOTA: true }
         var testOk = testModelResult.ok === true
@@ -4737,7 +4866,7 @@ window.__ModuleLoader__.load({
         }, testOk ? bind(t, 'modelTestOk') : testLimit ? bind(t, 'limitBadge') : testAuth ? bind(t, 'authBadge') : bind(t, 'modelTestFailed')),
         h('span', { style: { minWidth: 0 } }, testDetail),
         h('span', { style: S.grow }),
-        h('span', { style: S.modelMeta }, chosenTestModel.name || chosenTestModel.id))
+        h('span', { style: S.modelMeta }, modelLabelOf(chosenTestModel)))
       }
 
       sections.push(
@@ -4775,7 +4904,7 @@ window.__ModuleLoader__.load({
                     return h('option', {
                       key: 'm' + index,
                       value: model.id,
-                    }, (model.name || model.id) + (model.unavailable === true ? ' · ' + bind(t, 'unavailable') : ''))
+                    }, modelLabelOf(model) + (model.unavailable === true ? ' · ' + bind(t, 'unavailable') : ''))
                   }))),
                 h('button', {
                   type: 'button',
@@ -4819,8 +4948,13 @@ window.__ModuleLoader__.load({
               h('input', {
                 type: 'checkbox',
                 className: 'rpc-check',
-                checked: checkin.enabled !== false,
-                onChange: function () { mutate({ checkin: { enabled: checkin.enabled === false } }) },
+                // 与账号页的签到开关共用同一个意图键：两处看到的是同一个值。
+                checked: toggleValue('checkin', checkin.enabled !== false),
+                onChange: function () {
+                  flipToggle('checkin', checkin.enabled !== false, function (next) {
+                    return { checkin: { enabled: next } }
+                  })
+                },
               }),
               bind(t, 'checkinAuto'))),
         )
@@ -4859,8 +4993,8 @@ window.__ModuleLoader__.load({
               },
             }, credits.unlimited === true ? '∞' : formatNumber(credits.remain)),
             isFiniteNumber(credits.total) && credits.total > 0
-              ? h('span', { className: 'rpc-credit-unit' }, '/ ' + formatNumber(credits.total) + ' ' + bind(t, 'creditsUnit'))
-              : h('span', { className: 'rpc-credit-unit' }, bind(t, 'creditsUnit')),
+              ? h('span', { className: 'rpc-credit-unit' }, '/ ' + formatNumber(credits.total) + ' ' + creditsUnitOf(credits, t))
+              : h('span', { className: 'rpc-credit-unit' }, creditsUnitOf(credits, t)),
             credits.planName ? h('span', { className: 'rpc-chip' }, credits.planName) : null,
             credits.exceeded ? h('span', { className: 'rpc-chip rpc-chip-warn' }, bind(t, qoderFreePlan ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
             credits.stale === true ? h('span', { className: 'rpc-chip' }, bind(t, 'creditsStale')) : null),
@@ -5705,9 +5839,11 @@ window.__ModuleLoader__.load({
             h('input', {
               type: 'checkbox',
               className: 'rpc-check',
-              checked: status.settings && status.settings.showRateInModelName !== false,
+              checked: toggleValue('display.showRateInModelName', status.settings && status.settings.showRateInModelName !== false),
               onChange: function () {
-                mutate({ display: { showRateInModelName: !(status.settings && status.settings.showRateInModelName !== false) } })
+                flipToggle('display.showRateInModelName', status.settings && status.settings.showRateInModelName !== false, function (next) {
+                  return { display: { showRateInModelName: next } }
+                })
               },
             }),
             h('span', { style: S.label }, bind(t, 'modelRateToggle'))),
@@ -5716,10 +5852,11 @@ window.__ModuleLoader__.load({
             h('input', {
               type: 'checkbox',
               className: 'rpc-check',
-              checked: !(status.settings && status.settings.showUsageInSidebar === false),
+              checked: toggleValue('display.showUsageInSidebar', !(status.settings && status.settings.showUsageInSidebar === false)),
               onChange: function () {
-                var on = !(status.settings && status.settings.showUsageInSidebar === false)
-                mutate({ display: { showUsageInSidebar: !on } })
+                flipToggle('display.showUsageInSidebar', !(status.settings && status.settings.showUsageInSidebar === false), function (next) {
+                  return { display: { showUsageInSidebar: next } }
+                })
               },
             }),
             h('span', { style: S.label }, bind(t, 'usageShowInSidebar')))),
@@ -5911,13 +6048,8 @@ window.__ModuleLoader__.load({
       var unavailableMatches = query === '' ? [] : unavailable.filter(matches)
 
       // 坏缓存里 name 可能缺失、甚至不是字符串（对象会被 React 当成 child 抛错），
-      // 而 aria-label 缺失会让复选框变成没有名字的控件。统一取可显示的标签。
-      var modelLabelOf = function (model) {
-        if (typeof model.name === 'string' && model.name !== '') return model.name
-        if (typeof model.id === 'string' && model.id !== '') return model.id
-        return 'model'
-      }
-
+      // 而 aria-label 缺失会让复选框变成没有名字的控件。统一走模块级的
+      // `modelLabelOf()`（可用性测试下拉、结果行、用量表也用它）。
       var modelMetaText = function (model) {
         var parts = [formatWindow(model.contextWindow)]
         parts.push(Array.isArray(model.reasoningEfforts) && model.reasoningEfforts.length > 0
@@ -6291,8 +6423,14 @@ window.__ModuleLoader__.load({
         return h('div', {
           key: page.id,
           id: 'dsh-rpc-page-' + page.id,
-          role: 'tabpanel',
-          'aria-labelledby': 'dsh-rpc-tab-' + active.provider,
+          // 这里**不能**是 `role="tabpanel"`：这六个分区是「页内导航」，同一个
+          // provider 的六页同时存在（用 display 切换），并不是服务商 tablist 的
+          // panel。服务商 tablist 唯一的 panel 是外层的 `dsh-rpc-detail`。
+          // 旧实现把 role 挂在这里，于是 tab 的 aria-controls 指向一个无角色
+          // 容器、有 role 的六个节点又没有 tab 指向 —— 两头都不成立。
+          // `aria-labelledby` 同理去掉：它原本指向服务商 tab，语义对不上。
+          role: 'group',
+          'aria-label': bind(t, page.label),
           className: 'rpc-page',
           style: { display: activePage === page.id ? 'flex' : 'none' },
         }, page.id === 'overview'
@@ -6320,6 +6458,9 @@ window.__ModuleLoader__.load({
       banners,
       h('div', {
         id: 'dsh-rpc-detail',
+        // 服务商 tablist 的唯一受控区域（每个 tab 的 `aria-controls` 都指向这里）。
+        role: 'tabpanel',
+        'aria-labelledby': 'dsh-rpc-tab-' + active.provider,
         className: 'rpc-detail',
       },
         detailHeader,
