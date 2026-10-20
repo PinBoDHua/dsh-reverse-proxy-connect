@@ -114,8 +114,20 @@ test('在途目录刷新返回时账号已被删除：不写回目录，也不�
     assert.equal(runtime.modelsFor('workbuddy').length, 0, '已删除账号的模型不能继续被列出')
     assert.equal(result?.reason, 'account-forgotten')
     runtime.flushCaches()
+    // 注意：墓碑列表（`forgotten`）里**应该有**这个 key —— 那正是「别再加载它」
+    // 的记录。断言要看 `entries`：已删账号的目录不能作为可用条目落盘。
     const cacheText = readFileSync(join(dir, 'catalog-cache.json'), 'utf8')
-    assert.equal(cacheText.includes('workbuddy::default'), false, '已删除账号的目录不能落盘')
+    const cacheDoc = JSON.parse(cacheText)
+    assert.equal(
+      Object.keys(cacheDoc.entries ?? {}).some((key) => key.startsWith('workbuddy::default')),
+      false,
+      '已删除账号的目录不能作为条目落盘',
+    )
+    assert.equal(
+      (cacheDoc.forgotten ?? []).includes('workbuddy::default'),
+      true,
+      '删除墓碑要随目录缓存落盘，否则重启后会被重新加载',
+    )
   } finally {
     globalThis.fetch = originalFetch
     rmSync(dir, { recursive: true, force: true })

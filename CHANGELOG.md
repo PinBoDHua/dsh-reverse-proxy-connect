@@ -1,5 +1,109 @@
 # 更新记录
 
+## 0.6.7 — 2026-10-20
+
+第八轮：**回归复查 + 适配器/用量口径审计**。6 条 0.6.6 引入的回归、11 条新缺陷，
+全部先用真实输入复现再修。状态接口仍是 v8，设置文件仍是 v2。
+测试 **346 后端 + 108 前端**。
+
+### 0.6.6 引入的回归（本轮修掉）
+
+- **被后续写入超过的那次保存永远不交还开关意图**：`mutate()` 的 `.then` 在
+  `if (seq !== writeSeq.current) return document` 之后才调 `settle()`，于是
+  「A 还在飞时又点了 B」会让 A 的响应走提前 return、意图永远留在
+  `pendingToggles` 里 —— 开关冻在用户点出来的值上，之后新到的 `/status` 也不再
+  跟随服务端（实测：侧栏用量显示「关」、设置里其实是「开」，直到刷新页面）。
+  现在 `settle()` 提到序号判断**之前**（`settle` 闭包自身按 key 的 seq 防误清）。
+- **跨午夜的请求被记进两个不同的「天」**：0.6.6 把 `at: startedAt` 传给
+  `Stats.record()`，而 `at` 同时决定 `daily` 分桶、「今日」KPI 却按进程时钟换桶
+  —— 23:59:50 发起、00:00:10 结束的请求让卡片写「今日 1 次」、柱状图今天那格是 0。
+  现在 `startedAt` 是**独立字段**，只用于删除墓碑判定；`at` 语义不变。
+- **所有候选账号都在请求期间被删时静默返回空流**：新加的「已删候选跳过」让
+  生成器一次都没打上游就结束 —— 宿主看到「零事件、没有 finish」的流，显示一片
+  空白回答。现在明确抛 `NO_ACCOUNT`（AUTH），提示重新登录/添加账号。
+- **目录缓存合并会让已删账号的目录复活**：0.6.6 给 `saveCatalogCache()` 加了
+  跨进程合并，于是 `forgetAccount()` 删掉的内存条目又被磁盘那份并回来，重启后
+  已删账号的模型重新出现在选择器里。现在墓碑随 `catalog-cache.json` 落盘
+  （`forgotten`），合并与加载两侧都跳过它。
+- **重置统计失败会丢掉「已记录但还没落盘」的记录**：`reset()` 的失败回滚把
+  `dirty` 一律清成 `false`，那条还在去抖窗口里的记录被当成「已保存」——进程退出
+  后彻底丢失（实测：`record` 后立刻 `reset`，写盘失败 → 文件根本不存在）。
+  现在回滚恢复**重置前**的 `dirty`。
+- **账本写盘失败时 `clear()` 已经把内存清空**：同一次操作里 HTTP 回 500
+  「清空失败」、下一轮 `/status` 却说「账本为空」。现在写盘成功才动内存。
+
+### 适配器（宿主契约）
+
+- **所有上游 HTTP 失败都被压成 `upstream-error`，宿主永不重试**：`finishError()`
+  先看 `error.code`，而上游统一抛 `UpstreamFailure{code:'upstream-error',
+  status:503}` —— 永远走不到 `kind` 分支，也完全不看 `status`。宿主的
+  `DEFAULT_RETRYABLE_CODES` 只有 `EMPTY_RESPONSE / RATE_LIMIT / SERVER /
+  TIMEOUT / TRANSPORT`，`upstream-error` 不在里面：**一次 503 或 429 就把整轮
+  回答结束掉**，上游已经给出的 `Retry-After` 也没人读。现在按状态码兜底
+  （401/403→AUTH、402→QUOTA、429→RATE_LIMIT、5xx/408/504→SERVER），且只覆盖
+  「原本就是 upstream-error」的情况。`failureCodeOf()` 同步补上 408/504，两套
+  分类器对同一个错误给出同一结论。
+- **适配器自己抛的 `UNKNOWN_MODEL` / `UNSUPPORTED_OPTION` 被自己的映射表抹掉**：
+  走 `default` → `upstream-error`，UI 拿不到「模型不存在，请刷新目录」这类可分支
+  的结论。现在直通（与宿主参考实现一致）。
+- **目录里的小数窗口/输出上限会让宿主直接拒绝整轮**：宿主
+  `normalizeModelInfo()` 要求 `contextWindow` 是正整数、`defaultMaxTokens` 是
+  安全正整数，否则抛 `INVALID_MODEL_CONTEXT` —— 在任何上游请求发出之前。
+  上游 JSON 里的 `128000.5` 完全合法，于是一个这样的模型 100% 不可用。现在统一
+  向下取整成合法正整数。
+- **回退模型清单一律声明「支持图片」**：26 行全部 `supportsImages: true`，与真实
+  目录（Qoder `is_vl`、Trae `display.multimodal`）相反。断网/首次启动时宿主会
+  允许用户往只支持文本的模型里贴图，然后上游 400。现在默认 `false`。
+
+### 图片输入
+
+- **历史里一张读不到的图会毒死此后每一轮对话**：`collectImageRefs()` 扫的是整段
+  历史，只要附件存储清理过/损坏过，之后每次对话都在发包之前抛
+  `image-unavailable`，用户只能手动删掉那条消息。现在单张读不到就降级成
+  `[an image was attached but could not be read]` 占位文案（那段逻辑以前是死代码）；
+  **只有本轮最后一条消息里的图全都读不到时**才明确报错。
+
+### 用量口径
+
+- **成功率被系统性抬高**：分母只有 `ok + failed`，而 `incomplete`（流中途死掉）
+  在用户眼里就是失败。实测「1 成功 + 2 中断」显示 **100%**（正确 33%）。现在
+  分母是 `ok + failed + incomplete`；`aborted`（用户自己取消）仍不参与。
+- **平均耗时被取消请求拖高**：`durationMs / requests` 把一条挂了两分钟的取消请求
+  算进平均，3×100ms 成功 + 1×120s 取消 → 显示 **30.1s**（真实 100ms）。新增
+  `okDurationMs`，只累计成功请求的耗时。
+- **迟到的真实请求被从全局总账里整条丢弃**：0.6.6 的墓碑逻辑在「删除前就已在途」
+  时直接 `return false`，连 `totals / today / 14 天` 都不记 —— 那次请求真的发生
+  了、token 真的被消耗。现在只跳过账号维度（`accounts` / `accountModels` /
+  `accountModelToday`），全局与 provider 维度照常累计。
+- **统计删除墓碑只在内存，不落盘**：另一个进程（CLI / 第二个窗口）内存里还有旧
+  计数，下一次 flush 就把已删账号的用量并回来。现在墓碑随 `stats.json` 落盘，
+  并在合并前采纳外部墓碑（与 `credits-cache` / `credit-history` 一致）。
+- **目录缓存合并的 tie-break 会挤掉刚刷新的本地条目**：`MAX_ENTRIES` 边缘上，
+  磁盘条目因 `order` 更大而赢，用户新加的账号又进不了选择器。现在同
+  `fetchedAt` 时本地（这一次刷新）优先。
+
+### 额度语义
+
+- **Trae 的免费套餐被当成「额度已用尽」**：Trae 在 `total_amount = 0` 时也写
+  `freePlan: true`，但 Free 豁免只对 `qoder` 前缀生效 —— 结果 Trae Free 在卡片上
+  是红色的「额度已用尽」，而且每 2 分钟一轮的额度刷新都会把它判成「不可用」并
+  自动换走。现在 `isFreePlan()` 对任何 provider 都认 `freePlan` 标记；`planUnknown`
+  仍只对 Qoder 生效（那是「免费池排队」的语义，其它 provider 没有）。前端
+  `isQoderFreePlan()` 同步对齐。
+
+### 测试
+
+- 新增 12 项后端回归（`tests/audit-r7.test.mjs` 现 24 项）：被超过的保存交还意图
+  （前端）、跨午夜 KPI/柱状图一致、全候选被删时明确报错、目录缓存墓碑跨重启、
+  重置失败不丢未落盘记录、账本写盘失败不清内存、上游 HTTP 状态→可重试 code、
+  小数窗口收敛、图片降级、回退模型能力、成功率/平均耗时、迟到请求只跳账号维度、
+  跨进程统计墓碑。
+- 新增 2 项前端检查（Trae Free 不误报「用尽」、真用完仍报）。
+- 后端 `node --test tests/*.test.mjs` **346 项**（原 333），
+  `node tests/client-credits.mjs` **108 项**（原 106），全部通过。
+- 真机回归：`bin.js ask` 走通 WorkBuddy 与 Trae 两条流；打进真实 429 时正确
+  记录 `RATE_LIMIT` 并尝试换号。
+
 ## 0.6.6 — 2026-10-20
 
 第七轮审计：后端 12 处、前端 6 处，全部用真实输入复现后修复。状态接口仍是 v8，

@@ -3225,6 +3225,53 @@ function extractFn(header) {
     }
     console.log('✓ Qoder 的 planUnknown 与服务端同判为 Free，不再显示「额度已用尽」')
 
+    // 2b) Trae 也会下发 `freePlan: true`（按免费额度计费）。客户端旧实现只认
+    //     qoder 前缀，于是 Trae Free 在卡片上是红色的「额度已用尽」，而服务端
+    //     （lib/quota.js）判的是「不预警、不换号」—— 同一份快照两个结论。
+    STATUS.providers = [
+      {
+        ...base,
+        provider: 'trae',
+        displayName: 'Trae',
+        kind: 'desktop-auth',
+        credits: { state: 'ok', remain: 0, total: 0, unit: 'credits', freePlan: true, planName: 'Free', items: [], fetchedAt: 1792234000000 },
+        accounts: [{
+          id: 'default', label: '本机登录', active: true, kind: 'desktop-auth', configured: true, source: 'desktop',
+          credits: { state: 'ok', remain: 0, total: 0, unit: 'credits', freePlan: true, planName: 'Free', items: [], fetchedAt: 1792234000000 },
+        }],
+        checkin: { enabled: true },
+        credential: { status: 'signed-in' },
+      },
+      ...providersSnapshot.slice(1),
+    ]
+    tree = await mount(card, { t: realT })
+    const traeFreeText = textOf(tree)
+    if (traeFreeText.includes(realT('creditsExhausted'))) {
+      throw new Error('Trae 的 freePlan 被渲染成「额度已用尽」（服务端判的是不预警、不换号）')
+    }
+    // 真的用完（有付费额度、剩 0）时必须仍然是「用尽」。
+    STATUS.providers = [
+      {
+        ...base,
+        provider: 'trae',
+        displayName: 'Trae',
+        kind: 'desktop-auth',
+        credits: { state: 'ok', remain: 0, total: 1000, unit: 'credits', items: [], fetchedAt: 1792234000000 },
+        accounts: [{
+          id: 'default', label: '本机登录', active: true, kind: 'desktop-auth', configured: true, source: 'desktop',
+          credits: { state: 'ok', remain: 0, total: 1000, unit: 'credits', items: [], fetchedAt: 1792234000000 },
+        }],
+        checkin: { enabled: true },
+        credential: { status: 'signed-in' },
+      },
+      ...providersSnapshot.slice(1),
+    ]
+    tree = await mount(card, { t: realT })
+    if (!textOf(tree).includes(realT('creditsExhausted'))) {
+      throw new Error('真的用完的付费账号也必须显示「额度已用尽」')
+    }
+    console.log('✓ Trae Free 不显示「额度已用尽」，真用完的付费账号仍然显示')
+
     // 3) 美元计价的额度要显示 $，不能一律写成「积分」。
     //    服务端 lib/trae/transport.js 在按美元计费时下发 `unit: 'usd'`。
     STATUS.providers = [
@@ -3372,6 +3419,64 @@ function extractFn(header) {
       throw new Error(`接入开关的补丁不对：${JSON.stringify(togglePosts.map((call) => call.body))}`)
     }
     console.log('✓ 接入开关的本地意图不会在 /status 轮询时被清掉')
+
+    // 7) 被后续写入「超过」的那次保存，响应到达时也必须把意图交还。
+    //
+    //    场景：A 还在飞时用户又点了 B。B 的响应先回（`writeSeq` 变成 2），
+    //    A 的响应后回却因 `seq !== writeSeq.current` 提前 return —— 旧实现把
+    //    settle 写在那个 return 之后，于是 A 的意图永远留在 pending 里，开关
+    //    冻在用户点出来的值上，之后新到的 /status 也不再让它跟随服务端
+    //    （实测：侧栏用量显示「关」、settings 里其实是「开」，直到刷新页面）。
+    //
+    //    这里用「把 /settings 响应挂起来、手动乱序 resolve」复现，两个开关都
+    //    必须回到服务端值。
+    {
+      const held = []
+      const restore = sandbox.fetch
+      sandbox.fetch = (url, init) => {
+        if (!String(url).includes('/settings')) return restore(url, init)
+        return new Promise((resolve) => {
+          held.push(() => resolve({ ok: true, status: 200, json: async () => STATUS, text: async () => '' }))
+        })
+      }
+      let raceTree
+      try {
+        raceTree = await mount(card, { t: realT })
+        const raceTabs = findAll(raceTree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+        raceTabs.find((node) => textOf(node).startsWith(realT('navSettings'))).props.onClick()
+        raceTree = await render(card, { t: realT })
+        const boxIn = (tree, needle) => findAll(tree, (node) => node.type === 'label' && node.props?.className === 'rpc-check-label')
+          .find((node) => textOf(node).includes(realT(needle)))
+          .children.find((child) => child && child.type === 'input')
+        boxIn(raceTree, 'usageShowInSidebar').props.onChange()
+        raceTree = await render(card, { t: realT })
+        boxIn(raceTree, 'modelRateToggle').props.onChange()
+        raceTree = await render(card, { t: realT })
+        if (held.length !== 2) throw new Error(`应有两个挂起的 /settings 写入，实际 ${held.length}`)
+        // 先resolve 后发的（序号更大），再 resolve 先发的（已被超过的那次）。
+        held[1]()
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        raceTree = await render(card, { t: realT })
+        held[0]()
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        raceTree = await render(card, { t: realT })
+        // 服务端两处都是 true；被超过的那次也必须交还意图、回到服务端值。
+        if (boxIn(raceTree, 'usageShowInSidebar').props.checked !== true) {
+          throw new Error('被后续写入超过的那次保存没有交还意图，开关卡在乐观值上')
+        }
+        // 再走一次完整轮询，确认它真的重新跟随服务端。
+        raceTree = await render(card, { t: realT })
+        if (boxIn(raceTree, 'usageShowInSidebar').props.checked !== true) {
+          throw new Error('被超过的开关在 /status 轮询后仍不跟随服务端')
+        }
+      } finally {
+        sandbox.fetch = restore
+        // 放掉还挂着的（如果有），避免影响后续用例。
+        for (const resolve of held) resolve()
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      console.log('✓ 被后续写入超过的保存也会交还意图，开关不会卡在乐观值上')
+    }
   } finally {
     STATUS.providers = providersSnapshot
     STATUS.stats = statsSnapshot

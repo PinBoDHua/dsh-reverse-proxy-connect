@@ -1476,8 +1476,21 @@ window.__ModuleLoader__.load({
      *
      * 优先认宿主写入的 `freePlan`（1.3.0），老宿主/老缓存则看套餐名与 paid。
      */
+    /**
+     * 这个账号是不是「免费套餐」—— 免费池的 0 额度不是「用尽」。
+     *
+     * 名字里的 Qoder 是历史原因：最初只有 Qoder 有免费池。Trae 也会在下发
+     * `usage_summary.total_amount = 0` 时写入 `freePlan: true`，只认 qoder 前缀
+     * 会让 **Trae Free 在卡片上变成红色的「额度已用尽」**，而服务端
+     * （lib/quota.js 的 isFreePlan）判的是「不预警、不换号」—— 同一份快照，
+     * 界面与插件自己的行为相反。
+     *
+     * 与服务端保持同一套判据：有付费额度就不是 Free；`freePlan` 标记最权威；
+     * 其次 `paid === false`；最后看套餐名；`planUnknown` 只对 Qoder 生效
+     * （那是「免费池排队」的语义，其余 provider 没有）。
+     */
     function isQoderFreePlan(provider, credits) {
-      if (typeof provider !== 'string' || provider.indexOf('qoder') !== 0) return false
+      if (typeof provider !== 'string' || provider === '') return false
       if (credits === undefined || credits === null) return false
       if (credits.state !== undefined && credits.state !== 'ok') return false
       if (isFiniteNumber(credits.total) && credits.total > 0) return false
@@ -1485,11 +1498,9 @@ window.__ModuleLoader__.load({
       if (credits.paid === false) return true
       var plan = typeof credits.planName === 'string' ? credits.planName.toLowerCase() : ''
       if (plan === 'free' || plan.indexOf('free') !== -1 || plan.indexOf('免费') !== -1) return true
-      // 计划接口失败（`planUnknown`）时三件证据全缺：Free 套餐的 `total` 本来就是 0，
-      // 不能因为「不知道套餐」就把它读成「额度用尽」。服务端 lib/quota.js 的同名
-      // 判定就是这么处理的（`planUnknown === true && paid !== true` → 按 Free 处理），
-      // 客户端漏了这一支，于是同一份快照在卡片上是红色「额度已用尽」、在预警
-      // 逻辑里却「不预警、不换号」—— 用户看到的结论与插件自己的行为相反。
+      // 计划接口失败时三件证据全缺：Free 的 `total` 本来就是 0，不能因为
+      // 「不知道套餐」就读成「额度用尽」。只有 Qoder 有这个语义。
+      if (provider.indexOf('qoder') !== 0) return false
       if (credits.planUnknown === true && credits.paid !== true) return true
       return false
     }
@@ -3166,8 +3177,31 @@ window.__ModuleLoader__.load({
         // 否则「先发的慢响应」会把「后发的快响应」结果冲掉。
         writeSeq.current += 1
         var seq = writeSeq.current
+        /**
+         * 这一次写入已经落地：把对应的本地意图交还给服务端值。
+         *
+         * **必须在序号判断之前**调用。旧位置在 `if (seq !== writeSeq.current)
+         * return` 之后，于是「A 还没回来时用户又点了 B」会让 A 的响应走提前
+         * return、永远不 settle —— A 的意图留在 `pendingToggles` 里，开关冻在
+         * 用户点出来的值上，连之后的新 /status 轮询都不再跟随服务端（实测：
+         * 侧栏用量开关显示「关」、设置里其实是「开」，直到刷新页面）。
+         *
+         * 早于本次响应的意图不会被误清：`settle` 闭包里比对 `pending.seq`，
+         * 期间又点过一次就保留更新的那份。
+         */
+        var settle = function () {
+          if (options === undefined || typeof options.settle !== 'function') return
+          try {
+            options.settle()
+          } catch (_) {
+            /* 回调失败不该再产生一个未处理拒绝 */
+          }
+        }
         return postJson(SETTINGS_PATH, patch, status.key)
           .then(function (document) {
+            // 意图的落地与「谁的响应接管界面」是两件事：被更新写入超过的响应
+            // 不再改界面，但它对应的那次保存**确实成功了**，意图必须交还。
+            settle()
             if (seq !== writeSeq.current) return document
             // 最新一次写入的响应就是权威状态：本地「未落盘的开关意图」到此
             // 已全部并入它，必须清空。否则用户之后在 CLI/另一个窗口改的
@@ -3177,16 +3211,6 @@ window.__ModuleLoader__.load({
             setError(undefined)
             endBusy('save')
             if (options !== undefined && options.clearPatDraft === true) setPatDraft('')
-            // 这一次写入已经落地：把对应的本地意图交还给服务端值。
-            // 用「写入响应」而不是「任意一次 /status」触发，才能保证
-            // 20 秒轮询不会在 PATCH 还在飞时把开关弹回旧值。
-            if (options !== undefined && typeof options.settle === 'function') {
-              try {
-                options.settle()
-              } catch (_) {
-                /* 回调失败不该再产生一个未处理拒绝 */
-              }
-            }
             if (options !== undefined && typeof options.onSuccess === 'function') options.onSuccess()
             return document
           })
