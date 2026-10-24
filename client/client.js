@@ -784,6 +784,10 @@ window.__ModuleLoader__.load({
       testModelResultAt: '测试于 {time}',
       testModelNoAccounts: '还没有可测试的账号',
       testModelNoModels: '没有可测试的模型',
+      testModelDeep: '深度测试',
+      testModelDeepHint: '带上系统提示词与工具表，按真实对话请求的形状发一次；只用来排查「测试通过、对话报错」这类问题。会真的消耗一点额度。',
+      testModelDeepBadge: '深度',
+      testModelDeepRunning: '深度测试中…',
       usageAccountCol: '账号',
       usageAllAccounts: '全部账号',
       usageModelCalls: '请求',
@@ -824,6 +828,9 @@ window.__ModuleLoader__.load({
       eventStats: '统计',
       eventEvents: '账本',
       eventTest: '账号测试',
+      eventUpstream: '上游拦截',
+      eventUpstreamRejected: '上游拒绝了请求（HTTP {status}）：{detail}',
+      eventUpstreamRecovered: '上游拦截了请求，自动重发后成功（重发 {attempts} 次）',
       eventUnknown: '事件',
       // 服务端下发的事件文案（`event.messageKey`）。没有对应键时回落到
       // `event.message`（中文原文），所以老账本仍然能看。
@@ -1182,6 +1189,10 @@ window.__ModuleLoader__.load({
       testModelResultAt: 'Tested {time}',
       testModelNoAccounts: 'No account to test yet',
       testModelNoModels: 'No model to test',
+      testModelDeep: 'Deep test',
+      testModelDeepHint: 'Sends a request shaped like a real chat turn (system prompt + tool schemas) to catch "test passes, chat fails" cases. It does consume a little credit.',
+      testModelDeepBadge: 'deep',
+      testModelDeepRunning: 'Deep testing…',
       usageAccountCol: 'Account',
       usageAllAccounts: 'All accounts',
       usageModelCalls: 'Requests',
@@ -1222,6 +1233,9 @@ window.__ModuleLoader__.load({
       eventStats: 'Stats',
       eventEvents: 'Journal',
       eventTest: 'Account test',
+      eventUpstream: 'Upstream block',
+      eventUpstreamRejected: 'Upstream rejected the request (HTTP {status}): {detail}',
+      eventUpstreamRecovered: 'Upstream intercepted the request; automatic resend succeeded ({attempts} retries)',
       eventUnknown: 'Event',
       // Server-provided event text (`event.messageKey`); falls back to the
       // Chinese `event.message` when a key is missing (older journals).
@@ -1891,6 +1905,8 @@ window.__ModuleLoader__.load({
           return 'eventEvents'
         case 'test':
           return 'eventTest'
+        case 'upstream':
+          return 'eventUpstream'
         default:
           return 'eventUnknown'
       }
@@ -2784,6 +2800,11 @@ window.__ModuleLoader__.load({
       var testPickState = useState({})
       var testPicks = testPickState[0]
       var setTestPicks = testPickState[1]
+      // 「深度测试」：按真实对话请求的形状发一次（系统提示词 + 工具表 + 正常
+      // 输出上限）。普通测试只发 `ping`，测不出「测试通过、对话 400」这类问题。
+      var deepTestState = useState(false)
+      var deepTest = deepTestState[0]
+      var setDeepTest = deepTestState[1]
       // 2.0.0：最近事件的时间线筛选与展开。
       var eventFilterState = useState('all')
       var eventFilter = eventFilterState[0]
@@ -3477,10 +3498,11 @@ window.__ModuleLoader__.load({
       }
 
       /** 真发一次 1-token 请求，验证某个账号 × 模型当前能不能用 / 是否被限额。 */
-      var testAccountModel = function (provider, accountId, modelId) {
+      var testAccountModel = function (provider, accountId, modelId, deep) {
         if (status === undefined) return
         // 与 testAccount 同一套规则：busy 键必须带 provider。
-        var key = 'model-test:' + provider + ':' + accountId + ':' + modelId
+        // 深度测试单独占一个键：两者并发发出去会互相干扰判断。
+        var key = 'model-test:' + provider + ':' + accountId + ':' + modelId + (deep === true ? ':deep' : '')
         if (busyNow(key)) return
         beginBusy(key)
         postJson(ACTION_PATH, {
@@ -3488,6 +3510,7 @@ window.__ModuleLoader__.load({
           provider: provider,
           accountId: accountId,
           model: modelId,
+          deep: deep === true,
         }, status.key)
           .then(function (document) {
             applyStatus(document.status !== undefined ? document.status : document)
@@ -4850,7 +4873,7 @@ window.__ModuleLoader__.load({
         ? chosenTestAccount.modelTests[chosenTestModel.id]
         : undefined
       var testModelBusyKey = chosenTestAccount !== undefined && chosenTestModel !== undefined
-        ? 'model-test:' + active.provider + ':' + chosenTestAccount.id + ':' + chosenTestModel.id
+        ? 'model-test:' + active.provider + ':' + chosenTestAccount.id + ':' + chosenTestModel.id + (deepTest === true ? ':deep' : '')
         : undefined
       var testModelResultNode = null
       if (chosenTestAccount === undefined) {
@@ -4880,6 +4903,7 @@ window.__ModuleLoader__.load({
         } else {
           testDetail = shortErrorMessage(testModelResult.error, t) + (testAgo === '' ? '' : ' · ' + testAgo)
         }
+        if (testModelResult.deep === true) testDetail = bind(t, 'testModelDeepBadge') + ' · ' + testDetail
         testModelResultNode = h('div', {
           key: 'result',
           className: 'rpc-testresult',
@@ -4936,10 +4960,24 @@ window.__ModuleLoader__.load({
                   style: { height: 32 },
                   disabled: isBusy(testModelBusyKey),
                   onClick: function () {
-                    testAccountModel(active.provider, chosenTestAccount.id, chosenTestModel.id)
+                    testAccountModel(active.provider, chosenTestAccount.id, chosenTestModel.id, deepTest === true)
                   },
                 }, rpcIcon('pulse', 14),
-                  isBusy(testModelBusyKey) ? bind(t, 'modelTesting') : bind(t, 'testModelStart'))),
+                  isBusy(testModelBusyKey)
+                    ? bind(t, deepTest === true ? 'testModelDeepRunning' : 'modelTesting')
+                    : bind(t, 'testModelStart'))),
+                h('label', { key: 'deep', className: 'rpc-check-label' },
+                  h('input', {
+                    type: 'checkbox',
+                    className: 'rpc-check',
+                    checked: deepTest === true,
+                    disabled: isBusy(testModelBusyKey),
+                    onChange: function () { setDeepTest(deepTest !== true) },
+                  }),
+                  bind(t, 'testModelDeep')),
+                deepTest === true
+                  ? h('p', { key: 'deep-hint', className: 'rpc-inline-note', style: S.hintTiny }, bind(t, 'testModelDeepHint'))
+                  : null,
           testModelResultNode),
       )
 

@@ -1,5 +1,80 @@
 # 更新记录
 
+## 0.6.8 — 2026-10-21
+
+第九轮：**上游「请求被拦截」不再终结整轮 + 深度测试**；第十轮前后端审计
+（修复 1 处测试竞态、拦截自愈入事件账本）。状态接口仍是 v8，
+设置文件仍是 v2。测试 **355 后端 + 109 前端**。
+
+### 事故：同一个请求，测试 200、对话 400
+
+现场（本机 `stats.json` 的 `recent` 与设置卡片）：
+
+```
+19:02:23  acc-1  400 upstream-error  271ms   请求被拦截，请重新发送
+19:02:25  acc-1  200                 2455ms  ← 同账号、同模型的并发小请求正常
+19:02:50  acc-1  400 upstream-error  266ms
+19:02:52  acc-1  200                 2090ms
+19:05:21  acc-1  400 upstream-error  287ms
+19:05:29  acc-1  200  1323ms          ← 8 秒后的 1-token 测试通过
+```
+
+- 400 只用 266–287ms 就返回，说明请求**没进模型**，是网关层拒的；
+- 失败 8 秒后，同账号同模型的测试返回 200；
+- 按同样的请求形状（21KB 系统提示词 + 工具表 + `max_tokens=128000` +
+  并发）重放 13 次**全部 200**。
+
+结论：这是**上游短时的「拦截」，语义是「重发一次」**，不是凭证、额度、模型
+或请求形状的问题。旧实现把它归成 `upstream-error`，而宿主的
+`DEFAULT_RETRYABLE_CODES` 里没有这个码 —— **一次拦截就结束整轮**，用户只能
+手动重发；界面上那个 `upstream-error` 标签就是插件内部码漏出去的原文。
+
+### 修法（三层，任一层生效就够了）
+
+- **拦截后立刻重发**：`openChatStream()` 认出「请求被拦截 / 请重新发送 /
+  intercepted / please resend」这类 **400 / 403**，换一组新的
+  `X-Conversation-*` 头重发，最多 2 次（退避 0.5s / 1s）。判定收窄到「400 /
+  403 + 上游自己的措辞」，避免把「模型不存在」「思考强度不支持」这类
+  **确定性** 400 也重发三遍。同一次请求内重发，不消耗宿主的重试预算。
+- **兜底成可重试码**：三次都被拦时抛 `soft-rate`（不是 `upstream-error`），
+  适配器映射成 `RATE_LIMIT` —— 宿主的重试执行器会按 500ms 起的退避再试，
+  账号池也会按 30 秒冷却换一个账号（`RATE_LIMIT` 本来就在换号判据里）。
+- **原始响应体进账本**：`UpstreamFailure` 新增 `responseBody`，运行时在 4xx
+  时记一条 `upstream` 事件（`HTTP {status}：{前 160 字}`，60 秒去重）。以前
+  `describeError()` 只留一句 `msg`，`code` / `requestId` / `traceId` 全丢，
+  出事只能猜。
+- **拦截被自愈也要留痕**：重发后成功时，`openChatStream()` 在响应上带
+  `interceptionRetries`，运行时记一条 `info` 级 `upstream` 事件
+  （`eventUpstreamRecovered`，60 秒去重）。否则拦截只有「三次都失败」才可见，
+  用户看到的「这次回答慢了半秒」背后的重发永远无人知晓。
+
+### 深度测试：让「测试」真的能发现这类问题
+
+- 可用性测试卡片新增 **「深度测试」** 勾选框：带上系统提示词、两个工具
+  schema 与 `max_tokens=512` 发一次 —— 也就是真实对话请求的骨架，专门用来
+  排查「1-token 测试通过、对话报错」。勾选后按钮文案变「深度测试中…」，
+  结果行带 `深度` 标记。
+- 200 但一个正文/思考分片都没有，深度测试直接判 `EMPTY_RESPONSE`：网关给个
+  空壳的情况不该显示「可用」。
+- CLI：`node lib/bin.js test [provider] [accountId] [model] --deep`。
+- 探测（`probeProvider`）与账号上的「测试」按钮保持**便宜**的 1-token 请求，
+  不受影响。
+
+### 其他
+
+- 事件账本新增类型 `upstream`（中文「上游拦截」/ 英文「Upstream block」）与
+  文案 `eventUpstreamRejected` / `eventUpstreamRecovered`，客户端缺键时仍回落
+  到中文原文。
+- 第十轮前后端审计：修复 `tests/http.test.mjs` 把 settings.json 写在 profile
+  根上（实际读取位置是 `profile/.dsh-reverse-proxy-connect/settings.json`）的
+  缺陷 —— 「全部 provider 禁用」从未生效，`test-model` 真发了上游请求并与首轮
+  目录刷新构成竞态（本机 workbuddy 桌面端探测约 2 秒落盘内置兜底目录后稳定
+  失败）。修正后该用例从 4.6 秒降到 50 毫秒，不再触网。其余前后端模块
+  （runtime / adapter / 三家 transport / 数据层 / client.js）逐行复查未发现
+  新缺陷。
+- 未改动：`STATUS_VERSION = 8`、设置文件 `version: 2`、六个 provider 的请求
+  形状、Trae / Qoder 的错误分类。
+
 ## 0.6.7 — 2026-10-20
 
 第八轮：**回归复查 + 适配器/用量口径审计**。6 条 0.6.6 引入的回归、11 条新缺陷，

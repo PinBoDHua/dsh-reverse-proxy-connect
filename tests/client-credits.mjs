@@ -765,6 +765,38 @@ console.log('✓ 签到按钮会发 action=checkin')
   }
 }
 
+// ---------- 1b3. 深度测试开关：勾上之后 /action 必须带 deep: true ----------
+//
+// 普通测试只发 1 token 的 `ping`，测不出「测试通过、对话 400」（2026-10-21 的
+// 「请求被拦截」就是这么漏掉的）。这个开关把请求换成真实对话的形状，所以
+// 「勾了却没传上去」等于功能不存在。
+{
+  try {
+    cardTree = await mount(card, { t: (key) => key })
+    let availability = find(cardTree, (node) => node.key === 'availability-test')
+    if (availability === undefined) throw new Error('找不到可用性测试区块')
+    const deepBox = find(availability, (node) => node.type === 'input' && node.props?.type === 'checkbox')
+    if (deepBox === undefined) throw new Error('可用性测试缺少「深度测试」勾选框')
+    deepBox.props.onChange({ target: { checked: true } })
+    cardTree = await render(card, { t: (key) => key })
+    availability = find(cardTree, (node) => node.key === 'availability-test')
+    if (!textOf(availability).includes('testModelDeepHint')) throw new Error('勾选深度测试后没有给出说明')
+    const runButton = findButton(cardTree, 'testModelStart')
+    if (runButton === undefined) throw new Error('找不到「开始测试」按钮')
+    const before = calls.length
+    runButton.props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 10))
+    if (calls.length === before) throw new Error('勾选深度测试后没有发出请求')
+    const body = String(calls[calls.length - 1]?.body)
+    if (!body.includes('test-model') || !body.includes('"deep":true')) {
+      throw new Error(`深度测试没有把 deep 传给服务端：${body.slice(0, 200)}`)
+    }
+    console.log('✓ 勾选深度测试后，test-model 请求带 deep: true')
+  } finally {
+    cardTree = await mount(card, { t: (key) => key })
+  }
+}
+
 // ---------- 1c. 状态列：过期测试与凭证失效都不能显示成「可用」 ----------
 {
   const provider = STATUS.providers[0]
