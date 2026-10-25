@@ -1572,6 +1572,10 @@ try {
   const storageInput = find(cardTree, (node) => node.type === 'input' && node.props.type === 'text' && String(node.props.placeholder).includes('storage.json'))
   if (storageInput === undefined) throw new Error('Trae 缺少登录文件路径输入框')
   if (!textOf(cardTree).includes('traeSignedIn')) throw new Error('Trae 已登录时没有显示登录态提示')
+  // Trae 没有浏览器登录流程（服务端 login-start 会直接拒绝）。账号页不能挂一个
+  // 必然失败的「浏览器登录新增账号」按钮，也不能用 WorkBuddy 的添加说明误导用户。
+  if (textOf(cardTree).includes('loginAddTitle')) throw new Error('Trae 账号页不应出现浏览器登录按钮')
+  if (!textOf(cardTree).includes('accountsHintTrae')) throw new Error('Trae 账号页缺少专属的登录来源说明')
   storageInput.props.onChange({ target: { value: 'D:\\trae\\storage.json' } })
   cardTree = await render(card, { t: (key) => key }, true)
   const saveTraeButton = findButton(cardTree, 'save')
@@ -2197,7 +2201,19 @@ if (!textOf(cardTree).includes('copyFailed')) throw new Error('复制失败没�
 if (!textOf(cardTree).includes('copyFallbackHint')) throw new Error('复制失败没有手动复制说明')
 const fallbackArea = find(cardTree, (node) => node.type === 'textarea' && typeof node.props?.value === 'string' && node.props.value.length > 10)
 if (fallbackArea === undefined) throw new Error('复制失败没有可手动复制的 textarea 兜底')
-console.log('✓ 复制失败有可见反馈与手动复制兜底')
+
+// 之后自动复制恢复：手动复制框必须收掉，否则界面会一直摆着一份可能过期的诊断。
+sandbox.navigator.clipboard = { writeText: () => Promise.resolve() }
+const copyAgain = find(cardTree, (node) => node.type === 'button' && (textOf(node) === 'copyFailed' || textOf(node) === 'copyDiagnostics'))
+if (copyAgain === undefined) throw new Error('复制失败后找不到再次复制按钮')
+copyAgain.props.onClick()
+await new Promise((resolve) => setTimeout(resolve, 20))
+cardTree = await render(card, { t: (key) => key })
+if (find(cardTree, (node) => node.type === 'textarea' && typeof node.props?.value === 'string' && node.props.value.length > 10) !== undefined) {
+  throw new Error('复制恢复成功后仍留着上一次的失败兜底 textarea')
+}
+delete sandbox.navigator.clipboard
+console.log('✓ 复制失败有可见反馈与手动复制兜底；恢复后兜底会收掉')
 
 // ── 2.4.0 UI 打磨回归 ────────────────────────────────────────────
 // 18) Qoder Free 的汇总卡大数字显示「免费」，不再显示 0；完整额度留在 title。

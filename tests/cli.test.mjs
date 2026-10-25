@@ -12,11 +12,11 @@
 
 import assert from 'node:assert/strict'
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { fileURLToPath } from 'node:url'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
 /** 仓库根目录。 */
 const ROOT = fileURLToPath(new URL('..', import.meta.url))
@@ -73,6 +73,94 @@ test('CLI：doctor 不把未配置的可选 provider 当失败（--strict 仍 ex
     assert.match(output, /未配置（可选）/, '未配置的 provider 应以提示行显示')
     assert.doesNotMatch(output, /✗/, '未配置不应显示为失败项')
     assert.match(output, /体检通过/)
+  } finally {
+    rmSync(profile, { recursive: true, force: true })
+  }
+})
+
+
+test('CLI probe 会把探测结果写回设置（和 GUI 的「检测账号可用模型」一致）', () => {
+  const profile = mkdtempSync(join(tmpdir(), 'dsh-rpc-cli-probe-'))
+  try {
+    const dataDir = join(profile, '.dsh-reverse-proxy-connect')
+    mkdirSync(dataDir, { recursive: true })
+    writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({
+      version: 2,
+      providers: {
+        workbuddy: { enabled: true },
+        'workbuddy-ai': { enabled: false },
+        qoder: { enabled: false },
+        'qoder-global': { enabled: false },
+        trae: { enabled: false },
+        'trae-global': { enabled: false },
+      },
+      accounts: {
+        workbuddy: [{
+          id: 'a',
+          label: 'A',
+          enabled: true,
+          token: {
+            accessToken: 'tok',
+            refreshToken: '',
+            expiresAtMs: Date.now() + 86_400_000,
+            refreshExpiresAtMs: 0,
+            domain: 'codebuddy.cn',
+            uid: 'u',
+            enterpriseId: '',
+          },
+        }],
+      },
+      activeAccount: { workbuddy: 'a' },
+      checkin: { enabled: false },
+      probe: { enabled: true, lastRunAt: 0, results: {} },
+    }))
+
+    // 子进程里没有别的办法拦截硬编码的上游地址：用 --import 预加载一个 fetch mock。
+    const mockFile = join(profile, 'mock-fetch.mjs')
+    writeFileSync(mockFile, `
+const encoder = new TextEncoder()
+globalThis.fetch = async (url, init) => {
+  const href = String(url)
+  if (href.includes('/v3/config')) {
+    return Response.json({ code: 0, data: { agents: [{ name: 'cli', models: ['m1', 'm2'] }], models: [
+      { id: 'm1', name: 'M1', maxInputTokens: 1000, maxOutputTokens: 100 },
+      { id: 'm2', name: 'M2', maxInputTokens: 1000, maxOutputTokens: 100 },
+    ] } })
+  }
+  if (href.includes('/meter/get-user-resource')) {
+    return Response.json({ code: 0, data: { Response: { Data: { Accounts: [] } } } })
+  }
+  if (href.includes('/v2/chat/completions')) {
+    let model = ''
+    try { model = JSON.parse(init && init.body ? init.body : '{}').model || '' } catch {}
+    if (model === 'm1') {
+      return new Response(JSON.stringify({ displayMsg: { zh: '当前账号类型暂不支持该模型' } }), { status: 400 })
+    }
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode('data: {"choices":[{"delta":{"content":"ok"},"finish_reason":"stop"}]}\\n\\ndata: [DONE]\\n\\n'))
+        controller.close()
+      },
+    })
+    return new Response(body, { status: 200, headers: { 'content-type': 'text/event-stream' } })
+  }
+  return new Response('unexpected ' + href, { status: 500 })
+}
+`)
+
+    const child = runCli(['probe', 'workbuddy', '--profile', profile], {
+      NODE_OPTIONS: `--import=${pathToFileURL(mockFile).href}`,
+    })
+    const output = `${child.stdout ?? ''}${child.stderr ?? ''}`
+    assert.equal(child.status, 0, `probe 应成功；输出：${output}`)
+    assert.match(output, /账号不支持 1 个/)
+
+    const saved = JSON.parse(readFileSync(join(dataDir, 'settings.json'), 'utf8'))
+    assert.deepEqual(saved.unavailableModels.workbuddy, ['m1'], '探测结论必须落盘，否则选择器毫无变化')
+    assert.equal(saved.probe.results.workbuddy.probed, 2)
+    assert.equal(saved.probe.results.workbuddy.unavailable, 1)
+    assert.equal(saved.probe.results.workbuddy.accountId, 'a')
+    assert.ok(saved.probe.lastRunAt > 0, '手动探测也要更新时间戳')
   } finally {
     rmSync(profile, { recursive: true, force: true })
   }

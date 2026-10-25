@@ -1,5 +1,103 @@
 # 更新记录
 
+## 0.6.9 — 2026-10-25
+
+第十一轮前后端全量审计。逐行复查 `lib/` 全模块、三家传输层、数据层与
+`client/client.js`，所有缺陷先用最小脚本复现再修。状态接口仍是 v8，设置文件仍是
+v2。测试 **366 后端 + 109 前端**。
+
+### 账号生命周期的数据一致性
+
+- **删除后又重建的账号，目录缓存被旧墓碑挡死**：删除账号时写下的 `forgotten`
+  墓碑不会因为账号重新出现而撤销。同样 id 的默认账号重建后，live 目录只存在
+  内存里；重启时 `loadCatalogCache()` 又把它过滤掉，选择器退回内置 4 个模型。
+  现在 live 拉取成功会撤销墓碑并记进 `revived`，落盘时一并从磁盘墓碑里摘掉；
+  再次删除会撤销复活意图。[lib/runtime.js](lib/runtime.js)、
+  [lib/catalog-cache.js](lib/catalog-cache.js)
+- **墓碑占着目录缓存的 `MAX_ENTRIES` 名额**：磁盘墓碑是在候选列表构建之后才
+  合并进来的，已删账号的旧条目仍参与 24 条截断，能把刚刷新成功的活账号挤出
+  缓存。现在先按墓碑过滤再截断。
+- **换 PAT / 登录文件后旧的失败探测继续生效**：`describeCredential()` 的 60 秒
+  失败缓存、账号冷却与「最近测试」结论不会随凭证变化失效。实测把坏 PAT 换成
+  好 PAT 后，`/settings` 的响应仍然写「未登录」，用户会以为保存没生效。新增
+  `Runtime.forgetCredentialState()`，在凭证字段写入后作废这些旁路状态。
+  [lib/runtime.js](lib/runtime.js)、[lib/index.js](lib/index.js)
+- **删除账号遗漏「账号 × 模型」测试结论**：`forgetAccount()` 清了账号测试，却没清
+  `modelTests`；id 被复用（默认账号重建或手改重名）时，新账号会继承上一个人的
+  「刚测可用 / 限额」徽章。
+- **默认账号写进显式账号池后丢失 `labelKey`**：为了增量 upsert，客户端添加第二个
+  账号时服务端会把隐式默认账号一起并进账号池；`normalizeAccount()` 丢掉
+  `labelKey`，英文界面从此把插件生成的「本机登录 / 默认令牌」显示成中文。读取
+  账号池时统一补回默认账号的文案键。[lib/accounts.js](lib/accounts.js)
+- **Qoder 身份交换没有单飞**：启动时目录、额度与首次 `/status` 会同时解析同一
+  账号的身份，实测打出多轮 `jobToken/exchange` + `userinfo`。现在同一 PAT 的
+  并发调用共用一个任务；PAT 变化时不复用旧任务，任务回来时若令牌已不是当前
+  那条就拒绝写缓存。[lib/runtime.js](lib/runtime.js)
+
+### 请求与统计
+
+- **历史里有能读的图时，本轮新贴的坏图被静默降级**：原判据看的是整张图片 Map
+  是否为空；历史里只要有一张可读的图，最后一条消息里新贴的坏图就会变成占位
+  文案，模型答非所问而用户收不到提示。现在只要本轮最后一条消息里的图**全部**
+  读不到就明确报 `image-unavailable`。[lib/runtime.js](lib/runtime.js)
+- **所有候选账号都被删时仍记一条 `incomplete` 统计**：这次请求一次上游都没发
+  出去，却污染「今日请求数 / 失败率」，还可能挂到已删账号上。现在明确抛
+  `NO_ACCOUNT`，并跳过整条统计记录。
+- **显式 `accountId` 不存在时静默退回当前账号**：测试/探测可能测错人，并把结论
+  记到被删账号的 id 上。现在直接报 `NO_ACCOUNT`。
+- **`NO_ACCOUNT` 没有映射成 AUTH**：运行时内部按 `kind=auth` 分类，但适配器的
+  `stableFailureCode()` 不认识这个内部码，交给宿主的仍是不可重试的
+  `upstream-error`。现在与运行时口径一致，映射为 `AUTH`。[lib/adapter.js](lib/adapter.js)
+
+### 额度与凭证解析
+
+- **Qoder 计划接口成功但缺 `is_paid_plan` 时被误判为 Free**：以前
+  `plan.value?.is_paid_plan === true` 会把「字段缺失」当成 `paid=false`，于是一个
+  `total=0` 的 Pro 账号被当成 Free：不预警、不换号，实际是额度已用尽。现在只在
+  字段是明确布尔值时采信；空套餐名 + 缺字段仍保持旧的 Free 兜底。
+  [lib/credits.js](lib/credits.js)
+- **Trae 加密登录信息解出非 JSON 时被归成不可重试错误**：明文分支包了
+  `JSON.parse`，加密分支没有；校验和通过但内容损坏的登录文件会抛裸
+  `SyntaxError`，最终变成 `upstream-error`。现在统一归
+  `credential-unreadable`。[lib/trae/credential.js](lib/trae/credential.js)
+
+### CLI
+
+- **`probe` 只打印不落盘**：文档写着「重跑能力探测」，但跑完 `unavailableModels`
+  与 `probe.results` 一字未变，选择器毫无变化。现在与 GUI 的「检测账号可用
+  模型」同一套语义写回设置；写盘失败会报错并 exit 1。[lib/bin.js](lib/bin.js)
+- **命令中途失败时未落盘的统计丢失**：`stats.stop()` 只在正常路径调用，抛错退出
+  时去抖窗口里的记录没人写。退出钩子现在补写一次统计。
+- `bin.js events` 补上 `upstream` 类型的中文标签「上游拦截」。
+
+### 前端
+
+- **较早的写入失败会清掉更新写入的本地意图**：A 还在飞时又点了 B，A 失败后会
+  清空全局 `pendingModelToggles` 并执行 `onError`，把 B 的意图一起抹掉，开关先
+  跳回旧值再跳一次。现在只有最新一次写入失败才回滚界面。
+  [client/client.js](client/client.js)
+- **签到 / 探测 / 深度测试的 90 秒假超时**：签到按账号串行打上游（单请求 20 秒）、
+  探测逐个模型（单模型死线 60 秒）、深度测试还有最长 180 秒的排队预算，90 秒
+  完全可能没跑完。客户端先显示失败，服务端其实仍在跑。刷新类改为 3 分钟，其余
+  写动作改为 10 分钟封顶。
+- **自动复制恢复后仍留着上次失败的手动复制框**：成功的复制路径没有清理
+  `copyFallback`，界面会一直摆着一份可能过期的诊断文本。现在成功即收掉。
+- **Trae 账号页提供「浏览器登录新增账号」按钮**：服务端对 Trae 的 `login-start`
+  必然返回拒绝（Trae 没有这条流程），按钮却一直显示。现在隐藏该入口，并换成
+  Trae 专属的登录来源说明：读客户端 `storage.json`，不在插件里另加账号。
+
+### 测试
+
+- 新增 `tests/audit-r11.test.mjs`（10 条）：默认账号 `labelKey`、`NO_ACCOUNT`
+  映射、目录墓碑复活与名额、Qoder 身份单飞与 PAT 变化、Qoder 缺
+  `is_paid_plan`、显式账号不存在、`modelTests` 清理、宿主保存新 PAT 后立即
+  显示已登录。
+- 扩展 `tests/audit-r7.test.mjs`：全候选被删时不记统计；历史好图 + 本轮坏图仍
+  必须报错。
+- 新增 CLI 集成用例：子进程用 `NODE_OPTIONS=--import` 注入 fetch mock，跑真实
+  `probe` 命令并断言设置文件里的探测结果。
+- 前端新增断言：Trae 账号页不再出现登录按钮、复制恢复后兜底会被收起。
+
 ## 0.6.8 — 2026-10-21
 
 第九轮：**上游「请求被拦截」不再终结整轮 + 深度测试**；第十轮前后端审计

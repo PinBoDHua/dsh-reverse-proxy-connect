@@ -223,7 +223,8 @@ test('RQ2b 所有候选都在请求期间被删：明确报错，不产出静默
     return new Response('nope', { status: 500 })
   }
   try {
-    const runtime = new Runtime({ settings: () => settings, dataDir: dir, logger: {} })
+    const recorded = []
+    const runtime = new Runtime({ settings: () => settings, dataDir: dir, logger: {}, stats: { record: (entry) => recorded.push(entry) } })
     const opened = await runtime.openStream('workbuddy', {
       model: 'hy3',
       messages: [{ role: 'user', content: [{ type: 'text', text: 'hi' }] }],
@@ -243,6 +244,7 @@ test('RQ2b 所有候选都在请求期间被删：明确报错，不产出静默
     })
     assert.equal(upstreamCalls, 0, '已删除的账号不能再去打上游')
     assert.deepEqual(events, [], '不该产出任何事件')
+    assert.deepEqual(recorded, [], '一次上游请求都没发出的「请求」不能记进统计')
     runtime.flushCaches()
   } finally {
     globalThis.fetch = originalFetch
@@ -714,7 +716,9 @@ test('RQ15 历史里读不到的图片降级成占位文案，不阻断本轮；
     assert.equal(refreshed, true)
     runtime.setAttachments({
       async readImageRequest(ref) {
-        if (ref?.attachmentId === 'stale-old') throw new Error('attachment not found in store')
+        if (ref?.attachmentId === 'stale-old' || ref?.attachmentId === 'fresh-broken') {
+          throw new Error('attachment not found in store')
+        }
         return { mediaType: 'image/png', data: new Uint8Array([1, 2, 3, 4]) }
       },
       imageHostPath() { return undefined },
@@ -740,6 +744,23 @@ test('RQ15 历史里读不到的图片降级成占位文案，不阻断本轮；
         model: 'm',
         signal: AbortSignal.timeout(10_000),
         messages: [{ role: 'user', content: [{ type: 'image', attachment: { attachmentId: 'stale-old', mediaType: 'image/png' } }] }],
+      })
+    }, (error) => {
+      assert.equal(error?.code, 'image-unavailable')
+      return true
+    })
+
+    // 历史里有一张能读的图，但本轮最后一条消息里的图读不到：不能因为
+    // 「至少读到过一张图」就把本轮的新图静默降级成占位文本。
+    await assert.rejects(async () => {
+      await runtime.openStream('workbuddy', {
+        model: 'm',
+        signal: AbortSignal.timeout(10_000),
+        messages: [
+          { role: 'user', content: [{ type: 'image', attachment: { attachmentId: 'history-ok', mediaType: 'image/png' } }] },
+          { role: 'assistant', content: [{ type: 'text', text: 'saw it' }] },
+          { role: 'user', content: [{ type: 'image', attachment: { attachmentId: 'fresh-broken', mediaType: 'image/png' } }] },
+        ],
       })
     }, (error) => {
       assert.equal(error?.code, 'image-unavailable')

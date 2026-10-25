@@ -597,6 +597,7 @@ window.__ModuleLoader__.load({
       autoSwitch: '额度用完自动切换',
       accountsHintPat: '可以为同一个 provider 添加多个 PAT；当前账号积分用完后会按上面的开关自动切换。',
       accountsHintDesktop: '桌面账号用「浏览器登录新增账号」添加；本机已有登录会自动读取。',
+      accountsHintTrae: 'Trae 的账号来自客户端自己的登录态：插件会读取本机 storage.json，不支持在插件里浏览器登录或另加账号。',
       accountLabel: '账号名称',
       accountPat: '粘贴个人访问令牌（PAT）',
       accountAuthFile: '登录文件路径（留空 = 读本机登录）',
@@ -1003,6 +1004,7 @@ window.__ModuleLoader__.load({
       autoSwitch: 'Switch when out of credits',
       accountsHintPat: 'Add more than one PAT per provider; when the current account runs out, it switches automatically.',
       accountsHintDesktop: 'Add desktop accounts with “Add account via browser login”; an existing local sign-in is picked up automatically.',
+      accountsHintTrae: 'Trae accounts come from the client’s own sign-in: the plugin reads the local storage.json and does not offer browser sign-in or extra accounts.',
       accountLabel: 'Account name',
       accountPat: 'Paste a personal access token',
       accountAuthFile: 'Sign-in file path (blank = local sign-in)',
@@ -2328,11 +2330,28 @@ window.__ModuleLoader__.load({
     var DOT_IDLE = 'var(--dsw-alias-label-secondary)'
 
     // ── 网络 ────────────────────────────────────────────────────────
+    /** 状态轮询：15 秒；设置写入：90 秒（宿主会 await 一轮目录 + 额度刷新）。 */
+    var STATUS_TIMEOUT_MS = 15_000
+    var SETTINGS_TIMEOUT_MS = 90_000
+    /**
+     * /action 的超时。
+     *
+     * 以前所有写操作都复用 90 秒，但「立即签到」会按账号串行打上游（单请求
+     * 20 秒）、「检测账号可用模型」要逐个模型真发一次极短请求（单模型死线
+     * 60 秒），深度测试还要加上 Qoder 排队预算（最长 180 秒）。这些动作在
+     * 90 秒内完全可能没跑完：客户端先超时显示「失败」，服务端其实仍在跑，
+     * 随后 20 秒轮询才把结果带回来 —— 用户看到的是假失败。
+     *
+     * 刷新类动作没有这些长尾，给 3 分钟；其余写动作给 10 分钟封顶。页面刷新
+     * 会 abort 这条 HTTP 请求，不会把用户锁在按钮上。
+     */
+    var REFRESH_TIMEOUT_MS = 3 * 60_000
+    var ACTION_TIMEOUT_MS = 10 * 60_000
+
     /**
      * 浏览器端请求超时信号。
      *
-     * 没有超时的 fetch 会让 busy 永远停在「保存中…」；宿主 /settings 在换 PAT 时
-     * 还会 await 一轮目录 + 额度刷新，所以设置保存给 90 秒，状态轮询给 15 秒。
+     * 没有超时的 fetch 会让 busy 永远停在「保存中…」。
      */
     function requestSignal(ms) {
       try {
@@ -2345,7 +2364,7 @@ window.__ModuleLoader__.load({
 
     function fetchStatus(light) {
       var url = light === true ? STATUS_PATH + '?light=1' : STATUS_PATH
-      return fetch(url, { headers: { Accept: 'application/json' }, signal: requestSignal(15_000) }).then(function (response) {
+      return fetch(url, { headers: { Accept: 'application/json' }, signal: requestSignal(STATUS_TIMEOUT_MS) }).then(function (response) {
         if (!response.ok) throw new Error('status ' + response.status)
         return response.json()
       }).then(function (document) {
@@ -2359,12 +2378,12 @@ window.__ModuleLoader__.load({
       })
     }
 
-    function postJson(path, body, key) {
+    function postJson(path, body, key, timeoutMs) {
       return fetch(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-RPC-Key': key === undefined ? '' : key },
         body: JSON.stringify(body === undefined ? {} : body),
-        signal: requestSignal(90_000),
+        signal: requestSignal(timeoutMs === undefined ? SETTINGS_TIMEOUT_MS : timeoutMs),
       }).then(function (response) {
         return response.json().then(function (document) {
           if (!response.ok) throw new Error(document && document.error ? document.error : 'http ' + response.status)
@@ -3236,10 +3255,13 @@ window.__ModuleLoader__.load({
             return document
           })
           .catch(function (failure) {
-            if (seq === writeSeq.current) {
-              endBusy('save')
-              setError(String(failure && failure.message ? failure.message : failure))
-            }
+            // 只有**最新一次**写入失败才回滚界面。更早的写入失败时，更新的
+            // 写入（已经包含用户在它之后做的改动）还在飞：清空本地意图会让
+            // 开关先跳回旧值、等新响应回来再跳一次；把 onError 交给旧写入
+            // 还会误删新写入的意图（provider 开关会卡在服务端旧值上）。
+            if (seq !== writeSeq.current) return undefined
+            endBusy('save')
+            setError(String(failure && failure.message ? failure.message : failure))
             // 失败时丢弃本地猜测，让界面回到服务端真实值。
             pendingModelToggles.current = {}
             if (options !== undefined && typeof options.onError === 'function') {
@@ -3256,7 +3278,7 @@ window.__ModuleLoader__.load({
       var refresh = function () {
         if (status === undefined || busyNow('refresh')) return
         beginBusy('refresh')
-        postJson(ACTION_PATH, { action: 'refresh' }, status.key)
+        postJson(ACTION_PATH, { action: 'refresh' }, status.key, REFRESH_TIMEOUT_MS)
           .then(function (document) {
             applyStatus(document)
             endBusy('refresh')
@@ -3449,7 +3471,7 @@ window.__ModuleLoader__.load({
       var runCheckin = function (provider) {
         if (status === undefined || busyNow('checkin')) return
         beginBusy('checkin')
-        postJson(ACTION_PATH, { action: 'checkin', provider: provider }, status.key)
+        postJson(ACTION_PATH, { action: 'checkin', provider: provider }, status.key, ACTION_TIMEOUT_MS)
           .then(function (document) {
             applyStatus(document)
             endBusy('checkin')
@@ -3464,7 +3486,7 @@ window.__ModuleLoader__.load({
       var runProbeNow = function () {
         if (status === undefined || busyNow('probe')) return
         beginBusy('probe')
-        postJson(ACTION_PATH, { action: 'probe' }, status.key)
+        postJson(ACTION_PATH, { action: 'probe' }, status.key, ACTION_TIMEOUT_MS)
           .then(function (document) {
             applyStatus(document)
             endBusy('probe')
@@ -3485,7 +3507,7 @@ window.__ModuleLoader__.load({
         var key = 'test:' + provider + ':' + accountId
         if (busyNow(key)) return
         beginBusy(key)
-        postJson(ACTION_PATH, { action: 'test-account', provider: provider, accountId: accountId }, status.key)
+        postJson(ACTION_PATH, { action: 'test-account', provider: provider, accountId: accountId }, status.key, ACTION_TIMEOUT_MS)
           .then(function (document) {
             applyStatus(document.status !== undefined ? document.status : document)
             endBusy(key)
@@ -3511,7 +3533,7 @@ window.__ModuleLoader__.load({
           accountId: accountId,
           model: modelId,
           deep: deep === true,
-        }, status.key)
+        }, status.key, ACTION_TIMEOUT_MS)
           .then(function (document) {
             applyStatus(document.status !== undefined ? document.status : document)
             endBusy(key)
@@ -3553,7 +3575,7 @@ window.__ModuleLoader__.load({
       var refreshCredits = function () {
         if (status === undefined || busyNow('credits')) return
         beginBusy('credits')
-        postJson(ACTION_PATH, { action: 'credits' }, status.key)
+        postJson(ACTION_PATH, { action: 'credits' }, status.key, REFRESH_TIMEOUT_MS)
           .then(function (document) {
             applyStatus(document)
             endBusy('credits')
@@ -3803,6 +3825,10 @@ window.__ModuleLoader__.load({
           if (typeof navigator !== 'undefined' && navigator !== null && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
             navigator.clipboard.writeText(text).then(function () {
               setCopied(true)
+              // 之前失败时留下的手动复制框要收掉：自动复制已经成功，继续摆着
+              // 一份可能过期的诊断文本既占地方也容易让人复制错。
+              setCopyFallback('')
+              setCopyFailed(false)
               later(function () { setCopied(false) }, 1500)
             }, function () { showFallback(text) })
             return
@@ -4763,9 +4789,13 @@ window.__ModuleLoader__.load({
               : null),
           h('p', { key: 'checkinhint', className: 'rpc-inline-note' }, rpcIcon('clock', 13), bind(t, 'checkinAutoHint')),
           accountTable,
-          h('p', { key: 'hint', className: 'rpc-inline-note' }, rpcIcon('shield', 13), bind(t, isPatProvider ? 'accountsHintPat' : 'accountsHintDesktop')),
-          // 桌面 provider：一键打开 App 登录，登录成功后自动导入账号。
-          isPatProvider
+          h('p', { key: 'hint', className: 'rpc-inline-note' }, rpcIcon('shield', 13), bind(
+            t,
+            isPatProvider ? 'accountsHintPat' : active.kind === 'desktop-auth' ? 'accountsHintTrae' : 'accountsHintDesktop',
+          )),
+          // WorkBuddy 桌面端：一键打开 App 登录，登录成功后自动导入账号。
+          // Trae 没有浏览器登录流程（服务端会明确拒绝），不要给一个必然失败的按钮。
+          isPatProvider || active.kind === 'desktop-auth'
             ? null
             : h('div', { key: 'login', className: 'rpc-subcard' },
                 h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' } },
@@ -6782,7 +6812,7 @@ window.__ModuleLoader__.load({
           busyRef.current = true
           setBusy(true)
           setFailed(false)
-          postJson(ACTION_PATH, { action: 'credits' }, status.key)
+          postJson(ACTION_PATH, { action: 'credits' }, status.key, REFRESH_TIMEOUT_MS)
             .then(function (document) {
               // 手动刷新的结果永远落地：它比任何在途的轻量 GET 都新。
               // GET 那边用代数判旧（applyStatus 递增），两者配合才不会互相覆盖。
