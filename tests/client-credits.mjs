@@ -1081,6 +1081,15 @@ console.log('✓ 健康状态、图片能力与用量区块都渲染出来了')
     if (!okTokens.includes('testedAvailableShort')) throw new Error('最近测试通过没有回写到状态卡')
     if (!okTokens.includes('healthStaleTestOkHint')) throw new Error('最近测试通过后没有更新待验证说明')
     if (okTokens.includes('healthStale')) throw new Error('有近期测试结果时仍同时显示「待验证」，状态互相矛盾')
+    // 「刚刚可用」旁边不能再挂一条警告色的 6 天前失败：stale 时旧失败只能
+    // 作为「历史失败」以中性色呈现，否则两个结论互相打架（用户实测截图）。
+    if (!okTokens.includes('lastFailureHistory')) throw new Error('待验证状态下的旧失败没有标成「历史失败」')
+    const oldFailureLine = find(cardTree, (node) => node.type === 'p' && textOf(node) === 'lastFailureHistory')
+    if (oldFailureLine === undefined) throw new Error('历史失败行没有渲染')
+    if (oldFailureLine.props.className !== 'rpc-tiny') throw new Error(`历史失败仍用警告色渲染：${oldFailureLine.props.className}`)
+    if (find(cardTree, (node) => node.type === 'p' && node.props?.className === 'rpc-warn-text' && textOf(node) === 'lastFailure')) {
+      throw new Error('stale 时同一条失败仍以「最近一次失败」警告色渲染')
+    }
 
     provider.accounts = accountsSnapshot.map((account, index) => index === 0
       ? { ...account, modelTests: { auto: { at: Date.now() - 60_000, ok: false, code: 'RATE_LIMIT', latencyMs: 250, model: 'auto', error: 'HTTP 429', resetHint: '2026-10-19 20:00' } } }
@@ -1103,6 +1112,12 @@ console.log('✓ 健康状态、图片能力与用量区块都渲染出来了')
     const freshTokens = tokensOf(freshText)
     if (!freshTokens.includes('healthDown')) throw new Error('30 分钟内的连续失败没有显示 healthDown')
     if (freshTokens.includes('healthStale')) throw new Error('近期失败不应显示「待验证」')
+    // 仍在 30 分钟内的失败必须保持警告色与「最近一次失败」措辞，不能被
+    // 上面的历史样式一起弱化。
+    const freshFailureLine = find(cardTree, (node) => node.type === 'p' && textOf(node) === 'lastFailure')
+    if (freshFailureLine === undefined || freshFailureLine.props.className !== 'rpc-warn-text') {
+      throw new Error('30 分钟内的失败没有保持警告色')
+    }
     console.log('✓ 健康状态按时间降级，最近测试结果合并为单一状态')
   } finally {
     provider.health = healthSnapshot

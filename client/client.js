@@ -738,8 +738,11 @@ window.__ModuleLoader__.load({
       accountSourceBrowser: '浏览器登录',
       accountSourceDesktop: '桌面登录',
       accountSourcePat: 'PAT',
-      lastErrorAt: '最近失败 {time}',
+      lastErrorAt: '最近失败 {time} · {ago}',
       lastFailure: '最近一次失败：{code} · {model} · {time}',
+      // 健康证据已过期（stale）时，旧失败只是历史，不能再按「当前故障」的
+      // 警告色渲染；带上相对时间，避免用户以为还是今天的事。
+      lastFailureHistory: '历史失败：{code} · {model} · {time} · {ago}',
       settingsCorrupt: '设置文件读取失败，已使用默认值；原文件已备份，请检查 settings.json。',
       settingsCorruptBackup: '备份：{path}',
       statusVersionMismatch: '客户端与宿主的状态版本不一致（宿主 v{host}，客户端期望 v{client}）。请刷新页面；仍然不一致时请重启 DeepSeek Harness，避免看到不完整的设置。',
@@ -1162,8 +1165,9 @@ window.__ModuleLoader__.load({
       accountSourceBrowser: 'Browser login',
       accountSourceDesktop: 'Desktop login',
       accountSourcePat: 'PAT',
-      lastErrorAt: 'Last failure {time}',
+      lastErrorAt: 'Last failure {time} · {ago}',
       lastFailure: 'Last failure: {code} · {model} · {time}',
+      lastFailureHistory: 'Earlier failure: {code} · {model} · {time} · {ago}',
       settingsCorrupt: 'Settings could not be read; defaults are in use. The original file was backed up — check settings.json.',
       settingsCorruptBackup: 'Backup: {path}',
       statusVersionMismatch: 'The client and host status versions differ (host v{host}, client expects v{client}). Refresh the page; if it persists, restart DeepSeek Harness so the settings are not rendered incomplete.',
@@ -4429,17 +4433,24 @@ window.__ModuleLoader__.load({
             ? h('p', { key: 'why', className: 'rpc-warn-text' }, credentialMessage)
             : null,
           lastFailure === undefined && isFiniteNumber(activeHealth.lastErrorAt) && activeHealth.lastErrorAt > 0 && activeHealth.state !== 'ok'
-            ? h('p', { key: 'last', className: 'rpc-warn-text' }, bind(t, 'lastErrorAt', { time: formatTime(activeHealth.lastErrorAt) }))
+            ? h('p', {
+                key: 'last',
+                className: activeHealthState === 'stale' ? 'rpc-tiny' : 'rpc-warn-text',
+              }, bind(t, 'lastErrorAt', { time: formatTime(activeHealth.lastErrorAt), ago: formatAgo(activeHealth.lastErrorAt, t) }))
             : null,
           lastFailure !== undefined
             ? h('p', {
                 key: 'lastfail',
-                className: 'rpc-warn-text',
+                // stale 表示失败证据已经超过 30 分钟：此时它只能当历史，不能
+                // 和「刚测可用」的绿色 chip 并列成黄色故障。仍在 30 分钟内的
+                // 失败保持警告色。
+                className: activeHealthState === 'stale' ? 'rpc-tiny' : 'rpc-warn-text',
                 title: typeof lastFailure.message === 'string' ? lastFailure.message : '',
-              }, bind(t, 'lastFailure', {
+              }, bind(t, activeHealthState === 'stale' ? 'lastFailureHistory' : 'lastFailure', {
                 code: lastFailure.code || 'ERROR',
                 time: formatTime(lastFailure.at),
                 model: lastFailure.model || '—',
+                ago: formatAgo(lastFailure.at, t),
               }))
             : null,
           activeHealthState === 'stale'
