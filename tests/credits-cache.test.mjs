@@ -81,6 +81,26 @@ test('缓存里的坏套餐行会被丢弃，不能把 null 原样送进 /status
   })
 })
 
+test('不限量套餐包的标记要保留：重启后卡片主值与明细不能自相矛盾', () => {
+  withTempDir((dir) => {
+    writeFileSync(join(dir, 'credits-cache.json'), JSON.stringify({
+      'workbuddy::default': {
+        fetchedAt: NOW,
+        data: {
+          state: 'ok',
+          remain: 0,
+          total: 0,
+          unit: 'credits',
+          unlimited: true,
+          items: [{ name: '企业额度', remain: 0, total: 0, unlimited: true }],
+        },
+      },
+    }), 'utf8')
+    const loaded = loadCreditsCache(dir)
+    assert.equal(loaded.get('workbuddy::default').data.items[0].unlimited, true)
+  })
+})
+
 test('缓存里的坏数字/坏布尔会被丢掉，不能让卡片算出 NaN', () => {
   withTempDir((dir) => {
     writeFileSync(join(dir, 'credits-cache.json'), JSON.stringify({
@@ -126,6 +146,25 @@ test('坏文件 / 不存在 / 非对象内容都安静退化成空缓存', () =>
     assert.equal(loadCreditsCache(dir).size, 0, '数组')
     writeFileSync(join(dir, 'credits-cache.json'), '{"workbuddy":{"data":{"state":"ok"},"fetchedAt":0}}', 'utf8')
     assert.equal(loadCreditsCache(dir).size, 0, '缺 fetchedAt')
+  })
+})
+
+test('冷启动读取也必须跳过墓碑：删号后重启不能先显示旧余额', () => {
+  // 真实时序：删号 → 墓碑落盘（entries 可能因为另一个进程还没保存而仍在文件里）
+  // → 重启。旧实现只在保存时清理墓碑，load 会把同 key 的快照原样放进内存，
+  // 隐式 `default` 账号一恢复就先显示上一个账号的余额。
+  withTempDir((dir) => {
+    writeFileSync(join(dir, 'credits-cache.json'), JSON.stringify({
+      version: 1,
+      entries: {
+        'qoder::default': { data: { state: 'ok', remain: 900, total: 1000, unit: 'credits', items: [] }, fetchedAt: NOW },
+        'workbuddy::default': { data: { state: 'ok', remain: 675, total: 1200, unit: 'credits', items: [] }, fetchedAt: NOW },
+      },
+      forgotten: ['qoder::default'],
+    }), 'utf8')
+    const loaded = loadCreditsCache(dir)
+    assert.deepEqual([...loaded.keys()], ['workbuddy::default'], '墓碑命中的 key 不能进内存')
+    assert.equal(loaded.forgotten.has('qoder::default'), true, '墓碑本身仍要保留，供后续保存继续过滤')
   })
 })
 

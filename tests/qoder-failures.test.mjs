@@ -12,6 +12,7 @@ import {
   parseStream,
   resolveIdentity,
 } from '../lib/qoder/transport.js'
+import { accountLimitation } from '../lib/runtime.js'
 
 /**
  * 用一次性的假 fetch 跑 fn，结束后恢复。
@@ -72,6 +73,35 @@ function bodyOf(text) {
     },
   })
 }
+
+test('Qoder 流内 code:400 保留状态：档位限制能被探测识别', async () => {
+  // 上游在 200 的流里回 `{error:{code:400,message:'当前账号类型暂不支持该模型'}}`。
+  // 旧实现把所有流内错误都按 HTTP 200 分类，最终 status=502；而探测侧的
+  // accountLimitation() 要求 status===400 —— 这类模型永远标不出「账号不支持」。
+  const limitation = '当前账号类型暂不支持该模型'
+  const inner = JSON.stringify({ error: { code: 400, message: limitation } })
+  const outer = JSON.stringify({ statusCodeValue: 200, body: inner })
+  let thrown
+  try {
+    for await (const _ of parseStream(bodyOf(`data: ${outer}\n\n`), undefined)) { /* drain */ }
+  } catch (error) {
+    thrown = error
+  }
+  assert.ok(thrown !== undefined, '流内错误必须抛出')
+  assert.equal(thrown.status, 400, 'body 里明确的 400 不能被改写成 502')
+  assert.equal(accountLimitation(String(thrown.message), thrown.status), true, '探测必须能识别档位限制')
+
+  // 普通流内错误（没有 400 证据）仍按 502：不能让「说不清」变成「账号不支持」。
+  const generic = JSON.stringify({ statusCodeValue: 200, body: JSON.stringify({ error: { message: 'boom' } }) })
+  let other
+  try {
+    for await (const _ of parseStream(bodyOf(`data: ${generic}\n\n`), undefined)) { /* drain */ }
+  } catch (error) {
+    other = error
+  }
+  assert.equal(other.status, 502)
+  assert.equal(accountLimitation(String(other.message), other.status), false)
+})
 
 test('Qoder 内容安全拦截：终态带 CONTENT_FILTER failure，而不是一个没有 code 的 error', async () => {
   // 用户可见行为：模型因内容安全被拦截时，界面/统计要能显示「内容过滤」，

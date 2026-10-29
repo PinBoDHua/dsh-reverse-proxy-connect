@@ -35,6 +35,8 @@ import {
 } from '../lib/trae/credential.js'
 import {
   buildChatBody,
+  checkinStatus,
+  claimCheckin,
   fetchCredits,
   interpretCheckinStatus,
   interpretClaim,
@@ -781,6 +783,43 @@ test('Trae：国内版额度端点 404 是真失败，不能套「国际版没�
   } finally {
     globalThis.fetch = originalFetch
   }
+})
+
+test('Trae：签到 404 只有国际版算「无活动」，国内版必须按失败重试', async () => {
+  // 与额度端点同一套区分：国际版本来就没有签到活动；国内版吃到 404 是
+  // 路由/网关出了问题。旧实现把国内版也判成 inactive —— 当天写入 completedOn，
+  // 调度器不再重试，奖励静默丢失，文案还错写成「国际版没有签到活动」。
+  const originalFetch = globalThis.fetch
+  globalThis.fetch = async () => new Response('not found', { status: 404 })
+  try {
+    for (const variant of ['trae-global', 'trae']) {
+      const status = await checkinStatus(variant, { jwt: 'jwt', userId: 'u1' })
+      const claim = await claimCheckin(variant, { jwt: 'jwt', userId: 'u1' })
+      if (variant === 'trae-global') {
+        assert.equal(status.kind, 'inactive')
+        assert.equal(claim.kind, 'inactive')
+        assert.match(status.message, /国际版/)
+      } else {
+        assert.equal(status.kind, 'failed', '国内版签到 404 不能当成无活动')
+        assert.equal(claim.kind, 'failed', '国内版领取 404 不能当成无活动')
+        assert.match(status.message, /HTTP 404/)
+        assert.doesNotMatch(status.message, /国际版/)
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
+test('Trae：显式思考档位要真的写进请求体，off/none 不发', () => {
+  // 用户选了 high 却被上游按默认档位跑，是「设置看起来生效、实际没生效」。
+  // none 不能发：实测会被下游以 Invalid combination of reasoning_effort 拒绝。
+  const base = { messages: [{ role: 'user', content: 'ok' }], model: 'glm-5' }
+  assert.equal(buildChatBody({ ...base, reasoningEffort: 'high' }).reasoning_effort, 'high')
+  assert.equal(buildChatBody({ ...base, reasoningEffort: 'medium' }).reasoning_effort, 'medium')
+  assert.equal(buildChatBody({ ...base, reasoningEffort: 'none' }).reasoning_effort, undefined)
+  assert.equal(buildChatBody({ ...base, reasoningEffort: 'off' }).reasoning_effort, undefined)
+  assert.equal(buildChatBody(base).reasoning_effort, undefined)
 })
 
 test('Trae：签到状态与领取结果的码都覆盖到', () => {

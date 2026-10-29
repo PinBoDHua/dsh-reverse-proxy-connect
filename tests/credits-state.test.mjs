@@ -162,6 +162,52 @@ test('日期时间与浏览器半边逐字一致：卡片与 CLI 不能把同一
 
 // ---------- creditsFor ----------
 
+test('额度新鲜窗口跟随高级设置：把刷新间隔调到 30 秒必须真的提前刷新', async () => {
+  // 真实缺陷：内部写死 120 秒新鲜窗口，用户把 creditsRefreshMs 改成 30 秒后，
+  // 调度器每 30 秒仍被这一层判成「还新鲜」而跳过 —— 设置看起来保存成功、
+  // 实际 2 分钟内一次请求都没发。
+  const settings = settingsFor('qoder')
+  settings.advanced.creditsRefreshMs = 30_000
+  settings.accounts.qoder = [{ id: 'default', label: '默认令牌', enabled: true, pat: 'pt-test' }]
+  settings.activeAccount.qoder = 'default'
+  const originalFetch = globalThis.fetch
+  let quotaCalls = 0
+  globalThis.fetch = async (url) => {
+    const href = String(url)
+    if (href.includes('/api/v2/quota/usage')) {
+      quotaCalls += 1
+      return Response.json({ userQuota: { total: 100, used: 10, remaining: 90 } })
+    }
+    if (href.includes('/api/v2/user/plan')) return Response.json({ plan_tier_name: 'Pro', is_paid_plan: true })
+    if (href.includes('/api/v3/user/status')) return Response.json({ nextResetAt: Date.now() + 86_400_000 })
+    throw new Error(`unexpected fetch ${href}`)
+  }
+  try {
+    await withRuntime(settings, async (runtime) => {
+      runtime.identities.set('qoder::default', {
+        pat: 'pt-test',
+        region: 'china',
+        userID: 'u1',
+        authToken: 'job',
+        name: 'tester',
+        email: 'a@b.c',
+        machineID: 'm',
+        expiresAtMs: Date.now() + 3_600_000,
+      })
+      // 40 秒前刚读过一次：按 120 秒窗口算「新鲜」，按 30 秒算「过期」。
+      runtime.creditCache.set('qoder::default', {
+        data: { state: 'ok', remain: 90, total: 100, unit: 'credits', items: [], fetchedAt: Date.now() - 40_000 },
+        fetchedAt: Date.now() - 40_000,
+        stale: false,
+      })
+      await runtime.refreshCredits('qoder')
+      assert.equal(quotaCalls, 1, '40 秒前的缓存必须被视为过期并重新读取')
+    })
+  } finally {
+    globalThis.fetch = originalFetch
+  }
+})
+
 test('额度状态：读失败且没有旧数字时不标 stale（否则 0 会被当成真实余额）', async () => {
   const settings = settingsFor('workbuddy')
   settings.accounts.workbuddy = [{

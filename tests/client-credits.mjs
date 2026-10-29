@@ -2674,23 +2674,27 @@ try {
 //   A. 输入是有限数，但中间运算（*10 / *100）溢出成 Infinity；
 //   B. 守卫只写了 typeof === 'number'，NaN / Infinity 照样进模板或样式。
 
-/** 从 client.js 抽出顶层纯函数（内部不能依赖闭包里的其它函数）。 */
-function extractFn(header) {
+/** 抽出 client.js 里一个顶层函数的源码。 */
+function extractSource(header) {
   const start = source.indexOf(header)
   if (start < 0) throw new Error(`client.js 里找不到 ${header}`)
-  const name = header.slice('function '.length, header.indexOf('('))
   let depth = 0
-  let end = start
   for (let i = source.indexOf('{', start); i < source.length; i++) {
     if (source[i] === '{') depth++
-    else if (source[i] === '}') { depth--; if (depth === 0) { end = i + 1; break } }
+    else if (source[i] === '}') { depth--; if (depth === 0) return source.slice(start, i + 1) }
   }
-  return new Function(`${source.slice(start, end)}; return ${name}`)()
+  throw new Error(`client.js 里 ${header} 的函数体不完整`)
+}
+
+/** 从 client.js 抽出顶层纯函数（内部不能依赖闭包里的其它函数）。 */
+function extractFn(header) {
+  const name = header.slice('function '.length, header.indexOf('('))
+  return new Function(`${extractSource(header)}; return ${name}`)()
 }
 
 // 31) 纯格式化函数：有限但极大（1e308）不能因中间乘法溢出成字面 Infinity。
 {
-  const formatNumber = extractFn('function formatNumber(value) {')
+  const formatNumber = extractFn('function formatNumber(value, decimals) {')
   const formatWindow = extractFn('function formatWindow(tokens) {')
   const ratioPercent = extractFn('function ratioPercent(ratio) {')
   if (formatNumber(2388) !== '2,388') throw new Error('formatNumber 正常千分位被改坏：' + formatNumber(2388))
@@ -2700,6 +2704,27 @@ function extractFn(header) {
     if (/Infinity/.test(out)) throw new Error(`formatNumber(${huge}) 仍输出 ${out}`)
   }
   if (formatWindow(256000) !== '256K' || formatWindow(1000000) !== '1M') throw new Error('formatWindow 正常缩写被改坏')
+  // 1200 被写成「1K」会丢掉 200 token；保留一位小数后与详情数字对得上。
+  if (formatWindow(1200) !== '1.2K' || formatWindow(1500) !== '1.5K') throw new Error('formatWindow 丢掉小数位：' + formatWindow(1200))
+  const compactNumber = extractFn('function compactNumber(value) {')
+  // 999,999 按「千」四舍五入是 1000：必须进位成 1M，不能输出「1000k」。
+  if (compactNumber(999999) !== '1M' || compactNumber(10000) !== '10k' || compactNumber(1200000) !== '1.2M') {
+    throw new Error('compactNumber 单位进位被改坏：' + compactNumber(999999))
+  }
+  // 金额必须两位小数：0.04 美元按一位小数会显示成 0（像余额被清零）。
+  // formatCreditsNumber 依赖 formatNumber 与 isMoneyCredits：三者要一起求值。
+  const creditsFmt = new Function([
+    extractSource('function formatNumber(value, decimals) {'),
+    extractSource('function isMoneyCredits(credits) {'),
+    extractSource('function formatCreditsNumber(value, credits) {'),
+    'return { isMoneyCredits, formatCreditsNumber }',
+  ].join('\n'))()
+  const isMoneyCredits = creditsFmt.isMoneyCredits
+  const formatCreditsNumber = creditsFmt.formatCreditsNumber
+  if (formatCreditsNumber(0.04, { unit: 'usd' }) !== '0.04') throw new Error('美元 0.04 被舍成：' + formatCreditsNumber(0.04, { unit: 'usd' }))
+  if (formatCreditsNumber(0.05, { unit: 'cny' }) !== '0.05') throw new Error('人民币 0.05 被舍成：' + formatCreditsNumber(0.05, { unit: 'cny' }))
+  if (formatCreditsNumber(600.1, { unit: 'credits' }) !== '600.1') throw new Error('积分一位小数被改坏')
+  if (isMoneyCredits({ unit: 'credits' }) !== false || isMoneyCredits({ unit: 'usd' }) !== true) throw new Error('isMoneyCredits 判定被改坏')
   if (formatWindow(Number.NaN) !== '—' || formatWindow(Number.POSITIVE_INFINITY) !== '—' || formatWindow(0) !== '—') {
     throw new Error('formatWindow 非有限/非正值应回 —')
   }
@@ -3835,6 +3860,176 @@ function extractFn(header) {
     STATUS.providers = providersSnapshot
     STATUS.stats = statsSnapshot
     STATUS.settings = settingsSnapshot
+  }
+}
+
+// ---------- 第十四轮审计（0.7.2）的前端回归 ----------
+{
+  const providersSnapshot = STATUS.providers
+  const statsSnapshot = STATUS.stats
+  const settingsSnapshot = STATUS.settings
+  const eventsSnapshot = STATUS.events
+  const openPage = async (tree, key) => {
+    const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    const tab = tabs.find((node) => textOf(node).startsWith(realT(key)))
+    if (tab === undefined) throw new Error(`找不到「${key}」页签`)
+    tab.props.onClick()
+    return await render(card, { t: realT })
+  }
+  try {
+    // 1) 停用账号的「使用」按钮必须禁用并说明原因：宿主会跳过停用账号，
+    //    旧实现点了零变化、零报错，像按钮坏了。
+    {
+      const base = providersSnapshot[0]
+      STATUS.providers = [
+        {
+          ...base,
+          credential: { status: 'signed-in' },
+          accounts: [
+            { id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: true, source: 'desktop', credits: { state: 'ok', remain: 10, total: 100, unit: 'credits' } },
+            { id: 'acc-off', label: '停用账号', active: false, enabled: false, kind: 'desktop', configured: true, source: 'browser-login', credits: { state: 'ok', remain: 5, total: 100, unit: 'credits' } },
+          ],
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      let tree = await mount(card, { t: realT })
+      tree = await openPage(tree, 'navAccounts')
+      const buttons = findAll(tree, (node) => node.type === 'button' && textOf(node) === realT('useAccount'))
+      if (buttons.length === 0) throw new Error('账号页找不到「使用」按钮')
+      const disabledButton = buttons.find((node) => node.props?.title === realT('useAccountDisabled'))
+      if (disabledButton === undefined) throw new Error('停用账号的「使用」按钮没有给出「已停用」说明')
+      if (disabledButton.props.disabled !== true) throw new Error('停用账号的「使用」按钮仍可点击')
+      console.log('✓ 停用账号的「使用」按钮被禁用并说明原因')
+    }
+
+    // 2) 过期的账号 × 模型测试结论不能冒充当前证据：降级成中性色 +
+    //    「历史结论（N 天前）」，30 分钟内的结论仍保持警告色。
+    {
+      const base = providersSnapshot[0]
+      const staleAt = Date.now() - 7 * 86400000
+      STATUS.providers = [
+        {
+          ...base,
+          accounts: [
+            {
+              ...base.accounts[0],
+              modelTests: { auto: { ok: false, code: 'RATE_LIMIT', at: staleAt, resetHint: '2026-10-22 10:00:00', error: '429' } },
+            },
+            {
+              id: 'acc-2', label: '备用账号', active: false, kind: 'desktop', configured: true, source: 'browser-login',
+              credits: { state: 'ok', remain: 10, total: 100, unit: 'credits' },
+            },
+          ],
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      let tree = await mount(card, { t: realT })
+      tree = await openPage(tree, 'navUsage')
+      const badges = findAll(tree, (node) => node.type === 'span' && textOf(node) === realT('limitBadge'))
+      const staleBadge = badges.find((node) => String(node.props?.title ?? '').startsWith('历史结论'))
+      if (staleBadge === undefined) throw new Error('过期的模型测试没有标成历史结论')
+      if (String(staleBadge.props.className).includes('rpc-chip-warn')) throw new Error('过期结论仍在用警告色')
+
+      // 30 分钟内：仍是当前证据。
+      STATUS.providers[0].accounts[0].modelTests.auto.at = Date.now() - 60_000
+      tree = await mount(card, { t: realT })
+      tree = await openPage(tree, 'navUsage')
+      const fresh = findAll(tree, (node) => node.type === 'span' && textOf(node) === realT('limitBadge'))
+      const freshBadge = fresh.find((node) => String(node.props?.className).includes('rpc-chip-warn'))
+      if (freshBadge === undefined) throw new Error('30 分钟内的限额结论必须保持警告色')
+      console.log('✓ 过期的模型测试降级为中性「历史结论」，30 分钟内仍是警告色')
+    }
+
+    // 3) 事件筛选值失效时下拉框不能变成空白；导出必须带服务商。
+    {
+      const scoped = {
+        id: 'ev-scope', at: Date.now(), type: 'account-switch', level: 'warn', provider: 'workbuddy',
+        accountId: 'acc-x', message: '切换到临时账号',
+      }
+      STATUS.events = { ...eventsSnapshot, items: [scoped, ...eventsSnapshot.items], count: eventsSnapshot.count + 1 }
+      let tree = await mount(card, { t: realT })
+      tree = await openPage(tree, 'navActivity')
+      const accountSelect = findAll(tree, (node) => node.type === 'select' && node.props?.['aria-label'] === realT('eventAccountLabel'))[0]
+      if (accountSelect === undefined) throw new Error('动态页找不到账号筛选下拉框')
+      accountSelect.props.onChange({ target: { value: 'workbuddy::acc-x' } })
+      tree = await render(card, { t: realT })
+      const exportButton = findAll(tree, (node) => node.type === 'button' && textOf(node).includes(realT('eventExport')))[0]
+      if (exportButton === undefined) throw new Error('动态页找不到导出按钮')
+      exportButton.props.onClick()
+      tree = await render(card, { t: realT })
+      const textarea = findAll(tree, (node) => node.type === 'textarea' && typeof node.props?.value === 'string' && node.props.value.includes('"filters"'))[0]
+      if (textarea === undefined) throw new Error('导出没有给出可复制的 JSON 兜底')
+      const exported = JSON.parse(textarea.props.value)
+      if (exported.filters.provider !== 'workbuddy') throw new Error('导出条件丢了服务商：' + JSON.stringify(exported.filters))
+      if (exported.filters.accountId !== 'acc-x') throw new Error('导出条件丢了账号：' + JSON.stringify(exported.filters))
+
+      // 该账号的事件被新事件挤出保留窗口后，下拉框仍要显示当前筛选值。
+      STATUS.events = { ...eventsSnapshot, items: [...eventsSnapshot.items] }
+      tree = await render(card, { t: realT })
+      const selectAfter = findAll(tree, (node) => node.type === 'select' && node.props?.['aria-label'] === realT('eventAccountLabel'))[0]
+      const options = findAll(selectAfter, (node) => node.type === 'option')
+      if (!options.some((node) => node.props?.value === 'workbuddy::acc-x')) {
+        throw new Error('筛选值失效后下拉框会显示空白（当前值不在 options 里）')
+      }
+      console.log('✓ 事件导出带服务商，失效的筛选值仍在下拉框里可见')
+    }
+
+    // 4) 服务端错误码必须本地化，不能把 `settings-write-failed` 原样显示。
+    {
+      const restore = sandbox.fetch
+      try {
+        let tree = await mount(card, { t: realT })
+        tree = await openPage(tree, 'navSettings')
+        sandbox.fetch = async (url, init) => {
+          if (String(url).includes('/settings')) return { ok: false, status: 500, json: async () => ({ error: 'settings-write-failed' }) }
+          return restore(url, init)
+        }
+        const rateBox = findAll(tree, (node) => node.type === 'label' && node.props?.className === 'rpc-check-label')
+          .find((node) => textOf(node).includes(realT('modelRateToggle')))
+          .children.find((child) => child && child.type === 'input')
+        rateBox.props.onChange()
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        tree = await render(card, { t: realT }, true)
+        const text = textOf(tree)
+        if (!text.includes(realT('errorServerWriteFailed'))) throw new Error('服务端错误码没有本地化：' + text.slice(0, 160))
+        if (text.includes('settings-write-failed')) throw new Error('中文界面原样显示了服务端错误码')
+      } finally {
+        sandbox.fetch = restore
+      }
+      console.log('✓ 服务端错误码显示为可操作的中文说明')
+    }
+
+    // 5) 金额按分显示、英文单数：0.04 不能变成 0；「1 packages」不能出现。
+    {
+      STATUS.providers = [
+        {
+          ...providersSnapshot[0],
+          credits: { state: 'ok', remain: 0.04, total: 100, unit: 'usd', items: [{ name: 'Pack', remain: 0.04, total: 0.5 }] },
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      let tree = await mount(card, { t: realT })
+      if (!textOf(tree).includes('0.04')) throw new Error('美元余额 0.04 被显示成 0')
+      const enT = (key, params) => {
+        let text = realLocale.en[key] !== undefined ? realLocale.en[key] : key
+        if (params !== undefined) {
+          text = String(text).replace(/\{(\w+)\}/g, (all, name) => (params[name] === undefined ? all : String(params[name])))
+        }
+        return text
+      }
+      tree = await mount(card, { t: enT })
+      const text = textOf(tree)
+      if (text.includes('1 packages')) throw new Error('英文界面把 1 个套餐包写成复数')
+      if (!text.includes('1 package')) throw new Error('英文界面缺少单数「1 package」')
+      if (!source.includes("rows.length === 1 ? 'creditsSourcesOne'")) throw new Error('侧栏服务商数量没有单数分支')
+      if (!source.includes("todayUsage.requests === 1 ? 'creditsTodayOne'")) throw new Error('侧栏今日次数没有单数分支')
+      console.log('✓ 美元余额按分显示；英文单数与侧栏计数分支都已接上')
+    }
+  } finally {
+    STATUS.providers = providersSnapshot
+    STATUS.stats = statsSnapshot
+    STATUS.settings = settingsSnapshot
+    STATUS.events = eventsSnapshot
   }
 }
 

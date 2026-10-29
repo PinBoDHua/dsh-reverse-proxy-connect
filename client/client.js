@@ -526,6 +526,22 @@ window.__ModuleLoader__.load({
       errorNetwork: '无法连接插件后端，请检查宿主是否仍在运行',
       errorStatus: '宿主返回 HTTP {status}',
       errorPayload: '宿主返回的数据格式不正确',
+      // 写接口的服务端错误码：以前原样显示 `invalid-key` / `settings-write-failed`
+      // 这类英文代号，用户既看不懂也不知道该做什么。
+      errorServerInvalidKey: '写操作的校验已失效，请刷新页面后重试',
+      errorServerInvalidJson: '请求内容不是合法的 JSON',
+      errorServerInvalidPatch: '设置内容没有被接受，请刷新后重试',
+      errorServerWriteFailed: '设置保存失败（文件可能被占用或只读），请稍后重试',
+      errorServerStatusFailed: '宿主生成状态失败，请稍后重试',
+      errorServerDiagnosticsFailed: '生成诊断失败，请稍后重试',
+      errorServerBodyTooLarge: '请求内容过大，已被拒绝',
+      errorServerNotTrusted: '请求不是从本机发出的，已被拒绝',
+      errorServerMethod: '不支持这种请求方式',
+      errorServerUnknownAction: '插件不认识这个操作',
+      errorServerInvalidAccount: '账号不存在或已被删除',
+      errorServerInvalidModelTest: '测试参数不正确',
+      errorServerEventsClearFailed: '事件账本清空失败（可能只读或被占用）',
+      errorServerRequestFailed: '请求失败，请稍后重试',
       loading: '读取中…',
       probe: '检测账号可用模型',
       probing: '检测中…',
@@ -551,8 +567,10 @@ window.__ModuleLoader__.load({
       creditsFree: '免费',
       creditsFreeShort: '免费',
       creditsPackages: '{count} 个套餐包',
+      creditsPackagesOne: '1 个套餐包',
       creditsPackageFallback: '额度包',
       usageHeatCell: '{date} · {requests} 次 · {tokens} tok',
+      usageHeatCellOne: '{date} · 1 次 · {tokens} tok',
       creditsFailed: '额度暂时读不到：{message}',
       creditsFetchedAt: '更新于 {time}',
       modelRateToggle: '在模型名后显示倍率',
@@ -565,8 +583,10 @@ window.__ModuleLoader__.load({
       creditsCachedHint: '显示上次结果 · 可手动刷新',
       creditsCached: '缓存数据',
       creditsSources: '{count} 家',
+      creditsSourcesOne: '1 家',
       creditsPercent: '{percent}%',
       creditsToday: '今日 {count} 次 · {tokens} tok',
+      creditsTodayOne: '今日 1 次 · {tokens} tok',
       creditsCurrent: '当前 {label}',
       creditsNoData: '未读取',
       creditsUnreadable: '读取失败',
@@ -651,6 +671,7 @@ window.__ModuleLoader__.load({
       agoDays: '{count} 天前',
       addAccount: '添加账号',
       useAccount: '使用',
+      useAccountDisabled: '账号已停用，请先启用再切换',
       removeAccount: '删除',
       currentAccount: '当前',
       checkinNow: '立即签到',
@@ -787,6 +808,7 @@ window.__ModuleLoader__.load({
       modelTesting: '检测中…',
       modelTestOk: '可用',
       modelTestFailed: '失败',
+      testStaleHint: '历史结论（{ago}），仅供参考',
       limitBadge: '限额',
       authBadge: '失效',
       limitUntil: '限额至 {time}',
@@ -859,6 +881,7 @@ window.__ModuleLoader__.load({
       eventSwitchReasonLow: '低于阈值',
       eventCredentialRefreshed: '登录令牌已自动续期（{account}）',
       eventCatalogUpdated: '模型目录已更新（{count} 个模型）',
+      eventCatalogUpdatedOne: '模型目录已更新（1 个模型）',
       eventCatalogFallback: '模型目录拉取失败，回退到 {source}（{reason}）',
       eventProbeDone: '能力探测完成：{models} 个模型，{unavailable} 个账号不支持',
       eventCheckinSummary: '签到：{accounts} 个账号{suffix}',
@@ -954,6 +977,20 @@ window.__ModuleLoader__.load({
       errorNetwork: 'Cannot reach the plugin backend; check that the host is still running',
       errorStatus: 'The host returned HTTP {status}',
       errorPayload: 'The host returned an unexpected payload',
+      errorServerInvalidKey: 'The write key is no longer valid; refresh the page and try again',
+      errorServerInvalidJson: 'The request body is not valid JSON',
+      errorServerInvalidPatch: 'The settings payload was rejected; refresh and try again',
+      errorServerWriteFailed: 'Saving settings failed (the file may be locked or read-only); try again shortly',
+      errorServerStatusFailed: 'The host could not build its status; try again shortly',
+      errorServerDiagnosticsFailed: 'Could not build diagnostics; try again shortly',
+      errorServerBodyTooLarge: 'The request body was too large and was rejected',
+      errorServerNotTrusted: 'The request did not come from this machine and was rejected',
+      errorServerMethod: 'This request method is not supported',
+      errorServerUnknownAction: 'The plugin does not recognize this action',
+      errorServerInvalidAccount: 'The account does not exist or was deleted',
+      errorServerInvalidModelTest: 'The test parameters are invalid',
+      errorServerEventsClearFailed: 'Could not clear the event journal (it may be read-only or locked)',
+      errorServerRequestFailed: 'The request failed; try again shortly',
       loading: 'Loading…',
       probe: 'Check which models my account can use',
       probing: 'Checking…',
@@ -979,8 +1016,10 @@ window.__ModuleLoader__.load({
       creditsFree: 'Free',
       creditsFreeShort: 'free',
       creditsPackages: '{count} packages',
+      creditsPackagesOne: '1 package',
       creditsPackageFallback: 'Credit package',
       usageHeatCell: '{date} · {requests} requests · {tokens} tok',
+      usageHeatCellOne: '{date} · 1 request · {tokens} tok',
       creditsFailed: 'Credits unavailable: {message}',
       creditsFetchedAt: 'Updated {time}',
       modelRateToggle: 'Show rate after model names',
@@ -993,8 +1032,10 @@ window.__ModuleLoader__.load({
       creditsCachedHint: 'Showing the last result · refresh manually',
       creditsCached: 'Cached',
       creditsSources: '{count} providers',
+      creditsSourcesOne: '1 provider',
       creditsPercent: '{percent}%',
       creditsToday: 'Today {count} calls · {tokens} tok',
+      creditsTodayOne: 'Today 1 call · {tokens} tok',
       creditsCurrent: 'Current: {label}',
       creditsNoData: 'Not read yet',
       creditsUnreadable: 'Read failed',
@@ -1078,6 +1119,7 @@ window.__ModuleLoader__.load({
       agoDays: '{count}d ago',
       addAccount: 'Add account',
       useAccount: 'Use',
+      useAccountDisabled: 'This account is disabled; enable it before switching',
       removeAccount: 'Remove',
       currentAccount: 'Current',
       checkinNow: 'Check in',
@@ -1212,6 +1254,7 @@ window.__ModuleLoader__.load({
       modelTesting: 'Testing…',
       modelTestOk: 'OK',
       modelTestFailed: 'Failed',
+      testStaleHint: 'Past result ({ago}), for reference only',
       limitBadge: 'Limited',
       authBadge: 'Auth',
       limitUntil: 'Limited until {time}',
@@ -1284,6 +1327,7 @@ window.__ModuleLoader__.load({
       eventSwitchReasonLow: 'below the threshold',
       eventCredentialRefreshed: 'Login token refreshed automatically ({account})',
       eventCatalogUpdated: 'Model catalog updated ({count} models)',
+      eventCatalogUpdatedOne: 'Model catalog updated (1 model)',
       eventCatalogFallback: 'Model catalog fetch failed; fell back to {source} ({reason})',
       eventProbeDone: 'Probe finished: {models} models, {unavailable} unsupported by this account',
       eventCheckinSummary: 'Check-in: {accounts} accounts{suffix}',
@@ -1350,9 +1394,31 @@ window.__ModuleLoader__.load({
       var status = /^(?:status|http)\s+(\d{3})$/i.exec(raw)
       if (status !== null) return bind(t, 'errorStatus', { status: status[1] })
       if (raw === 'status payload is not an object') return bind(t, 'errorPayload')
+      // 服务端写接口返回的是稳定错误码（`invalid-key` / `settings-write-failed`…），
+      // 旧实现把它们原样塞进横幅。按码查表，未知码才原样透传（中文字面文案不变）。
+      var serverCode = SERVER_ERROR_KEYS[raw]
+      if (serverCode !== undefined) return bind(t, serverCode)
       if (/timed out|aborted due to timeout/i.test(raw)) return bind(t, 'errorTimeout')
       if (/Failed to fetch|NetworkError|Load failed/i.test(raw)) return bind(t, 'errorNetwork')
       return raw
+    }
+
+    /** 写接口错误码 → 文案键（与 lib/index.js 的 `{error:'…'}` 一一对应）。 */
+    var SERVER_ERROR_KEYS = {
+      'request-not-trusted': 'errorServerNotTrusted',
+      'method-not-allowed': 'errorServerMethod',
+      'invalid-key': 'errorServerInvalidKey',
+      'invalid-json': 'errorServerInvalidJson',
+      'invalid-patch': 'errorServerInvalidPatch',
+      'settings-write-failed': 'errorServerWriteFailed',
+      'status-failed': 'errorServerStatusFailed',
+      'diagnostics-failed': 'errorServerDiagnosticsFailed',
+      'body-too-large': 'errorServerBodyTooLarge',
+      'unknown-action': 'errorServerUnknownAction',
+      'invalid-account': 'errorServerInvalidAccount',
+      'invalid-model-test': 'errorServerInvalidModelTest',
+      'events-clear-failed': 'errorServerEventsClearFailed',
+      'request-failed': 'errorServerRequestFailed',
     }
 
     /**
@@ -1405,11 +1471,35 @@ window.__ModuleLoader__.load({
      * `Infinity`，再被 String 成字面「Infinity」——输入明明是有限数。
      * 只有缩放结果仍有限时才做一位小数舍入，否则原样显示（科学计数法）。
      */
-    function formatNumber(value) {
+    function formatNumber(value, decimals) {
       if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
-      var scaled = value * 10
-      var rounded = Number.isFinite(scaled) ? Math.round(scaled) / 10 : value
+      // 小数位默认 1（积分常见 600.1）。金额（`unit:'usd'/'cny'`）必须传 2：
+      // 0.04 美元按一位小数会显示成 0，看起来像「余额已清零」。
+      var places = typeof decimals === 'number' && Number.isFinite(decimals)
+        ? Math.max(0, Math.min(6, Math.round(decimals)))
+        : 1
+      var factor = Math.pow(10, places)
+      var scaled = value * factor
+      var rounded = Number.isFinite(scaled) ? Math.round(scaled) / factor : value
       return String(rounded).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
+    }
+
+    /** 额度快照是不是按货币计（美元 / 人民币）。 */
+    function isMoneyCredits(credits) {
+      var unit = credits !== null && typeof credits === 'object' && typeof credits.unit === 'string'
+        ? credits.unit.trim().toLowerCase()
+        : ''
+      return unit === 'usd' || unit === 'dollar' || unit === 'dollars' || unit === 'cny' || unit === 'rmb'
+    }
+
+    /** 额度数字：金额保留两位小数（0.04 ⇒ 0.04），积分沿用一位小数。 */
+    function formatCreditsNumber(value, credits) {
+      return formatNumber(value, isMoneyCredits(credits) ? 2 : 1)
+    }
+
+    /** 额度数字的紧凑写法：金额不用 k 缩写（`$0.04` 被写成 0k 毫无意义）。 */
+    function compactCreditsNumber(value, credits) {
+      return isMoneyCredits(credits) ? formatCreditsNumber(value, credits) : compactNumber(value)
     }
 
     /** 各 provider 的强调色（与 DSH 主题变量兼容，取不到就用兜底色）。 */
@@ -1464,7 +1554,16 @@ window.__ModuleLoader__.load({
      */
     function compactNumber(value) {
       if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
-      if (value >= 10000) return String(Math.round(value / 100) / 10) + 'k'
+      // 边界要升一级单位：999,999 按「千」四舍五入是 1000，写成 "1000k"
+      // 既难看又会被读成十万级。与 compactTokens 同一套进位规则。
+      if (value >= 1e6) {
+        var millions = Math.round((value / 1e6) * 10) / 10
+        return millions >= 1000 ? String(Math.round((value / 1e9) * 10) / 10) + 'B' : String(millions) + 'M'
+      }
+      if (value >= 1e4) {
+        var thousands = Math.round((value / 1e3) * 10) / 10
+        return thousands >= 1000 ? String(Math.round((value / 1e6) * 10) / 10) + 'M' : String(thousands) + 'k'
+      }
       return formatNumber(value)
     }
 
@@ -1730,8 +1829,8 @@ window.__ModuleLoader__.load({
       }
       if (credits.unlimited === true) return { big: '∞', small: '', unit: creditsUnitOf(credits, t) }
       return {
-        big: formatNumber(credits.remain),
-        small: isFiniteNumber(credits.total) && credits.total > 0 ? '/ ' + formatNumber(credits.total) : '',
+        big: formatCreditsNumber(credits.remain, credits),
+        small: isFiniteNumber(credits.total) && credits.total > 0 ? '/ ' + formatCreditsNumber(credits.total, credits) : '',
         unit: creditsUnitOf(credits, t),
       }
     }
@@ -1792,8 +1891,8 @@ window.__ModuleLoader__.load({
       // 那看起来像是这个账号真的一分额度都没有了。
       if (credits.state === 'error') return bind(t, 'creditsUnreadable')
       if (credits.unlimited === true) return bind(t, 'creditsUnlimited')
-      var remain = formatNumber(credits.remain)
-      var total = isFiniteNumber(credits.total) && credits.total > 0 ? ' / ' + formatNumber(credits.total) : ''
+      var remain = formatCreditsNumber(credits.remain, credits)
+      var total = isFiniteNumber(credits.total) && credits.total > 0 ? ' / ' + formatCreditsNumber(credits.total, credits) : ''
       // 单位按快照自己的 `unit` 走（`usd` → `$`，未知单位原样显示）。
       // 旧实现只认 `credits`，其余一律置空 —— 美元计费的账号会被读成「积分」。
       var unit = creditsUnitOf(credits, t)
@@ -2040,6 +2139,9 @@ window.__ModuleLoader__.load({
           ? bind(t, 'eventSwitchReasonExhausted')
           : bind(t, 'eventSwitchReasonLow')
         return bind(t, 'eventSwitchByCredits', values)
+      }
+      if (spec.key === 'eventCatalogUpdated' && Number(params.count) === 1) {
+        return bind(t, 'eventCatalogUpdatedOne', values)
       }
       // 其余键都是「同名文案键 + 直接插值」。
       var text = bind(t, spec.key, values)
@@ -2444,8 +2546,17 @@ window.__ModuleLoader__.load({
         body: JSON.stringify(body === undefined ? {} : body),
         signal: requestSignal(timeoutMs === undefined ? SETTINGS_TIMEOUT_MS : timeoutMs),
       }).then(function (response) {
-        return response.json().then(function (document) {
-          if (!response.ok) throw new Error(document && document.error ? document.error : 'http ' + response.status)
+        // 解析失败不能把 `Unexpected token '<'` 这种解析器文案直接塞给用户：
+        // 网关/代理返回 HTML 错误页时按 HTTP 状态码收尾（errorTextOf 会再本地化）。
+        return response.json().catch(function () { return undefined }).then(function (document) {
+          if (!response.ok) {
+            throw new Error(document !== null && typeof document === 'object' && typeof document.error === 'string'
+              ? document.error
+              : 'http ' + response.status)
+          }
+          if (document === undefined || document === null || typeof document !== 'object' || Array.isArray(document)) {
+            throw new Error('status payload is not an object')
+          }
           return document
         })
       })
@@ -2708,7 +2819,9 @@ window.__ModuleLoader__.load({
       // 999,999 会舍入成 1000K：边界上直接进位成 1M，别输出「1000K」。
       if (tokens >= 1000000) return String(Math.round((tokens / 1000000) * 10) / 10) + 'M'
       if (tokens >= 999500) return '1M'
-      if (tokens >= 1000) return String(Math.round(tokens / 1000)) + 'K'
+      // 保留一位小数：1200 写成「1K」会丢掉 200 token（误差 1/6），
+      // 而「1.2K」与详情里的完整数字对得上。
+      if (tokens >= 1000) return String(Math.round(tokens / 100) / 10) + 'K'
       return String(tokens)
     }
 
@@ -4024,7 +4137,7 @@ window.__ModuleLoader__.load({
         var freePlan = isQoderFreePlan(entry.provider, credits)
         // 读失败与「真的是 0」必须长得不一样：前者给 `—`，后者才显示 0。
         var valueText = credits.state === 'ok'
-          ? credits.unlimited === true ? '∞' : freePlan ? bind(t, 'creditsFree') : compactNumber(credits.remain)
+          ? credits.unlimited === true ? '∞' : freePlan ? bind(t, 'creditsFree') : compactCreditsNumber(credits.remain, credits)
           : '—'
         var valueTitle = credits.state === 'ok'
           ? formatCreditsText(credits, t)
@@ -4684,8 +4797,12 @@ window.__ModuleLoader__.load({
               color: 'var(--dsw-alias-state-business-primary, #2f6fed)',
               borderColor: 'var(--dsw-alias-state-business-primary, #2f6fed)',
             }, account.configured === false ? { opacity: 0.55 } : {}),
-            disabled: isBusy('save') || account.configured === false,
-            title: account.configured === false ? bind(t, 'creditsNeedLogin') : undefined,
+            // 停用的账号不能被「使用」：宿主选当前账号时会跳过它，点下去
+            // 界面一动不动、也没有报错，像是按钮坏了。这里直接禁用并说明原因。
+            disabled: isBusy('save') || account.configured === false || account.enabled === false,
+            title: account.enabled === false
+              ? bind(t, 'useAccountDisabled')
+              : account.configured === false ? bind(t, 'creditsNeedLogin') : undefined,
             onClick: function () {
               var patch = { activeAccount: {} }
               patch.activeAccount[active.provider] = account.id
@@ -5204,9 +5321,9 @@ window.__ModuleLoader__.load({
                 color: creditsLow ? 'var(--dsh-rpc-warn, #9d5c00)' : 'var(--rpc-text)',
                 opacity: credits.stale === true ? 0.68 : 1,
               },
-            }, credits.unlimited === true ? '∞' : formatNumber(credits.remain)),
+            }, credits.unlimited === true ? '∞' : formatCreditsNumber(credits.remain, credits)),
             isFiniteNumber(credits.total) && credits.total > 0
-              ? h('span', { className: 'rpc-credit-unit' }, '/ ' + formatNumber(credits.total) + ' ' + creditsUnitOf(credits, t))
+              ? h('span', { className: 'rpc-credit-unit' }, '/ ' + formatCreditsNumber(credits.total, credits) + ' ' + creditsUnitOf(credits, t))
               : h('span', { className: 'rpc-credit-unit' }, creditsUnitOf(credits, t)),
             credits.planName ? h('span', { className: 'rpc-chip' }, credits.planName) : null,
             credits.exceeded ? h('span', { className: 'rpc-chip rpc-chip-warn' }, bind(t, qoderFreePlan ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
@@ -5237,15 +5354,15 @@ window.__ModuleLoader__.load({
         var trend = credits.trend
         if (trend !== null && typeof trend === 'object' && (trend.sampleCount > 0 || safeArray(trend.points).length > 1)) {
           var trendChips = []
-          trendChips.push(h('span', { key: 'td', className: 'rpc-chip' }, bind(t, 'trendToday', { value: formatNumber(trend.spentToday || 0) })))
+          trendChips.push(h('span', { key: 'td', className: 'rpc-chip' }, bind(t, 'trendToday', { value: formatCreditsNumber(trend.spentToday || 0, credits) })))
           if (isFiniteNumber(trend.spent7d) && trend.spent7d > 0) {
-            trendChips.push(h('span', { key: 'tw', className: 'rpc-chip' }, bind(t, 'trendWeek', { value: formatNumber(trend.spent7d) })))
+            trendChips.push(h('span', { key: 'tw', className: 'rpc-chip' }, bind(t, 'trendWeek', { value: formatCreditsNumber(trend.spent7d, credits) })))
           }
           if (isFiniteNumber(trend.topupToday) && trend.topupToday > 0) {
-            trendChips.push(h('span', { key: 'tu', className: 'rpc-chip' }, bind(t, 'trendTopup', { value: formatNumber(trend.topupToday) })))
+            trendChips.push(h('span', { key: 'tu', className: 'rpc-chip' }, bind(t, 'trendTopup', { value: formatCreditsNumber(trend.topupToday, credits) })))
           }
           if (isFiniteNumber(trend.burnPerHour) && trend.burnPerHour > 0) {
-            trendChips.push(h('span', { key: 'tr', className: 'rpc-chip' }, bind(t, 'trendRate', { value: formatNumber(trend.burnPerHour) })))
+            trendChips.push(h('span', { key: 'tr', className: 'rpc-chip' }, bind(t, 'trendRate', { value: formatCreditsNumber(trend.burnPerHour, credits) })))
           }
           if (isFiniteNumber(trend.etaMs) && trend.etaMs > 0) {
             trendChips.push(h('span', { key: 'te', className: 'rpc-chip rpc-chip-warn' }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) })))
@@ -5298,7 +5415,7 @@ window.__ModuleLoader__.load({
         creditsBody.push(
           h('details', { key: 'pkgs' },
             h('summary', { className: 'rpc-label', style: Object.assign({}, S.hintTiny, { cursor: 'pointer' }) },
-              bind(t, 'creditsPackages', { count: creditItems.length })),
+              bind(t, creditItems.length === 1 ? 'creditsPackagesOne' : 'creditsPackages', { count: creditItems.length })),
             h('ul', {
               className: 'rpc-list',
               style: Object.assign({}, S.modelList, { marginTop: 6 }),
@@ -5312,7 +5429,9 @@ window.__ModuleLoader__.load({
               h('span', { style: S.modelName }, typeof item.name === 'string' && item.name !== '' ? item.name : bind(t, 'creditsPackageFallback')),
               item.expired ? h('span', { className: 'rpc-chip rpc-chip-warn' }, bind(t, 'creditsExhausted')) : null,
               h('span', { style: S.grow }),
-              h('span', { className: 'rpc-model-meta' }, formatNumber(item.remain) + ' / ' + formatNumber(item.total)),
+              h('span', { className: 'rpc-model-meta' }, item.unlimited === true
+                ? '∞ / ∞'
+                : formatCreditsNumber(item.remain, credits) + ' / ' + formatCreditsNumber(item.total, credits)),
               h('span', { style: S.modelId }, isFiniteNumber(item.endAtMs) && item.endAtMs > 0 ? formatTime(item.endAtMs) : ''))
             })),
           ),
@@ -5577,7 +5696,7 @@ window.__ModuleLoader__.load({
                     key: 'd' + day.date,
                     className: 'rpc-chart-col',
                     'data-today': day.date === todayKey ? 'true' : undefined,
-                    title: bind(t, 'usageHeatCell', { date: day.date, requests: formatNumber(day.requests || 0), tokens: formatNumber(tokens) }),
+                    title: bind(t, day.requests === 1 ? 'usageHeatCellOne' : 'usageHeatCell', { date: day.date, requests: formatNumber(day.requests || 0), tokens: formatNumber(tokens) }),
                   },
                   h('div', {
                     className: 'rpc-chart-bar',
@@ -5766,25 +5885,35 @@ window.__ModuleLoader__.load({
             var recent = test === undefined ? recentLimitFor(entry.accountId, entry.model) : undefined
             var badge = null
             if (test !== undefined && typeof test === 'object') {
+              // 与卡片其它入口同一道 30 分钟门禁：一周前的「限额/可用」不能
+              // 冒充当前证据（限额可能早就解除，可用也可能早就失效）。旧结论
+              // 保留，但降级成中性色，并在悬停里写明是历史结论。
+              var testAt = isFiniteNumber(test.at) && test.at > 0 ? test.at : undefined
+              var stale = testAt !== undefined && Date.now() - testAt >= TEST_RESULT_TTL_MS
+              var staleHint = stale ? bind(t, 'testStaleHint', { ago: formatAgo(testAt, t) }) : undefined
+              var chipClass = stale ? 'rpc-chip' : 'rpc-chip rpc-chip-warn'
+              var withHint = function (parts) {
+                return [staleHint].concat(parts).filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · ')
+              }
               if (test.ok === true) {
                 badge = h('span', {
-                  className: 'rpc-chip rpc-chip-ok',
-                  title: bind(t, 'testOk', { ms: formatLatency(test.latencyMs) }),
+                  className: stale ? 'rpc-chip' : 'rpc-chip rpc-chip-ok',
+                  title: withHint([bind(t, 'testOk', { ms: formatLatency(test.latencyMs) })]),
                 }, bind(t, 'modelTestOk'))
               } else if (limitCodes[test.code] === true) {
                 badge = h('span', {
-                  className: 'rpc-chip rpc-chip-warn',
-                  title: [
+                  className: chipClass,
+                  title: withHint([
                     bind(t, 'limitUntil', { time: test.resetHint === undefined ? '—' : test.resetHint }),
                     test.error,
-                  ].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
+                  ]),
                 }, bind(t, 'limitBadge'))
               } else if (test.code === 'AUTH') {
-                badge = h('span', { className: 'rpc-chip rpc-chip-warn', title: test.error ?? '' }, bind(t, 'authBadge'))
+                badge = h('span', { className: chipClass, title: withHint([test.error]) }, bind(t, 'authBadge'))
               } else {
                 badge = h('span', {
-                  className: 'rpc-chip rpc-chip-warn',
-                  title: [test.code, test.error].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · '),
+                  className: chipClass,
+                  title: withHint([test.code, test.error]),
                 }, bind(t, 'modelTestFailed'))
               }
             } else if (recent !== undefined) {
@@ -6507,6 +6636,23 @@ window.__ModuleLoader__.load({
         var visibleAccountOptions = eventAccountOptions.filter(function (option) {
           return eventProviderFilter === '' || option.provider === eventProviderFilter
         })
+        // 选中的筛选值可能已经不在「账本里出现过」的列表里（账号的事件被新事件
+        // 挤出保留窗口，或账号刚被删除）。原生 select 的 value 找不到对应 option
+        // 时会显示空白，而筛选其实还在生效 —— 看起来像列表丢数据。把当前值补成
+        // 一个选项，至少让状态可见，用户能自己重置。
+        var providerOptionValues = eventProviderOptions
+        if (eventProviderFilter !== '' && providerOptionValues.indexOf(eventProviderFilter) === -1) {
+          providerOptionValues = [eventProviderFilter].concat(providerOptionValues)
+        }
+        var accountOptionKeys = visibleAccountOptions.map(function (option) { return option.key })
+        if (eventAccountFilter !== '' && accountOptionKeys.indexOf(eventAccountFilter) === -1) {
+          var orphanSeparator = eventAccountFilter.indexOf('::')
+          visibleAccountOptions = [{
+            key: eventAccountFilter,
+            provider: orphanSeparator > 0 ? eventAccountFilter.slice(0, orphanSeparator) : eventAccountFilter,
+            accountId: orphanSeparator > 0 ? eventAccountFilter.slice(orphanSeparator + 2) : eventAccountFilter,
+          }].concat(visibleAccountOptions)
+        }
         var scopeActive = eventProviderFilter !== '' || eventAccountFilter !== ''
         var clearEventScope = function () {
           setEventProviderFilter('')
@@ -6517,6 +6663,12 @@ window.__ModuleLoader__.load({
         /** 时间线导出：只导出当前筛选结果，带筛选条件与历史总数，便于排障对照。 */
         var exportEvents = function () {
           if (filteredEvents.length === 0) return
+          // 账号筛选值本身就是 `provider::accountId`：只导 accountId 会丢掉
+          // 服务商（六家的默认账号都叫 default），拿到文件的人无法复现筛选。
+          var accountSeparator = eventAccountFilter.indexOf('::')
+          var accountProvider = eventAccountFilter === '' || accountSeparator <= 0
+            ? undefined
+            : eventAccountFilter.slice(0, accountSeparator)
           var payload = {
             plugin: 'dsh-reverse-proxy-connect',
             version: status.plugin !== null && typeof status.plugin === 'object' && typeof status.plugin.version === 'string'
@@ -6525,11 +6677,12 @@ window.__ModuleLoader__.load({
             exportedAt: new Date().toISOString(),
             filters: {
               type: eventFilter,
-              provider: eventProviderFilter === '' ? undefined : eventProviderFilter,
-              accountId: eventAccountFilter === '' ? undefined : eventAccountFilter.slice(eventAccountFilter.indexOf('::') + 2),
+              provider: eventProviderFilter === '' ? accountProvider : eventProviderFilter,
+              accountId: eventAccountFilter === '' ? undefined : eventAccountFilter.slice(accountSeparator + 2),
             },
-            // 历史总数与真实保留条数分开写：导出文件里的 events 只是宿主保留的
-            // 最近一批，不能让人误以为这就是全部历史。
+            // 两个口径分开写：`count` 是宿主账本里还留着的总条数（上限 200，
+            // 不是「历史上发生过的全部」），`retained` 是当前筛选后保留下来的
+            // 条数。读文件的人据此知道这份 events 只是账本的一个切片。
             count: isFiniteNumber(eventDoc.count) ? eventDoc.count : filteredEvents.length,
             retained: filteredEvents.length,
             events: filteredEvents,
@@ -6655,7 +6808,7 @@ window.__ModuleLoader__.load({
             setEventsExpanded(false)
           },
         }, [h('option', { key: 'all', value: '' }, bind(t, 'eventProviderFilterAll'))].concat(
-          eventProviderOptions.map(function (provider, index) {
+          providerOptionValues.map(function (provider, index) {
             return h('option', { key: 'p' + String(index), value: provider }, providerNames[provider] || provider)
           }),
         ))
@@ -7561,7 +7714,7 @@ window.__ModuleLoader__.load({
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 6, paddingBottom: 6, borderBottom: '0.5px solid var(--dsw-alias-border-l2)' } },
             h('span', { style: { fontSize: 10.5, fontWeight: 600, letterSpacing: '.08em', color: 'var(--dsw-alias-label-secondary)' } }, bind(t, 'credits')),
-            h('span', { style: microChip() }, bind(t, 'creditsSources', { count: rows.length })),
+            h('span', { style: microChip() }, bind(t, rows.length === 1 ? 'creditsSourcesOne' : 'creditsSources', { count: rows.length })),
             h('span', { style: { flex: 1 } }),
             latestFetched > 0
               ? h('span', { style: { fontSize: 10, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsFetchedAt', { time: formatShortTime(latestFetched) }))
@@ -7597,13 +7750,19 @@ window.__ModuleLoader__.load({
             if (percent !== undefined) meta.push(h('span', { key: 'pct', style: microChip(warn ? 'var(--dsh-rpc-warn, #9d5c00)' : accent) }, bind(t, 'creditsPercent', { percent: percent })))
             if (activeAccount !== undefined && problem === undefined) meta.push(h('span', { key: 'acc', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bind(t, 'creditsCurrent', { label: accountNameOf(activeAccount, t) })))
             if (isFiniteNumber(snapshot.resetAtMs) && snapshot.resetAtMs > 0) meta.push(h('span', { key: 'reset', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsResetShort', { date: formatShortDate(snapshot.resetAtMs) })))
-            if (sidebarShowUsage && todayUsage !== undefined && isFiniteNumber(todayUsage.requests) && todayUsage.requests > 0) meta.push(h('span', { key: 'today', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsToday', { count: formatNumber(todayUsage.requests), tokens: formatNumber(todayUsage.totalTokens || 0) })))
+            if (sidebarShowUsage && todayUsage !== undefined && isFiniteNumber(todayUsage.requests) && todayUsage.requests > 0) {
+              meta.push(h('span', { key: 'today', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } },
+                bind(t, todayUsage.requests === 1 ? 'creditsTodayOne' : 'creditsToday', {
+                  count: formatNumber(todayUsage.requests),
+                  tokens: formatNumber(todayUsage.totalTokens || 0),
+                })))
+            }
             if (snapshot.stale === true) meta.push(h('span', { key: 'cached', style: microChip() }, bind(t, 'creditsCached')))
             var trend = snapshot.trend
             var hasTrend = trend !== null && typeof trend === 'object' && trend.sampleCount > 0
             var trendLine = hasTrend
               ? h('div', { key: 'trend', style: { display: 'flex', alignItems: 'center', gap: 7, marginTop: 5, minWidth: 0 } },
-                  h('span', { style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'trendToday', { value: formatNumber(trend.spentToday || 0) })),
+                  h('span', { style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'trendToday', { value: formatCreditsNumber(trend.spentToday || 0, snapshot) })),
                   isFiniteNumber(trend.etaMs) && trend.etaMs > 0
                     ? h('span', { style: { fontSize: 10.5, color: warn ? 'var(--dsh-rpc-warn, #9d5c00)' : 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) }))
                     : null,
