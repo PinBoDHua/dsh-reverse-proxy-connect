@@ -1153,7 +1153,13 @@ if (calls.length === beforeAdvanced || !String(advancedCall.body).includes('adva
 if (!String(advancedCall.body).includes('"alerts"') || !String(advancedCall.body).includes('thresholdRatio') || !String(advancedCall.body).includes('qoderQueueWaitMs') || !String(advancedCall.body).includes('"probe"')) {
   throw new Error(`高级设置没有带上预警/换号/排队/探测开关：${String(advancedCall.body).slice(0, 280)}`)
 }
-console.log('✓ 高级设置会发 advanced 补丁')
+// 高级表单不拥有「自动换号」的开关：带上它会把账号页刚关掉的开关按旧快照写回。
+// 服务端支持部分字段合并，所以这里只应出现 thresholdRatio。
+const advancedBody = JSON.parse(String(advancedCall.body))
+if (advancedBody.autoSwitch !== undefined && advancedBody.autoSwitch.enabled !== undefined) {
+  throw new Error(`高级设置越权写入 autoSwitch.enabled：${String(advancedCall.body).slice(0, 280)}`)
+}
+console.log('✓ 高级设置会发 advanced 补丁，且不覆盖账号页的自动换号开关')
 
 // ---------- 8. PAT 保存要写进当前账号（而不是被忽略的旧字段） ----------
 const qoderTab = findButton(cardTree, 'Qoder Global')
@@ -3528,6 +3534,154 @@ function extractFn(header) {
   } finally {
     STATUS.providers = providersSnapshot
     STATUS.stats = statsSnapshot
+  }
+}
+
+// ---------- 第十二轮审计（0.6.10）的前端回归 ----------
+{
+  const providersSnapshot = STATUS.providers
+  const statsSnapshot = STATUS.stats
+  const settingsSnapshot = STATUS.settings
+  try {
+    // 1) 先点的开关失败、后点的成功：失败那次也必须交还本地意图。
+    //    旧实现只在成功分支 settle，失败且被更新写入超过时直接 return，
+    //    第一个开关永远停在用户点出来的值，连轮询也不纠正。
+    {
+      const held = []
+      const restore = sandbox.fetch
+      sandbox.fetch = (url, init) => {
+        if (!String(url).includes('/settings')) return restore(url, init)
+        return new Promise((resolve, reject) => { held.push({ resolve, reject }) })
+      }
+      try {
+        let tree = await mount(card, { t: realT })
+        const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+        tabs.find((node) => textOf(node).startsWith(realT('navSettings'))).props.onClick()
+        tree = await render(card, { t: realT })
+        const boxIn = (needle) => findAll(tree, (node) => node.type === 'label' && node.props?.className === 'rpc-check-label')
+          .find((node) => textOf(node).includes(realT(needle)))
+          .children.find((child) => child && child.type === 'input')
+        boxIn('modelRateToggle').props.onChange()
+        tree = await render(card, { t: realT })
+        boxIn('usageShowInSidebar').props.onChange()
+        tree = await render(card, { t: realT })
+        if (held.length !== 2) throw new Error(`应有两个挂起的 /settings 写入，实际 ${held.length}`)
+        // 后发的先成功，先发的最后失败（被更新写入超过）。
+        held[1].resolve({ ok: true, status: 200, json: async () => STATUS, text: async () => '' })
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        held[0].reject(new Error('network down'))
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        tree = await render(card, { t: realT })
+        const rateBox = boxIn('modelRateToggle')
+        if (rateBox.props.checked !== true) {
+          throw new Error('先点的开关失败后被更新写入掩盖，界面永久停在错误的本地值')
+        }
+        if (textOf(tree).includes(realT('error'))) throw new Error('被更新写入超过的失败不应弹出错误横幅')
+      } finally {
+        sandbox.fetch = restore
+        for (const entry of held) entry.resolve({ ok: true, status: 200, json: async () => STATUS, text: async () => '' })
+        await new Promise((resolve) => setTimeout(resolve, 10))
+      }
+      console.log('✓ 被更新写入掩盖的保存失败也会交还意图，开关回到服务端值')
+    }
+
+    // 2) 当前账号未登录、但账号池里还有另一个已配置账号时，「立即签到」不能整家禁用。
+    {
+      const base = providersSnapshot[0]
+      STATUS.providers = [
+        {
+          ...base,
+          credential: { status: 'signed-out' },
+          accounts: [
+            { id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: false, source: 'desktop', credits: { state: 'none' } },
+            { id: 'acc-2', label: '备用账号', active: false, kind: 'desktop', configured: true, source: 'browser-login', credits: { state: 'ok', remain: 10, total: 100, unit: 'credits' } },
+          ],
+          checkin: { enabled: true },
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      let tree = await mount(card, { t: realT })
+      const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+      tabs.find((node) => textOf(node).startsWith(realT('navAccounts'))).props.onClick()
+      tree = await render(card, { t: realT })
+      const checkinButton = find(tree, (node) => node.type === 'button' && textOf(node) === realT('checkinNow'))
+      if (checkinButton === undefined) throw new Error('账号页找不到「立即签到」按钮')
+      if (checkinButton.props.disabled === true) {
+        throw new Error('另一个账号已配置时，整家的「立即签到」仍被当前账号的未登录状态禁用')
+      }
+      console.log('✓ 其它账号已配置时「立即签到」不再被当前账号禁用')
+    }
+
+    // 3) 长模型 id 不能把模型名/元信息挤成 0 宽；必须有省略号与宽度上限。
+    if (!source.includes('.rpc-model-id{font-family:')
+      || !source.includes('max-width:42%;overflow:hidden;text-overflow:ellipsis}')) {
+      throw new Error('长模型 id 缺少宽度上限与省略号（会把模型名挤成 0 宽并溢出）')
+    }
+    console.log('✓ 长模型 id 有宽度上限与省略号，不再挤掉模型名')
+
+    // 4) 英文单数：1 个模型 / 1 次请求不能写成复数。
+    {
+      const base = providersSnapshot[0]
+      STATUS.providers = [
+        {
+          ...base,
+          models: [{ id: 'only', name: 'Only', contextWindow: 1000, maxTokens: 100, supportsImages: false, reasoningEfforts: [], disabled: false }],
+          modelCount: 1,
+          usage: { ...base.usage, today: { requests: 1, totalTokens: 10 } },
+          accounts: [{ id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: true, source: 'desktop', usage: { requests: 1, totalTokens: 10 }, credits: { state: 'ok', remain: 1, total: 1, unit: 'credits' } }],
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      STATUS.stats = { ...statsSnapshot, totalTokens: 10 }
+      const enT = (key, params) => {
+        let text = realLocale.en[key] !== undefined ? realLocale.en[key] : key
+        if (params !== undefined) {
+          text = String(text).replace(/\{(\w+)\}/g, (all, name) => (params[name] === undefined ? all : String(params[name])))
+        }
+        return text
+      }
+      const tree = await mount(card, { t: enT })
+      const text = textOf(tree)
+      if (/(^|\s|· )1 Models(\s|$)/.test(text)) throw new Error(`英文界面把 1 个模型写成复数：${text.slice(0, 160)}`)
+      if (/(^|\s|· )1 Requests(\s|$)/.test(text)) throw new Error(`英文界面把 1 次请求写成复数：${text.slice(0, 160)}`)
+      console.log('✓ 英文界面单数不再写成复数（1 Model / 1 Request）')
+    }
+
+    // 5) 超时的英文 DOMException 不应原样进中文横幅。
+    {
+      const restore = sandbox.fetch
+      try {
+        let tree = await mount(card, { t: realT })
+        const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+        tabs.find((node) => textOf(node).startsWith(realT('navSettings'))).props.onClick()
+        tree = await render(card, { t: realT })
+        sandbox.fetch = async (url, init) => {
+          if (String(url).includes('/settings')) {
+            calls.push({ url: String(url), method: init?.method ?? 'GET', body: init?.body })
+            throw new Error('The operation was aborted due to timeout')
+          }
+          return restore(url, init)
+        }
+        const rateBox = findAll(tree, (node) => node.type === 'label' && node.props?.className === 'rpc-check-label')
+          .find((node) => textOf(node).includes(realT('modelRateToggle')))
+          .children.find((child) => child && child.type === 'input')
+        rateBox.props.onChange()
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        // 跳过 effects：迷你 harness 每次渲染都会重跑所有 effect，而真实 React
+        // 只跑一次；不跳过的话成功的 /status 会立刻把错误横幅清掉。
+        tree = await render(card, { t: realT }, true)
+        const text = textOf(tree)
+        if (!text.includes(realT('errorTimeout'))) throw new Error(`超时没有给出本地化说明：${text.slice(0, 200)}`)
+        if (text.includes('aborted due to timeout')) throw new Error('中文界面原样显示了英文 DOMException')
+      } finally {
+        sandbox.fetch = restore
+      }
+      console.log('✓ 保存超时会给出可读的本地化说明，不显示英文 DOMException')
+    }
+  } finally {
+    STATUS.providers = providersSnapshot
+    STATUS.stats = statsSnapshot
+    STATUS.settings = settingsSnapshot
   }
 }
 

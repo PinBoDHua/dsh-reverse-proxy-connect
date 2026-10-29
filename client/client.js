@@ -326,7 +326,7 @@ window.__ModuleLoader__.load({
           '.rpc-list-row:hover{background:var(--rpc-surface)}',
           '.rpc-model-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--rpc-text);font-weight:500}',
           '.rpc-model-meta{display:flex;align-items:center;gap:4px;flex-wrap:wrap;min-width:0;color:var(--rpc-muted);font-size:11px;line-height:17px}',
-          '.rpc-model-id{font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Consolas,monospace);font-size:11px;line-height:17px;color:var(--rpc-faint);white-space:nowrap}',
+          '.rpc-model-id{font-family:var(--ds-font-family-code,ui-monospace,SFMono-Regular,Consolas,monospace);font-size:11px;line-height:17px;color:var(--rpc-faint);white-space:nowrap;min-width:0;max-width:42%;overflow:hidden;text-overflow:ellipsis}',
           '.rpc-event-list{display:flex;flex-direction:column;min-width:0}',
           '.rpc-event{display:flex;align-items:flex-start;gap:9px;padding:11px 12px;border-top:1px solid var(--rpc-border);min-width:0;font-size:13px;line-height:20px}',
           '.rpc-event:first-child{border-top:0}',
@@ -484,6 +484,7 @@ window.__ModuleLoader__.load({
       enabled: '接入',
       disabled: '已关闭',
       models: '模型',
+      modelsOne: '模型',
       noModels: '还没有模型。请先登录对应 App，或填好个人访问令牌（PAT）。',
       catalogLive: '已从上游拉取',
       catalogSaved: '上游不可达，显示上次结果',
@@ -519,6 +520,10 @@ window.__ModuleLoader__.load({
       reasoning: '推理档位',
       noReasoning: '不支持推理档位',
       error: '出错了',
+      errorTimeout: '请求超时，请稍后重试',
+      errorNetwork: '无法连接插件后端，请检查宿主是否仍在运行',
+      errorStatus: '宿主返回 HTTP {status}',
+      errorPayload: '宿主返回的数据格式不正确',
       loading: '读取中…',
       probe: '检测账号可用模型',
       probing: '检测中…',
@@ -528,6 +533,7 @@ window.__ModuleLoader__.load({
       unavailable: '账号不支持',
       unavailableHint: '这些模型产品里有、但你这个账号用不了。勾选可强制显示并自行尝试。',
       unavailableCount: '{count} 个模型账号不支持',
+      unavailableCountOne: '1 个模型账号不支持',
       forceShow: '强制显示',
       forced: '已强制显示',
       credits: '积分',
@@ -681,6 +687,7 @@ window.__ModuleLoader__.load({
       usageTotal: '累计',
       usageRequests: '{count} 次请求',
       usageCalls: '请求',
+      usageCallOne: '请求',
       usageRate: '成功率',
       usageAvg: '平均耗时',
       usageTokens: '{count} tokens',
@@ -891,6 +898,7 @@ window.__ModuleLoader__.load({
       enabled: 'Enabled',
       disabled: 'Disabled',
       models: 'Models',
+      modelsOne: 'Model',
       noModels: 'No models yet. Sign in to the desktop app, or save a personal access token.',
       catalogLive: 'Fetched from upstream',
       catalogSaved: 'Upstream unreachable — showing the last result',
@@ -926,6 +934,10 @@ window.__ModuleLoader__.load({
       reasoning: 'Reasoning levels',
       noReasoning: 'No reasoning levels',
       error: 'Something went wrong',
+      errorTimeout: 'Request timed out, please try again',
+      errorNetwork: 'Cannot reach the plugin backend; check that the host is still running',
+      errorStatus: 'The host returned HTTP {status}',
+      errorPayload: 'The host returned an unexpected payload',
       loading: 'Loading…',
       probe: 'Check which models my account can use',
       probing: 'Checking…',
@@ -935,6 +947,7 @@ window.__ModuleLoader__.load({
       unavailable: 'Not in plan',
       unavailableHint: 'These models exist in the product but your account cannot use them. Tick to force-show and try anyway.',
       unavailableCount: '{count} models not in this plan',
+      unavailableCountOne: '1 model not in this plan',
       forceShow: 'Force show',
       forced: 'Force-shown',
       credits: 'Credits',
@@ -1087,6 +1100,7 @@ window.__ModuleLoader__.load({
       usageTotal: 'All time',
       usageRequests: '{count} requests',
       usageCalls: 'Requests',
+      usageCallOne: 'Request',
       usageRate: 'Success',
       usageAvg: 'Avg time',
       usageTokens: '{count} tokens',
@@ -1294,6 +1308,23 @@ window.__ModuleLoader__.load({
       return String(text).replace(/\{(\w+)\}/g, function (_, name) {
         return vars[name] === undefined ? '' : String(vars[name])
       })
+    }
+
+    /**
+     * 把网络层的技术错误翻成可操作的说明。
+     *
+     * fetch 失败时浏览器给的是 `Failed to fetch` / `The operation was aborted
+     * due to timeout` 这类英文 DOMException；原样塞进中文横幅，用户只看到一句
+     * 看不懂的英文。服务端自己的错误文案（已经是中文）原样透传。
+     */
+    function errorTextOf(message, t) {
+      var raw = String(message === undefined || message === null ? '' : message)
+      var status = /^(?:status|http)\s+(\d{3})$/i.exec(raw)
+      if (status !== null) return bind(t, 'errorStatus', { status: status[1] })
+      if (raw === 'status payload is not an object') return bind(t, 'errorPayload')
+      if (/timed out|aborted due to timeout/i.test(raw)) return bind(t, 'errorTimeout')
+      if (/Failed to fetch|NetworkError|Load failed/i.test(raw)) return bind(t, 'errorNetwork')
+      return raw
     }
 
     /**
@@ -3255,6 +3286,11 @@ window.__ModuleLoader__.load({
             return document
           })
           .catch(function (failure) {
+            // 失败也必须交还这次写入的本地意图（`settle` 会比对 pending.seq，
+            // 期间又点过一次时不会误清更新的意图）。旧实现只在成功分支调用
+            // settle：先点的开关失败、后点的成功时，先点那个的意图永远留在
+            // `pendingToggles` 里，界面停在用户点出来的值，连轮询也不再跟随。
+            settle()
             // 只有**最新一次**写入失败才回滚界面。更早的写入失败时，更新的
             // 写入（已经包含用户在它之后做的改动）还在飞：清空本地意图会让
             // 开关先跳回旧值、等新响应回来再跳一次；把 onError 交给旧写入
@@ -3643,10 +3679,10 @@ window.__ModuleLoader__.load({
             lowRatio: toPercent(advAlert, 0.15),
           },
           probe: { enabled: advProbeEnabled !== false },
+          // 只提交高级表单自己的字段：`enabled` 属于账号页的「自动换号」开关。
+          // 以前这里用当前 status 的值一起发，保存高级设置会把用户在账号页
+          // 刚关掉的开关按 20 秒前的快照写回 true（或覆盖另一个窗口的修改）。
           autoSwitch: {
-            enabled: (status.settings && status.settings.autoSwitch && typeof status.settings.autoSwitch === 'object')
-              ? status.settings.autoSwitch.enabled !== false
-              : true,
             thresholdRatio: toPercent(advSwitch, 0),
           },
         }, status.key)
@@ -3935,8 +3971,10 @@ window.__ModuleLoader__.load({
             ? bind(t, credits.state === 'error' ? 'creditsUnreadable' : 'creditsNone') + ': ' + credits.error
             : bind(t, credits.state === 'none' ? 'creditsNone' : 'creditsUnreadable')
         var modelCount = isFiniteNumber(entry.modelCount) ? entry.modelCount : safeArray(entry.models).length
-        var metaParts = [String(modelCount) + ' ' + bind(t, 'models')]
-        if (isFiniteNumber(today.requests) && today.requests > 0) metaParts.push(formatNumber(today.requests) + ' ' + bind(t, 'usageCalls'))
+        var metaParts = [String(modelCount) + ' ' + bind(t, modelCount === 1 ? 'modelsOne' : 'models')]
+        if (isFiniteNumber(today.requests) && today.requests > 0) {
+          metaParts.push(formatNumber(today.requests) + ' ' + bind(t, today.requests === 1 ? 'usageCallOne' : 'usageCalls'))
+        }
         var ratio
         if (credits.state === 'ok' && credits.unlimited !== true && isFiniteNumber(credits.total) && credits.total > 0 && isFiniteNumber(credits.remain)) {
           ratio = Math.max(0, Math.min(1, credits.remain / credits.total))
@@ -4144,7 +4182,7 @@ window.__ModuleLoader__.load({
           ? null
           : h('div', { key: 'err', className: 'rpc-banner rpc-banner-error', role: 'status' },
               rpcIcon('alert', 15),
-              h('span', {}, bind(t, 'error') + ': ' + error)),
+              h('span', { title: error }, bind(t, 'error') + ': ' + errorTextOf(error, t))),
         settingsCorrupt === null
           ? null
           : h('div', { key: 'settings-corrupt', className: 'rpc-banner rpc-banner-warn' }, rpcIcon('alert', 15), settingsCorrupt),
@@ -4271,7 +4309,7 @@ window.__ModuleLoader__.load({
             activeAccountLabel !== undefined
               ? h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4, minWidth: 0 } }, rpcIcon('users', 12), bind(t, 'creditsCurrent', { label: accountNameOf(activeAccountLabel, t) }))
               : null,
-            h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } }, rpcIcon('cube', 12), String(modelTotal) + ' ' + bind(t, 'models')))),
+            h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } }, rpcIcon('cube', 12), String(modelTotal) + ' ' + bind(t, modelTotal === 1 ? 'modelsOne' : 'models')))),
         h('div', { className: 'rpc-detail-actions' },
           // 开关而不是复选框：这里控制的是「这个 provider 参不参与请求」，
           // 是即时生效的模式开关，不是表单里的多选项；开关的语义与状态色都更直接。
@@ -4417,7 +4455,7 @@ window.__ModuleLoader__.load({
         var deleteConfirmKey = active.provider + '::' + account.id
         var usage = account.usage !== null && typeof account.usage === 'object' ? account.usage : undefined
         var usageMeta = usage !== undefined && (usage.requests || 0) > 0
-          ? formatNumber(usage.requests || 0) + ' ' + bind(t, 'usageCalls') + ' · '
+          ? formatNumber(usage.requests || 0) + ' ' + bind(t, usage.requests === 1 ? 'usageCallOne' : 'usageCalls') + ' · '
             + compactTokens(usage.totalTokens || 0)
           : accountSourceText(account, t)
         var accountCell = h('div', { key: 'who', role: 'cell', className: 'rpc-cell rpc-acc-who', style: S.accountCell },
@@ -4721,9 +4759,24 @@ window.__ModuleLoader__.load({
         }
       }
       var checkinFailed = checkinTone === 'hintWarn' && checkin.enabled !== false
-      // 凭证状态明确不是 signed-in（未登录 / 已禁用）时签到必然失败，先禁掉按钮；
-      // credential 缺省（老宿主）按可用处理，避免误伤现有用户。
+      // 凭证状态明确不是 signed-in（未登录 / 已禁用）时先禁掉按钮；credential
+      // 缺省（老宿主）按可用处理，避免误伤现有用户。
+      //
+      // 但 credential 只探测**当前账号**：账号池里还有另一个已配置的账号时，
+      // 服务端的签到会逐账号探测、跳过未配置的那个，照样为它签到。只看当前
+      // 账号会把整家的「立即签到」禁掉（实测：当前账号未登录，第二个账号
+      // 显示「可签」却没有入口）。有其它可签到账号就放行。
       var checkinBlocked = credential.status !== undefined && credential.status !== null && credential.status !== 'signed-in'
+      if (checkinBlocked && accountRows.length > 0) {
+        var activeAccountRow = accountRows.filter(function (row) {
+          return row !== null && typeof row === 'object' && row.active === true
+        })[0]
+        var activeAccountId = activeAccountRow === undefined ? undefined : activeAccountRow.id
+        checkinBlocked = !accountRows.some(function (row) {
+          return row !== null && typeof row === 'object'
+            && row.enabled !== false && row.configured === true && row.id !== activeAccountId
+        })
+      }
       // 签到徽标的色调：成功/已签为绿，失败为橙，其余（未开始/无活动/未配置）保持中性。
       var checkinPositive = false
       if (checkin.enabled !== false) {
@@ -5328,7 +5381,7 @@ window.__ModuleLoader__.load({
             }, present === false ? '—' : formatNumber(data.requests || 0)),
             present === false
               ? null
-              : h('span', { style: { fontSize: 11, color: 'var(--rpc-muted)' } }, bind(t, 'usageCalls'))),
+              : h('span', { style: { fontSize: 11, color: 'var(--rpc-muted)' } }, bind(t, data.requests === 1 ? 'usageCallOne' : 'usageCalls'))),
           h('div', {
             className: 'rpc-kpi-metrics',
             style: {
@@ -6227,7 +6280,7 @@ window.__ModuleLoader__.load({
         sections.push(
           h('details', { key: 'unavail', className: 'rpc-details' },
             h('summary', { className: 'rpc-label', style: Object.assign({}, S.hintWarn, { cursor: 'pointer', color: 'var(--rpc-warn)' }) },
-              rpcIcon('alert', 13), bind(t, 'unavailableCount', { count: unavailable.length })),
+              rpcIcon('alert', 13), bind(t, unavailable.length === 1 ? 'unavailableCountOne' : 'unavailableCount', { count: unavailable.length })),
             h('p', { className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'unavailableHint')),
             h('ul', { className: 'rpc-list', style: Object.assign({}, S.modelList, { marginTop: 6 }) },
               unavailable.map(function (model, index) {

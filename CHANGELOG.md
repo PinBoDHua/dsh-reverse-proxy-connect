@@ -1,5 +1,78 @@
 # 更新记录
 
+## 0.6.10 — 2026-10-29
+
+第十二轮前后端审计（打磨轮）。后端 7 条、前端 6 条，每条都先用最小脚本复现
+再修。状态接口仍是 v8，设置文件仍是 v2。测试 **374 后端 + 114 前端**。
+
+### 凭证与换号
+
+- **换 PAT / 登录文件后仍显示上一个账号的额度与消耗曲线**：凭证变更只清了
+  失败探测与测试结论，没清 `creditCache` 与 `creditHistory`；`/status` 的非
+  force 刷新会命中原有的 2 分钟新鲜窗口，卡片继续显示旧余额（旧账号额度为 0
+  时还会触发自动换号）。现在 `forgetCredentialState()` 一并删掉该账号的额度
+  快照、推进删除代数（挡住旧凭证在途的刷新），并清掉消耗历史。
+  账号池里换某一项时只作废那一项，同一 provider 的其它账号不受影响
+  （`credentialTargetsOf()` 保留账号粒度）。[lib/runtime.js](lib/runtime.js)、
+  [lib/patch.js](lib/patch.js)、[lib/index.js](lib/index.js)
+- **换号成功、写回设置失败时整条回答被丢弃**：`onAccountSwitch()` 写锁被占 /
+  只读文件会抛错，而它在正文开始前裸调，异常直接把一次已经拿到上游正文的
+  请求判成失败（CLI `ask` 直接 exit 1）。现在统一走 `#applyAccountSwitch()`
+  try/catch，只记一条 warn。[lib/runtime.js](lib/runtime.js)
+
+### 请求与统计
+
+- **`canDisableThinking` 的模型被强行改回唯一档位**：用户显式选 `off` 后，
+  `impliedEffortOf()` 仍按「只有一个档位」补回 `high`，多花思考 token、变慢，
+  个别上游还会因 `high + disabled` 直接 400。现在目录明确允许关闭思考时不再
+  补档位。[lib/runtime.js](lib/runtime.js)
+- **老 `stats.json` 升级后平均耗时变 0ms**：`normalizeCounters()` 把缺失的
+  `okDurationMs` 补成 0，`derived()` 的回退分支永远不生效。现在 0 时沿用旧的
+  「全部耗时 / 全部请求」口径。[lib/stats.js](lib/stats.js)
+- **删除账号后「最近请求」仍留着它的行**：`forgetAccount()` 只清计数维度，
+  没过滤 `recent`，重启后又被写回磁盘；与 `mergeStatsData()` 的口径矛盾。
+  现在一并删除并落盘。[lib/stats.js](lib/stats.js)
+
+### 设置与 CLI
+
+- **运行中删掉 `settings.json` 被旧内存快照写回**：`#reloadIfChanged()` 把
+  「文件不存在」当成「没有外部修改」，下一次任意 patch 会把 PAT 与账号池
+  原样写回。现在与 `#load()` 一致回到默认值（stat 先失败的路径也覆盖）。
+  [lib/settings.js](lib/settings.js)
+- **显式 `test` / `probe` 一个已关闭的 provider 什么都没做却 exit 0**：现在
+  与未知 provider 同类，打印「已在设置里关闭」后 exit 2。
+
+### 前端
+
+- **被更新写入掩盖的失败让开关永久停在错误值**：`mutate().catch` 在
+  `seq !== writeSeq.current` 时直接 return，漏掉 `settle()`；先点的开关失败、
+  后点的成功时，前一个的本地意图永远留在 `pendingToggles`，轮询也不再纠正。
+  现在失败分支先 `settle()`（按 `pending.seq` 比对，不会误清更新的意图）。
+  [client/client.js](client/client.js)
+- **保存高级设置越权覆盖「自动换号」**：高级补丁里带着 `autoSwitch.enabled`
+  且值取自当前 `status`，会把账号页刚关掉的开关按 20 秒前的快照写回 true。
+  现在高级表单只提交 `thresholdRatio`。
+- **当前账号未登录就禁用整家「立即签到」**：`credential` 只探测当前账号，而
+  服务端会逐账号签到、跳过未配置的那个。现在只要还有另一个已配置的账号就
+  放行。[client/client.js](client/client.js)
+- **长模型 id 把模型名/元信息挤成 0 宽并溢出**：`.rpc-model-id` 补上
+  `min-width:0;max-width:42%` 与省略号。
+- **英文单数写成复数**：`1 Models` / `1 Requests` / `1 model not in this plan`
+  改为按数量选单数键（`modelsOne` / `usageCallOne` / `unavailableCountOne`）。
+- **超时的英文 DOMException 原样进中文横幅**：新增 `errorTextOf()`，把
+  `The operation was aborted due to timeout` / `Failed to fetch` / `HTTP 5xx`
+  翻成可操作的中文说明，原始文本只放进悬停 `title`。
+
+### 测试
+
+- 新增 `tests/audit-r12.test.mjs`（8 条）：账号级凭证变更的额度/历史隔离、
+  `credentialTargetsOf` 粒度、换号写回失败不终结回答、`canDisableThinking`
+  下的 `off`、老 stats 平均耗时、删除账号清 recent、删设置文件不复活、
+  CLI 已关闭 provider exit 2。
+- 前端新增 5 条断言（被更新写入掩盖的失败、跨表单覆盖、签到禁用、长模型 id
+  CSS、英文单数、超时本地化），并把高级设置补丁的断言收紧为「不得出现
+  `autoSwitch.enabled`」。
+
 ## 0.6.9 — 2026-10-25
 
 第十一轮前后端全量审计。逐行复查 `lib/` 全模块、三家传输层、数据层与
