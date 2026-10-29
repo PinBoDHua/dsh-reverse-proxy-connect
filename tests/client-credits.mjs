@@ -161,7 +161,7 @@ const STATUS = {
         // 今日 10 次，但 accountModelToday 只覆盖了 3 次 —— 复刻真实场景：
         // 交叉维度从升级后才开始累积，覆盖率必然小于 100%。
         today: { requests: 10, totalTokens: 80 },
-        last: { at: 1792234000000, model: 'auto', kind: 'stop', durationMs: 1000, totalTokens: 20 },
+        last: { at: 1792234000000, accountId: 'default', model: 'auto', kind: 'stop', durationMs: 1000, totalTokens: 20 },
       },
       models: [{ id: 'auto', name: 'Auto', contextWindow: 256000, maxTokens: 32000, supportsImages: true, reasoningEfforts: [], disabled: false, unavailable: false, forced: false }],
       modelCount: 1,
@@ -1882,9 +1882,147 @@ console.log('✓ 清空事件走服务端事件账本')
 const eventsSnapshot = STATUS.events
 delete STATUS.events
 cardTree = await mount(card, { t: (key) => key })
-if (textOf(cardTree).includes('eventTitle')) throw new Error('没有事件字段时不该渲染事件区块')
+if (textOf(cardTree).includes('eventTitle')) throw new Error('没有事件字段时不该渲染半个空区块')
 STATUS.events = eventsSnapshot
 console.log('✓ 老宿主没有事件账本时整块隐藏')
+
+// ── 0.7.0：事件按服务商 / 账号筛选，并能导出当前结果 ─────────────
+{
+  const snapshot = STATUS.events
+  const baseAt = 1792234000000
+  STATUS.events = {
+    version: 1,
+    count: 4,
+    latestAt: baseAt,
+    limit: 50,
+    items: [
+      { id: 'f1', at: baseAt, type: 'account-switch', level: 'warn', provider: 'workbuddy', accountId: 'acc-2', message: '切换到「备用账号」' },
+      { id: 'f2', at: baseAt - 60000, type: 'credential-refresh', level: 'info', provider: 'workbuddy', accountId: 'default', message: '令牌已续期（本机登录）' },
+      { id: 'f3', at: baseAt - 120000, type: 'credits', level: 'warn', provider: 'qoder-global', accountId: 'default', message: '额度读取失败（默认令牌）：HTTP 503' },
+      { id: 'f4', at: baseAt - 180000, type: 'checkin', level: 'info', provider: 'qoder', accountId: 'default', message: '签到完成' },
+    ],
+  }
+  const providerSelectOf = (tree) => find(tree, (node) => node.type === 'select' && node.props?.['aria-label'] === '按服务商筛选事件')
+  const accountSelectOf = (tree) => find(tree, (node) => node.type === 'select' && node.props?.['aria-label'] === '按账号筛选事件')
+  try {
+    cardTree = await mount(card, { t: realT })
+    const providerSelect = providerSelectOf(cardTree)
+    if (providerSelect === undefined) throw new Error('缺少按服务商筛选事件的下拉框')
+    const providerText = textOf(providerSelect)
+    for (const name of ['全部服务商', 'WorkBuddy', 'Qoder Global', 'qoder']) {
+      if (!providerText.includes(name)) throw new Error(`服务商下拉缺少「${name}」：${providerText}`)
+    }
+    const accountSelect = accountSelectOf(cardTree)
+    if (accountSelect === undefined) throw new Error('缺少按账号筛选事件的下拉框')
+    const accountText = textOf(accountSelect)
+    for (const name of ['全部账号', 'WorkBuddy · 本机登录', 'WorkBuddy · 备用账号']) {
+      if (!accountText.includes(name)) throw new Error(`账号下拉缺少「${name}」：${accountText}`)
+    }
+
+    providerSelect.props.onChange({ target: { value: 'workbuddy' } })
+    cardTree = await render(card, { t: realT })
+    let eventText = textOf(cardTree)
+    if (!eventText.includes('切换到「备用账号」') || !eventText.includes('令牌已续期')) {
+      throw new Error('按服务商筛选后应保留该服务商的事件')
+    }
+    if (eventText.includes('HTTP 503') || eventText.includes('签到完成')) {
+      throw new Error('按服务商筛选后仍显示其它服务商的事件')
+    }
+    // 计数跟着筛选范围走：WorkBuddy 只有 2 条。
+    if (!find(cardTree, (node) => node.type === 'button' && textOf(node) === '全部 2')) {
+      throw new Error('类型筛选计数没有跟着服务商范围收窄')
+    }
+
+    const accountSelect2 = accountSelectOf(cardTree)
+    const scopedAccountText = textOf(accountSelect2)
+    if (scopedAccountText.includes('WorkBuddy ·')) throw new Error('选定服务商后账号下拉仍在拼服务商前缀')
+    accountSelect2.props.onChange({ target: { value: 'workbuddy::default' } })
+    cardTree = await render(card, { t: realT })
+    eventText = textOf(cardTree)
+    if (!eventText.includes('令牌已续期')) throw new Error('按账号筛选后应保留该账号的事件')
+    if (eventText.includes('切换到「备用账号」') || eventText.includes('HTTP 503')) {
+      throw new Error('按账号筛选后仍显示其它账号的事件')
+    }
+
+    // 导出：沙箱里没有 Blob/URL，必须退化成可复制的 JSON 文本，而不是点了没反应。
+    const exportButton = find(cardTree, (node) => node.type === 'button' && node.props?.['aria-label'] === '把当前筛选的事件导出为 JSON')
+    if (exportButton === undefined) throw new Error('缺少导出按钮')
+    if (exportButton.props.disabled === true) throw new Error('有筛选结果时导出按钮不应禁用')
+    exportButton.props.onClick()
+    cardTree = await render(card, { t: realT })
+    const fallbackBox = find(cardTree, (node) => node.type === 'textarea' && String(node.props?.value || '').startsWith('{'))
+    if (fallbackBox === undefined) throw new Error('无法下载时没有给出可复制的 JSON')
+    const exported = JSON.parse(fallbackBox.props.value)
+    if (exported.filters.provider !== 'workbuddy' || exported.filters.accountId !== 'default') {
+      throw new Error(`导出没有带上当前筛选条件：${JSON.stringify(exported.filters)}`)
+    }
+    if (exported.retained !== 1 || exported.events.length !== 1) throw new Error('导出没有按当前筛选收窄事件')
+    if (exported.count !== 4) throw new Error('导出应保留历史总数，不能让人误以为只有筛出来的这些')
+    console.log('✓ 事件可按服务商 / 账号筛选，计数同步收窄，并能导出当前结果 JSON')
+
+    const resetButton = find(cardTree, (node) => node.type === 'button' && textOf(node).includes('重置筛选'))
+    if (resetButton === undefined) throw new Error('筛选生效后没有重置入口')
+    resetButton.props.onClick()
+    cardTree = await render(card, { t: realT })
+    eventText = textOf(cardTree)
+    if (!eventText.includes('HTTP 503') || !eventText.includes('签到完成')) throw new Error('重置筛选后没有恢复全部事件')
+    if (!find(cardTree, (node) => node.type === 'select' && node.props?.value === '')) throw new Error('重置后下拉没有回到「全部」')
+    if (find(cardTree, (node) => node.type === 'textarea' && String(node.props?.value || '').startsWith('{'))) {
+      throw new Error('重置筛选后应清掉上一次的导出兜底文本')
+    }
+    console.log('✓ 重置筛选恢复全部事件，并清掉导出兜底')
+  } finally {
+    STATUS.events = snapshot
+  }
+}
+
+// ── 0.7.0：账号行显示「最近成功 / 最近失败」而不是最后一次请求 ─────
+{
+  const provider = STATUS.providers[0]
+  const accountsSnapshot = provider.accounts
+  const now = Date.now()
+  provider.accounts = [
+    {
+      ...accountsSnapshot[0],
+      usage: {
+        requests: 5, ok: 4, failed: 1, totalTokens: 700,
+        lastAt: now - 60_000, lastOkAt: now - 5 * 60_000, lastErrorAt: now - 60_000,
+      },
+    },
+    {
+      ...accountsSnapshot[1],
+      cooldownUntil: 0,
+      lastTest: undefined,
+      usage: {
+        requests: 2, ok: 2, failed: 0, totalTokens: 20,
+        lastAt: now - 2 * 3600_000, lastOkAt: now - 2 * 3600_000, lastErrorAt: 0,
+      },
+    },
+  ]
+  try {
+    cardTree = await mount(card, { t: realT })
+    const accountsTab = find(cardTree, (node) => node.type === 'button' && textOf(node).split(' | ')[0] === '账号')
+    if (accountsTab === undefined) throw new Error('缺少账号分区入口')
+    accountsTab.props.onClick()
+    cardTree = await render(card, { t: realT })
+    const rows = findAll(cardTree, (node) => node.type === 'div' && node.props?.role === 'row' && node.props?.className === 'rpc-table-row rpc-account-row')
+    if (rows.length !== 2) throw new Error(`账号表应有 2 行，实际 ${rows.length}`)
+    const activeRow = rows.find((row) => textOf(row).includes('本机登录'))
+    const idleRow = rows.find((row) => textOf(row).includes('备用账号'))
+    if (activeRow === undefined || idleRow === undefined) throw new Error('账号行没有按名称渲染')
+    const activeText = textOf(activeRow)
+    if (!activeText.includes('最近成功')) throw new Error('账号行没有显示最近一次成功请求时间')
+    if (!activeText.includes('最近失败')) throw new Error('最近失败晚于成功时没有同时显示失败时间')
+    if (!activeText.includes('模型 auto')) throw new Error('最近成功时间旁边丢了模型名')
+    const idleTitled = find(idleRow, (node) => typeof node.props?.title === 'string' && /最近成功\s+\d{4}-\d{2}-\d{2}/.test(node.props.title))
+    if (idleTitled === undefined) throw new Error('账号行的悬停提示没有给出完整成功时间戳')
+    if (!textOf(idleRow).includes('最近成功')) throw new Error('只有成功记录的账号也应显示最近成功时间')
+    if (textOf(idleRow).includes('最近失败')) throw new Error('没有失败记录的账号不应显示最近失败')
+    console.log('✓ 账号行显示最近成功时间（失败晚于成功时并列），完整时间戳在悬停里')
+  } finally {
+    provider.accounts = accountsSnapshot
+  }
+}
 
 // ── 2.0.0：审查修复的回归 ───────────────────────────────────────
 //

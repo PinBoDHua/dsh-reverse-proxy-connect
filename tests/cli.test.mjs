@@ -79,6 +79,37 @@ test('CLI：doctor 不把未配置的可选 provider 当失败（--strict 仍 ex
 })
 
 
+test('CLI：doctor --quiet 只输出问题项（健康时完全静默）', () => {
+  const profile = mkdtempSync(join(tmpdir(), 'dsh-rpc-cli-quiet-'))
+  try {
+    const dataDir = join(profile, '.dsh-reverse-proxy-connect')
+    mkdirSync(dataDir, { recursive: true })
+    // 与上一个用例相同：只有 qoder 启用且未配置 —— 「可选但未配置」不算问题。
+    writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({
+      version: 2,
+      providers: {
+        workbuddy: { enabled: false },
+        'workbuddy-ai': { enabled: false },
+        qoder: { enabled: true },
+        'qoder-global': { enabled: false },
+        trae: { enabled: false },
+        'trae-global': { enabled: false },
+      },
+    }))
+    const child = runCli(['doctor', '--quiet', '--strict', '--profile', profile], {
+      QODER_CN_PERSONAL_ACCESS_TOKEN: '',
+      QODER_PERSONAL_ACCESS_TOKEN: '',
+    })
+    const output = `${child.stdout ?? ''}${child.stderr ?? ''}`
+    assert.equal(child.status, 0, `doctor --quiet --strict 应成功；输出：${output}`)
+    // 没有问题时一个字都不该输出：脚本/开机自检据此判断「无需处理」。
+    assert.equal(output.trim(), '', `--quiet 在健康环境不应有任何输出，实际：${output}`)
+    assert.doesNotMatch(output, /✓|体检通过|未配置（可选）/, '--quiet 不应输出成功项或提示项')
+  } finally {
+    rmSync(profile, { recursive: true, force: true })
+  }
+})
+
 test('CLI probe 会把探测结果写回设置（和 GUI 的「检测账号可用模型」一致）', () => {
   const profile = mkdtempSync(join(tmpdir(), 'dsh-rpc-cli-probe-'))
   try {

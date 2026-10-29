@@ -335,6 +335,8 @@ window.__ModuleLoader__.load({
           '.rpc-event-time{font-size:11px;line-height:17px;color:var(--rpc-faint);font-variant-numeric:tabular-nums;white-space:nowrap;flex:0 0 auto;margin-top:1px}',
           '.rpc-event-msg{flex:1 1 200px;min-width:0;color:var(--rpc-text);overflow-wrap:anywhere}',
           '.rpc-filters{display:flex;align-items:center;gap:5px;flex-wrap:wrap}',
+          '.rpc-event-scope{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}',
+          '.rpc-event-scope .rpc-select{width:auto;min-width:104px;max-width:190px;height:27px;font-size:11.5px;padding:0 6px;border-radius:7px}',
           '.rpc-filter{font:inherit;font-size:11.5px;line-height:1;height:25px;padding:0 9px;border-radius:999px;',
           'border:1px solid var(--rpc-border);background:transparent;color:var(--rpc-muted);cursor:pointer;white-space:nowrap;transition:background .12s ease,color .12s ease,border-color .12s ease}',
           '.rpc-filter:hover{background:var(--rpc-surface-2);color:var(--rpc-text)}',
@@ -623,6 +625,9 @@ window.__ModuleLoader__.load({
       accountFallback: '未命名账号',
       accountDisabled: '已禁用',
       accountNoRequests: '还没有请求记录',
+      accountLastOk: '最近成功 {time}',
+      accountLastError: '最近失败 {time}',
+      accountLastRequest: '最近请求 {time}',
       accountModelShort: '模型 {model}',
       accountCooldownHint: '约 {duration} 后恢复',
       accountCreditsExpiry: '到期 {date}',
@@ -871,6 +876,14 @@ window.__ModuleLoader__.load({
       eventRetained: '仅保留最近 {count} 条，更早的事件已轮转。',
       eventRepeat: '×{count}',
       eventRepeatHint: '同一事件共 {count} 次；最早 {first}，最新 {last}',
+      eventProviderFilterAll: '全部服务商',
+      eventAccountFilterAll: '全部账号',
+      eventProviderLabel: '按服务商筛选事件',
+      eventAccountLabel: '按账号筛选事件',
+      eventResetFilters: '重置筛选',
+      eventExport: '导出',
+      eventExportAria: '把当前筛选的事件导出为 JSON',
+      eventExportFallback: '当前环境不能直接下载，已生成 JSON，请手动复制。',
       searchOnlyUnavailable: '没有可用的匹配模型；{count} 个「账号不支持」的模型匹配，可在下方勾选强制显示。',
       searchAllUnavailable: '全部 {count} 个模型都被判定为「账号不支持」；可在下方勾选强制显示，或点「检测」重新探测。',
       advancedInvalid: '超出允许范围：{min}–{max}。',
@@ -1036,6 +1049,9 @@ window.__ModuleLoader__.load({
       accountFallback: 'Unnamed account',
       accountDisabled: 'Disabled',
       accountNoRequests: 'No requests yet',
+      accountLastOk: 'last success {time}',
+      accountLastError: 'last failure {time}',
+      accountLastRequest: 'last request {time}',
       accountModelShort: 'model {model}',
       accountCooldownHint: 'back in ~{duration}',
       accountCreditsExpiry: 'expires {date}',
@@ -1284,6 +1300,14 @@ window.__ModuleLoader__.load({
       eventRetained: 'Only the latest {count} events are kept; older entries have rotated out.',
       eventRepeat: '×{count}',
       eventRepeatHint: 'Same event {count} times; first {first}, latest {last}',
+      eventProviderFilterAll: 'All providers',
+      eventAccountFilterAll: 'All accounts',
+      eventProviderLabel: 'Filter events by provider',
+      eventAccountLabel: 'Filter events by account',
+      eventResetFilters: 'Reset filters',
+      eventExport: 'Export',
+      eventExportAria: 'Export the filtered events as JSON',
+      eventExportFallback: 'Download is unavailable here; the JSON is ready to copy below.',
       searchOnlyUnavailable: 'No available model matches; {count} model(s) not in this plan match — expand the list below to force-show one.',
       searchAllUnavailable: 'All {count} models are flagged as not supported by this account. Force-show one below, or run Probe again to re-check.',
       advancedInvalid: 'Out of range: {min}–{max}.',
@@ -2528,16 +2552,31 @@ window.__ModuleLoader__.load({
           && typeof provider.usage.last.model === 'string' && provider.usage.last.model !== ''
           ? provider.usage.last.model
           : undefined)
-      var usageAt = account.usage !== null && typeof account.usage === 'object'
-        && isFiniteNumber(account.usage.lastAt) && account.usage.lastAt > 0
-        ? account.usage.lastAt
-        : undefined
-      var at = lastTest !== undefined && isFiniteNumber(lastTest.at) && lastTest.at > 0 ? lastTest.at : usageAt
+      var usage = account.usage !== null && typeof account.usage === 'object' ? account.usage : undefined
+      var usageAt = usage !== undefined && isFiniteNumber(usage.lastAt) && usage.lastAt > 0 ? usage.lastAt : undefined
+      var okAt = usage !== undefined && isFiniteNumber(usage.lastOkAt) && usage.lastOkAt > 0 ? usage.lastOkAt : undefined
+      var errAt = usage !== undefined && isFiniteNumber(usage.lastErrorAt) && usage.lastErrorAt > 0 ? usage.lastErrorAt : undefined
       var detailParts = []
-      if (at !== undefined) detailParts.push(formatAgo(at, t))
+      // 用户真正关心的是「这个账号最近一次**成功**是什么时候」：旧实现拿
+      // lastAt（最后一次请求，可能是失败）当相对时间，一个连续失败的账号看起来
+      // 像「刚刚还在正常工作」。成功时间优先，没有成功记录时退化成最后一次请求。
+      if (okAt !== undefined) detailParts.push(bind(t, 'accountLastOk', { time: formatAgo(okAt, t) }))
+      else if (usageAt !== undefined) detailParts.push(bind(t, 'accountLastRequest', { time: formatAgo(usageAt, t) }))
+      // 老宿主（status v8 之前）账号行没有 usage：沿用「最近测试时间」，不倒退。
+      else if (lastTest !== undefined && isFiniteNumber(lastTest.at) && lastTest.at > 0) detailParts.push(formatAgo(lastTest.at, t))
+      // 没有任何成功记录时，errAt 必然等于 usageAt（最后一次请求就是失败）：
+      // 再补一句「最近失败」只是在同一格子里说两遍同一件事。
+      if (errAt !== undefined && (okAt === undefined ? errAt !== usageAt : errAt > okAt)) {
+        detailParts.push(bind(t, 'accountLastError', { time: formatAgo(errAt, t) }))
+      }
       if (model !== undefined) detailParts.push(bind(t, 'accountModelShort', { model: model }))
       var detail = detailParts.length > 0 ? detailParts.join(' · ') : bind(t, 'accountNoRequests')
-      var title = lastTest !== undefined && typeof lastTest.error === 'string' ? lastTest.error : ''
+      // 悬停里给完整时间戳：相对时间适合扫一眼，排查时还是要精确到秒。
+      var titleParts = []
+      if (lastTest !== undefined && typeof lastTest.error === 'string' && lastTest.error !== '') titleParts.push(lastTest.error)
+      if (okAt !== undefined) titleParts.push(bind(t, 'accountLastOk', { time: formatTime(okAt) }))
+      if (errAt !== undefined) titleParts.push(bind(t, 'accountLastError', { time: formatTime(errAt) }))
+      var title = titleParts.join('\n')
 
       if (account.enabled === false) {
         return { label: bind(t, 'accountDisabled'), tone: 'muted', detail: detail, title: title }
@@ -2594,9 +2633,14 @@ window.__ModuleLoader__.load({
           label: bind(t, 'accountCreditsExhausted'),
           tone: 'error',
           detail: detail,
-          title: isFiniteNumber(credits.resetAtMs) && credits.resetAtMs > 0
-            ? bind(t, 'accountCreditsExpiry', { date: formatMonthDayTime(credits.resetAtMs) })
-            : '',
+          // 额度用尽时也要保留最近成功/失败时间：排查「是刚用完还是早就没额度」
+          // 全靠这一行，不能被到期时间挤掉。
+          title: [
+            isFiniteNumber(credits.resetAtMs) && credits.resetAtMs > 0
+              ? bind(t, 'accountCreditsExpiry', { date: formatMonthDayTime(credits.resetAtMs) })
+              : '',
+            title,
+          ].filter(function (part) { return part !== '' }).join('\n'),
         }
       }
       return { label: bind(t, 'accountAvailable'), tone: 'ok', detail: detail, title: title }
@@ -2862,6 +2906,18 @@ window.__ModuleLoader__.load({
       var eventsExpandedState = useState(false)
       var eventsExpanded = eventsExpandedState[0]
       var setEventsExpanded = eventsExpandedState[1]
+      // 0.7.0：按服务商 / 账号收窄时间线。账号筛选值统一用 `provider::accountId`
+      // （账号 id 只在 provider 内唯一），切换服务商时清空，避免留下一个不可见的筛选。
+      var eventProviderState = useState('')
+      var eventProviderFilter = eventProviderState[0]
+      var setEventProviderFilter = eventProviderState[1]
+      var eventAccountState = useState('')
+      var eventAccountFilter = eventAccountState[0]
+      var setEventAccountFilter = eventAccountState[1]
+      // 无法触发下载（无 Blob / 非浏览器环境）时的兜底 JSON。
+      var eventFallbackState = useState('')
+      var eventFallback = eventFallbackState[0]
+      var setEventFallback = eventFallbackState[1]
       // 删除账号二次确认：第一次点击只进入确认态，3 秒后自动复原。
       var deleteConfirmState = useState(undefined)
       var deleteConfirm = deleteConfirmState[0]
@@ -3760,6 +3816,7 @@ window.__ModuleLoader__.load({
             applyStatus(document)
             endBusy('events')
             setError(undefined)
+            setEventFallback('')
           })
           .catch(function (failure) {
             endBusy('events')
@@ -6367,8 +6424,23 @@ window.__ModuleLoader__.load({
           if (filter === 'credential') return event.type === 'credential' || event.type === 'credential-refresh' || event.type === 'login'
           return true
         }
+        // 0.7.0：服务商 / 账号筛选。账号值用 `provider::accountId`，因为
+        // `default` 这类 id 在六家里都存在，只比 id 会把别的服务商一起筛进来。
+        var matchesEventScope = function (event) {
+          if (eventProviderFilter !== '' && event.provider !== eventProviderFilter) return false
+          if (eventAccountFilter !== '') {
+            var separator = eventAccountFilter.indexOf('::')
+            if (separator <= 0) return false
+            if (event.provider !== eventAccountFilter.slice(0, separator)) return false
+            if (event.accountId !== eventAccountFilter.slice(separator + 2)) return false
+          }
+          return true
+        }
+        var scopedEvents = allEvents.filter(matchesEventScope)
         var groupedCountOf = function (filter) {
-          return groupRepeatedEvents(allEvents.filter(function (event) { return matchesEventFilter(event, filter) })).length
+          // 计数跟着当前服务商/账号范围走：范围收窄后按钮还写全量数字，
+          // 会和下方只剩一行的列表直接打架。
+          return groupRepeatedEvents(scopedEvents.filter(function (event) { return matchesEventFilter(event, filter) })).length
         }
         var eventFilters = [
           { id: 'all', label: 'eventAll', count: groupedCountOf('all') },
@@ -6376,8 +6448,116 @@ window.__ModuleLoader__.load({
           { id: 'problem', label: 'eventProblemFilter', count: groupedCountOf('problem') },
           { id: 'credential', label: 'eventCredentialFilter', count: groupedCountOf('credential') },
         ]
-        var filteredEvents = allEvents.filter(function (event) { return matchesEventFilter(event, eventFilter) })
+        var filteredEvents = scopedEvents.filter(function (event) { return matchesEventFilter(event, eventFilter) })
         var groupedEvents = groupRepeatedEvents(filteredEvents)
+
+        // 下拉框的选项只列「账本里真的出现过」的服务商与账号：列一堆永远为空
+        // 的选项没有意义。账号名称从 /status 的账号池取，取不到就退回账号 id。
+        var providerNames = {}
+        var providerOrder = []
+        var accountNames = {}
+        safeArray(status.providers).forEach(function (providerRow) {
+          if (providerRow === null || typeof providerRow !== 'object' || typeof providerRow.provider !== 'string') return
+          providerOrder.push(providerRow.provider)
+          providerNames[providerRow.provider] = typeof providerRow.displayName === 'string' && providerRow.displayName !== ''
+            ? providerRow.displayName
+            : providerRow.provider
+          safeArray(providerRow.accounts).forEach(function (account) {
+            if (typeof account.id !== 'string') return
+            accountNames[providerRow.provider + '::' + account.id] = accountNameOf(account, t)
+          })
+        })
+        var seenProviders = {}
+        var seenAccounts = {}
+        var eventProviderOptions = []
+        var eventAccountOptions = []
+        allEvents.forEach(function (event) {
+          if (typeof event.provider !== 'string') return
+          if (seenProviders[event.provider] !== true) {
+            seenProviders[event.provider] = true
+            eventProviderOptions.push(event.provider)
+          }
+          if (typeof event.accountId !== 'string' || event.accountId === '') return
+          var accountKey = event.provider + '::' + event.accountId
+          if (seenAccounts[accountKey] === true) return
+          seenAccounts[accountKey] = true
+          eventAccountOptions.push({ key: accountKey, provider: event.provider, accountId: event.accountId })
+        })
+        var rankOfProvider = function (provider) {
+          var index = providerOrder.indexOf(provider)
+          return index === -1 ? providerOrder.length : index
+        }
+        eventProviderOptions.sort(function (a, b) { return rankOfProvider(a) - rankOfProvider(b) })
+        eventAccountOptions.sort(function (a, b) {
+          var rank = rankOfProvider(a.provider) - rankOfProvider(b.provider)
+          if (rank !== 0) return rank
+          return String(accountNames[a.key] || a.accountId).localeCompare(String(accountNames[b.key] || b.accountId))
+        })
+        var visibleAccountOptions = eventAccountOptions.filter(function (option) {
+          return eventProviderFilter === '' || option.provider === eventProviderFilter
+        })
+        var scopeActive = eventProviderFilter !== '' || eventAccountFilter !== ''
+        var clearEventScope = function () {
+          setEventProviderFilter('')
+          setEventAccountFilter('')
+          setEventFallback('')
+          setEventsExpanded(false)
+        }
+        /** 时间线导出：只导出当前筛选结果，带筛选条件与历史总数，便于排障对照。 */
+        var exportEvents = function () {
+          if (filteredEvents.length === 0) return
+          var payload = {
+            plugin: 'dsh-reverse-proxy-connect',
+            version: status.plugin !== null && typeof status.plugin === 'object' && typeof status.plugin.version === 'string'
+              ? status.plugin.version
+              : undefined,
+            exportedAt: new Date().toISOString(),
+            filters: {
+              type: eventFilter,
+              provider: eventProviderFilter === '' ? undefined : eventProviderFilter,
+              accountId: eventAccountFilter === '' ? undefined : eventAccountFilter.slice(eventAccountFilter.indexOf('::') + 2),
+            },
+            // 历史总数与真实保留条数分开写：导出文件里的 events 只是宿主保留的
+            // 最近一批，不能让人误以为这就是全部历史。
+            count: isFiniteNumber(eventDoc.count) ? eventDoc.count : filteredEvents.length,
+            retained: filteredEvents.length,
+            events: filteredEvents,
+          }
+          var text = JSON.stringify(payload, null, 2)
+          var date = new Date()
+          var pad = function (value) { return String(value).padStart(2, '0') }
+          var filename = 'dsh-rpc-events-' + String(date.getFullYear()) + pad(date.getMonth() + 1) + pad(date.getDate())
+            + '-' + pad(date.getHours()) + pad(date.getMinutes()) + '.json'
+          var downloaded = false
+          try {
+            if (typeof document !== 'undefined' && document !== null && typeof document.createElement === 'function'
+              && typeof Blob !== 'undefined' && typeof URL !== 'undefined' && typeof URL.createObjectURL === 'function') {
+              var blob = new Blob([text], { type: 'application/json;charset=utf-8' })
+              var href = URL.createObjectURL(blob)
+              var anchor = document.createElement('a')
+              if (anchor !== null && typeof anchor.click === 'function') {
+                anchor.href = href
+                anchor.download = filename
+                anchor.rel = 'noopener'
+                if (document.body !== null && document.body !== undefined && typeof document.body.appendChild === 'function') {
+                  document.body.appendChild(anchor)
+                }
+                anchor.click()
+                if (anchor.parentNode !== null && anchor.parentNode !== undefined && typeof anchor.parentNode.removeChild === 'function') {
+                  anchor.parentNode.removeChild(anchor)
+                }
+                downloaded = true
+              }
+              setTimeout(function () { URL.revokeObjectURL(href) }, 1000)
+            }
+          } catch (_) {
+            downloaded = false
+          }
+          // 没有 DOM / Blob 的宿主（测试、SSR）退化成可手动复制的文本框，
+          // 而不是点了没反应。
+          if (!downloaded) setEventFallback(text)
+          else setEventFallback('')
+        }
         // 展开即渲染全部筛选结果（重复事件已合并）：宿主已把 items 截到
         // events.limit（默认 50），不再用 30 这种「看起来是全部、其实不是」的隐性上限。
         var visibleGroups = eventsExpanded === true ? groupedEvents : groupedEvents.slice(0, 6)
@@ -6391,6 +6571,7 @@ window.__ModuleLoader__.load({
             onClick: function () {
               setEventFilter(filter.id)
               setEventsExpanded(false)
+              setEventFallback('')
             },
           }, bind(t, filter.label) + (filter.count > 0 ? ' ' + String(filter.count) : ''))
         }
@@ -6448,6 +6629,81 @@ window.__ModuleLoader__.load({
               ? bind(t, 'eventLess')
               : bind(t, 'eventMore', { count: groupedEvents.length }))
           : null
+        // 服务商 / 账号下拉 + 重置 + 导出。放在类型筛下面一行，窄屏自动换行。
+        var providerSelect = h('select', {
+          key: 'provider',
+          className: 'rpc-select',
+          'aria-label': bind(t, 'eventProviderLabel'),
+          value: eventProviderFilter,
+          onChange: function (event) {
+            setEventProviderFilter(event.target.value)
+            // 换了服务商，原来选的账号一定不属于新范围：一起清掉，
+            // 否则界面上看不到那个选项、列表却仍是空的。
+            setEventAccountFilter('')
+            setEventFallback('')
+            setEventsExpanded(false)
+          },
+        }, [h('option', { key: 'all', value: '' }, bind(t, 'eventProviderFilterAll'))].concat(
+          eventProviderOptions.map(function (provider, index) {
+            return h('option', { key: 'p' + String(index), value: provider }, providerNames[provider] || provider)
+          }),
+        ))
+        var accountSelect = h('select', {
+          key: 'account',
+          className: 'rpc-select',
+          'aria-label': bind(t, 'eventAccountLabel'),
+          value: eventAccountFilter,
+          onChange: function (event) {
+            setEventAccountFilter(event.target.value)
+            setEventFallback('')
+            setEventsExpanded(false)
+          },
+        }, [h('option', { key: 'all', value: '' }, bind(t, 'eventAccountFilterAll'))].concat(
+          visibleAccountOptions.map(function (option, index) {
+            var name = accountNames[option.key] || option.accountId
+            var label = eventProviderFilter === ''
+              ? (providerNames[option.provider] || option.provider) + ' · ' + name
+              : name
+            return h('option', { key: 'a' + String(index), value: option.key }, label)
+          }),
+        ))
+        var eventScopeBar = allEvents.length === 0
+          ? null
+          : h('div', { key: 'scope', className: 'rpc-event-scope' },
+              providerSelect,
+              accountSelect,
+              scopeActive
+                ? h('button', {
+                    key: 'reset',
+                    type: 'button',
+                    className: 'rpc-btn rpc-btn-sm',
+                    onClick: clearEventScope,
+                  }, rpcIcon('x', 12), bind(t, 'eventResetFilters'))
+                : null,
+              h('span', { key: 'grow', style: S.grow }),
+              h('button', {
+                key: 'export',
+                type: 'button',
+                className: 'rpc-btn rpc-btn-sm',
+                disabled: filteredEvents.length === 0,
+                title: bind(t, 'eventExportAria'),
+                'aria-label': bind(t, 'eventExportAria'),
+                onClick: exportEvents,
+              }, rpcIcon('external', 13), bind(t, 'eventExport')))
+        // 下载不可用时把 JSON 摊在界面上，至少还能手动复制去提 issue。
+        var eventExportFallbackNode = eventFallback === ''
+          ? null
+          : h('div', { key: 'export-fallback', role: 'status', style: S.field },
+              h('span', { className: 'rpc-inline-note', style: S.hintTiny }, bind(t, 'eventExportFallback')),
+              h('textarea', {
+                className: 'rpc-pre',
+                style: Object.assign({}, S.pre, { width: '100%', boxSizing: 'border-box', minHeight: 96, resize: 'vertical' }),
+                readOnly: true,
+                value: eventFallback,
+                onFocus: function (event) {
+                  if (event !== undefined && event.target !== undefined && typeof event.target.select === 'function') event.target.select()
+                },
+              }))
         sections.push(
           h('div', { key: 'events', style: S.section },
             h('div', { key: 'h', style: S.sectionHead },
@@ -6469,6 +6725,8 @@ window.__ModuleLoader__.load({
               ? h('p', { key: 'retained', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'eventRetained', { count: allEvents.length }))
               : null,
             h('div', { key: 'filters', className: 'rpc-filters', style: Object.assign({}, S.row, { flexWrap: 'wrap' }) }, eventFilters.map(eventFilterButton)),
+            eventScopeBar,
+            eventExportFallbackNode,
             allEvents.length === 0
               ? h('div', { key: 'empty', className: 'rpc-empty' },
                   h('span', { className: 'rpc-empty-icon' }, rpcIcon('pulse', 18)),
