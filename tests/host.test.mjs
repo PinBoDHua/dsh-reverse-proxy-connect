@@ -220,6 +220,14 @@ test('宿主入口：注册六个 provider，status v8 与诊断接口可用', a
     assert.equal(diagnostics.body.providers.length, 6)
     assert.ok(!JSON.stringify(diagnostics.body).includes(full.body.key), '诊断里不能带控制密钥')
 
+    // 登录任务同时下发稳定文案键：英文界面不能直接渲染服务端中文。
+    const traeLogin = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, { action: 'login-start', provider: 'trae' })
+    assert.equal(traeLogin.status, 200)
+    assert.equal(traeLogin.body.login.phase, 'failed')
+    assert.equal(traeLogin.body.login.messageKey.key, 'loginUnsupportedTrae')
+    const qoderLogin = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, { action: 'login-start', provider: 'qoder' })
+    assert.equal(qoderLogin.body.login.messageKey.key, 'loginUnsupportedPat')
+
     const reset = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, { action: 'stats-reset' })
     assert.equal(reset.status, 200)
     assert.equal(reset.body.version, 8)
@@ -644,3 +652,83 @@ test('额度定时刷新：到点必须真的请求，不能被「上一拍刚�
   }
 })
 
+
+test('宿主入口：更高版本写过的 stats / events 在状态里标成只读，重置不会假成功', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-host-readonly-'))
+  const dataDir = join(root, DATA_DIR_NAME)
+  mkdirSync(dataDir, { recursive: true })
+  writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({
+    version: 2,
+    providers: {
+      workbuddy: { enabled: false },
+      'workbuddy-ai': { enabled: false },
+      qoder: { enabled: false },
+      'qoder-global': { enabled: false },
+      trae: { enabled: false },
+      'trae-global': { enabled: false },
+    },
+  }))
+  // 更高版本写过的文件：Stats / EventLog 都会只读加载，且拒绝写回。
+  writeFileSync(join(dataDir, 'stats.json'), JSON.stringify({ version: 999, totals: { requests: 42 } }))
+  writeFileSync(join(dataDir, 'events.json'), JSON.stringify({ version: 99, events: [] }))
+
+  const handlers = {}
+  const disposers = []
+  const ctx = {
+    get(name) {
+      if (name === 'profileContext') return { dir: root }
+      return undefined
+    },
+    inject(names, callback) {
+      for (const name of names) {
+        if (name === 'webServer') {
+          callback({
+            webServer: fakeWebServer(handlers),
+            effect(fn) {
+              const dispose = fn()
+              disposers.push(dispose)
+              return dispose
+            },
+          })
+        }
+      }
+    },
+    effect(fn) {
+      const dispose = fn()
+      disposers.push(dispose)
+      return dispose
+    },
+    llm: { registerAdapter() { return () => {} } },
+    emit() {},
+    logger: { info() {}, warn() {} },
+  }
+
+  apply(ctx, {})
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 80))
+    const full = await get(handlers[STATUS_PATH], STATUS_PATH)
+    assert.equal(full.status, 200)
+    assert.deepEqual(full.body.storage.statsReadOnly, { version: 999 })
+    assert.deepEqual(full.body.storage.eventsReadOnly, { version: 99 })
+    // 只读加载 = 不读内容：旧数字不会冒充当前统计。
+    assert.equal(full.body.stats.totals.requests, 0)
+
+    const reset = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, { action: 'stats-reset' })
+    assert.equal(reset.status, 500, '只读文件的「重置」不能报成功')
+    assert.equal(reset.body.error, 'stats-reset-failed')
+
+    // 磁盘上的高版本文件必须原样保留，不能被这次操作降级或清空。
+    assert.equal(JSON.parse(readFileSync(join(dataDir, 'stats.json'), 'utf8')).version, 999)
+    assert.equal(JSON.parse(readFileSync(join(dataDir, 'stats.json'), 'utf8')).totals.requests, 42)
+    assert.equal(JSON.parse(readFileSync(join(dataDir, 'events.json'), 'utf8')).version, 99)
+  } finally {
+    for (const dispose of disposers) {
+      try {
+        if (typeof dispose === 'function') dispose()
+      } catch {
+        /* 忽略清理失败 */
+      }
+    }
+    rmSync(root, { recursive: true, force: true })
+  }
+})

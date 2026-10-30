@@ -295,10 +295,16 @@ const calls = []
 let fetchFailure = null
 // /action 的响应延迟：用来在「A 家的操作还在飞」时切到 B 家，验证 busy 键没有串台。
 let fetchDelayMs = 0
+// 按请求体给 /settings 单独延迟：用来制造「A 家的写入还没回来、B 家已经成功」。
+let fetchDelayFor = null
 async function fakeFetch(url, init) {
   const target = String(url)
   if (fetchDelayMs > 0 && target.includes('/action')) {
     await new Promise((resolve) => setTimeout(resolve, fetchDelayMs))
+  }
+  if (typeof fetchDelayFor === 'function' && target.includes('/settings')) {
+    const delay = Number(fetchDelayFor(String(init?.body ?? '')))
+    if (Number.isFinite(delay) && delay > 0) await new Promise((resolve) => setTimeout(resolve, delay))
   }
   calls.push({ url: target, method: init?.method ?? 'GET', body: init?.body })
   if (fetchFailure === 'status' && target.includes('/status')) throw new Error('fetch failed: ECONNREFUSED')
@@ -4362,6 +4368,114 @@ function extractFn(header) {
     STATUS.providers = providersSnapshot
     STATUS.stats = statsSnapshot
     fetchDelayMs = 0
+  }
+}
+
+
+// ---------- 0.7.5：登录文案、跨 provider 写入与只读文件 ----------
+{
+  const providersSnapshot = STATUS.providers
+  const storageSnapshot = STATUS.storage
+  const enT = (key, params) => {
+    let text = realLocale.en[key] !== undefined ? realLocale.en[key] : key
+    if (params !== undefined) {
+      text = String(text).replace(/\{(\w+)\}/g, (all, name) => (params[name] === undefined ? all : String(params[name])))
+    }
+    return text
+  }
+  const openPageWith = async (tree, t, key) => {
+    const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    const tab = tabs.find((node) => textOf(node).startsWith(t(key)))
+    if (tab === undefined) throw new Error(`找不到「${key}」页签`)
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+  const openProvider = async (tree, provider, t) => {
+    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+  const modelCheckbox = (tree, name) => find(tree, (node) => node.type === 'input'
+    && node.props?.type === 'checkbox'
+    && node.props?.['aria-label'] === name)
+  try {
+    // 1) 登录任务按 messageKey 本地化：英文界面不能直接渲染服务端中文。
+    {
+      const base = providersSnapshot[0]
+      const reason = '磁盘只读'
+      STATUS.providers = [
+        {
+          ...base,
+          login: {
+            phase: 'failed',
+            message: `保存账号失败：${reason}`,
+            messageKey: { key: 'loginPhaseSaveFailed', params: { reason } },
+          },
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      let tree = await mount(card, { t: enT })
+      const enText = textOf(tree)
+      if (!enText.includes(enT('loginPhaseSaveFailed', { reason }))) throw new Error('英文界面没有本地化登录失败文案')
+      if (enText.includes('保存账号失败')) throw new Error('英文界面仍渲染服务端中文登录文案')
+      tree = await mount(card, { t: realT })
+      if (!textOf(tree).includes(realT('loginPhaseSaveFailed', { reason }))) throw new Error('中文界面的登录文案不对')
+    }
+
+    // 2) 跨 provider 的写入不能互相清掉本地意图：A 家没回来时 B 家成功，
+    //    A 家刚改的勾选必须保持（旧实现会清空整个 pending 表）。
+    {
+      fetchDelayFor = (body) => (body.includes('"workbuddy"') ? 220 : 15)
+      let tree = await mount(card, { t: realT })
+      tree = await openPageWith(tree, realT, 'navModels')
+      const auto = modelCheckbox(tree, 'Auto')
+      if (auto === undefined || auto.props.checked !== true) throw new Error('WorkBuddy 的 Auto 初始应为勾选')
+      auto.props.onChange()
+
+      tree = await render(card, { t: realT })
+      tree = await openProvider(tree, 'qoder-global', realT)
+      tree = await openPageWith(tree, realT, 'navModels')
+      const qwen = modelCheckbox(tree, 'Qwen3.8-Flash')
+      if (qwen === undefined) throw new Error('Qoder Global 缺少模型复选框')
+      qwen.props.onChange()
+
+      // B 家（15ms）已经成功，A 家（220ms）还在飞：这时 A 的意图不能被清掉。
+      await new Promise((resolve) => setTimeout(resolve, 90))
+      tree = await render(card, { t: realT })
+      tree = await openProvider(tree, 'workbuddy', realT)
+      tree = await openPageWith(tree, realT, 'navModels')
+      const autoAfterB = modelCheckbox(tree, 'Auto')
+      if (autoAfterB === undefined || autoAfterB.props.checked !== false) {
+        throw new Error('另一家写入成功把这家还没落盘的模型勾选清掉了')
+      }
+      await new Promise((resolve) => setTimeout(resolve, 220))
+      fetchDelayFor = null
+    }
+
+    // 3) 高版本 stats / events：顶部横幅说明只读，重置/清空按钮禁用。
+    {
+      STATUS.storage = { statsReadOnly: { version: 999 }, eventsReadOnly: { version: 99 } }
+      let tree = await mount(card, { t: realT })
+      const text = textOf(tree)
+      if (!text.includes(realT('statsReadOnly', { version: '999' }))) throw new Error('缺少统计只读横幅')
+      if (!text.includes(realT('eventsReadOnly', { version: '99' }))) throw new Error('缺少事件只读横幅')
+      tree = await openPageWith(tree, realT, 'navUsage')
+      const reset = findButton(tree, realT('usageReset'))
+      if (reset === undefined || reset.props.disabled !== true) throw new Error('只读统计仍允许点「重置统计」')
+      tree = await openPageWith(tree, realT, 'navActivity')
+      const clear = findButton(tree, realT('eventClear'))
+      if (clear === undefined || clear.props.disabled !== true) throw new Error('只读账本仍允许点「清空」')
+      const enTree = await mount(card, { t: enT })
+      if (!textOf(enTree).includes(enT('statsReadOnly', { version: '999' }))) throw new Error('英文界面缺少统计只读横幅')
+    }
+    console.log('✓ 登录状态按 messageKey 本地化，英文界面不再混入服务端中文')
+    console.log('✓ 跨 provider 的模型写入不再互相清掉本地意图')
+    console.log('✓ 高版本 stats / events 只读时有横幅且禁用重置 / 清空')
+  } finally {
+    STATUS.providers = providersSnapshot
+    STATUS.storage = storageSnapshot
+    fetchDelayFor = null
   }
 }
 

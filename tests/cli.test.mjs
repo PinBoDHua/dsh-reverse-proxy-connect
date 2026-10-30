@@ -226,3 +226,43 @@ test('CLI：全部 provider 关闭时，probe / test / credits / checkin 都不�
     rmSync(profile, { recursive: true, force: true })
   }
 })
+
+test('CLI：高版本 stats / events 文件在 doctor 里报只读，stats-reset 不假成功', () => {
+  const profile = mkdtempSync(join(tmpdir(), 'dsh-rpc-cli-readonly-'))
+  try {
+    const dataDir = join(profile, '.dsh-reverse-proxy-connect')
+    mkdirSync(dataDir, { recursive: true })
+    writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({
+      version: 2,
+      providers: {
+        workbuddy: { enabled: false },
+        'workbuddy-ai': { enabled: false },
+        qoder: { enabled: false },
+        'qoder-global': { enabled: false },
+        trae: { enabled: false },
+        'trae-global': { enabled: false },
+      },
+    }))
+    writeFileSync(join(dataDir, 'stats.json'), JSON.stringify({ version: 999, totals: { requests: 7 } }))
+    writeFileSync(join(dataDir, 'events.json'), JSON.stringify({ version: 99, events: [] }))
+
+    const doctor = runCli(['doctor', '--strict', '--profile', profile])
+    const doctorOut = `${doctor.stdout ?? ''}${doctor.stderr ?? ''}`
+    assert.equal(doctor.status, 1, `只读文件必须让 --strict 失败；输出：${doctorOut}`)
+    assert.match(doctorOut, /用量统计文件.*只读/, 'doctor 应说明统计文件只读')
+    assert.match(doctorOut, /事件账本文件.*只读/, 'doctor 应说明事件账本只读')
+
+    const reset = runCli(['stats-reset', '--profile', profile])
+    const resetOut = `${reset.stdout ?? ''}${reset.stderr ?? ''}`
+    assert.equal(reset.status, 1, `只读文件的重置必须 exit 1；输出：${resetOut}`)
+    assert.match(resetOut, /重置失败/)
+    assert.doesNotMatch(resetOut, /已清空/, '不能一边失败一边打印「已清空」')
+
+    // 磁盘文件必须原样保留（不能被降级成 v4 空统计）。
+    const statsDoc = JSON.parse(readFileSync(join(dataDir, 'stats.json'), 'utf8'))
+    assert.equal(statsDoc.version, 999)
+    assert.equal(statsDoc.totals.requests, 7)
+  } finally {
+    rmSync(profile, { recursive: true, force: true })
+  }
+})

@@ -1,5 +1,53 @@
 # 更新记录
 
+## 0.7.5 — 2026-10-30
+
+0.7.4 遗留三项的收尾轮。后端 4 处、前端 3 处；状态接口仍是 v8，设置文件仍是 v2。
+测试 **400 后端 + 138 前端**。
+
+### 登录任务说当前语言
+
+- **英文界面里混着服务端中文**：`login` 任务只下发中文 `message`（「正在申请登录
+  地址…」「保存账号失败：…」），英文界面原样渲染。现在宿主给每个阶段附
+  `messageKey`（starting / waiting / waiting-manual / reading / done / save-failed /
+  failed / cancelled，以及 Trae / PAT 两条不支持说明），前端按当前语言渲染，
+  中文 `message` 保留作悬停与老宿主兜底。[lib/index.js](lib/index.js)
+  [lib/workbuddy/browser-login.js](lib/workbuddy/browser-login.js)
+  [client/client.js](client/client.js)
+
+### 跨 provider 的写入互不干扰
+
+- **一家写入成功会清掉另一家还没落盘的模型勾选**：`pendingModelToggles` 是全局
+  表，任何一次 `/settings` 成功/失败都整表清空；而 `writeSeq` 又要求「只有最新
+  一次响应能改界面」，被超过的那家响应直接丢弃 —— 勾选先跳回旧值、等下一轮
+  20 秒轮询才纠正。现在每条意图带 `{on, seq}`，成功/失败只交还**本次写入覆盖的
+  `provider::field` 桶**里序号更小的条目；界面按响应到达顺序推进（`lastAppliedSeq`），
+  不再因为另一家还在飞就丢弃这份真实状态。[client/client.js](client/client.js)
+
+### 高版本文件不再「看起来像空数据」
+
+- **stats / events 来自更新版本时只读加载，界面却只显示 0**：宿主现在在
+  `/status.storage` 下发 `statsReadOnly` / `eventsReadOnly`（含版本号）；卡片顶部
+  出现「文件来自更新版本（v999），本次只读显示、不会写回」横幅，「重置统计」
+  与「清空事件」按钮禁用并说明原因。[lib/index.js](lib/index.js)
+  [client/client.js](client/client.js)
+- **重置统计会假成功**：高版本文件（`writeBlocked`）或磁盘只读时 `stats.reset()`
+  会回滚内存并抛错，`/action stats-reset` 以前忽略异常、无条件回 200。现在回
+  500 `stats-reset-failed`，卡片/CLI 都显示失败原因。
+  [lib/index.js](lib/index.js)
+- **CLI 的体检与重置同样说真话**：`doctor` 新增「用量统计文件」「事件账本文件」
+  两项只读检查（`--strict` 会失败）；`stats-reset` 失败时 exit 1，不再打印
+  「已清空」。[lib/bin.js](lib/bin.js)
+
+### 测试
+
+- 后端新增 2 条：宿主级只读状态 + 重置 500（并核对磁盘文件原样保留）、
+  CLI 只读体检与 `stats-reset` exit 1；现有宿主用例补了 Trae / Qoder 的
+  `login.messageKey` 断言。
+- 前端新增 3 条：英文登录失败文案、跨 provider 写入不互相清意图（A 家延迟
+  220ms、B 家 15ms 的时序）、只读横幅与按钮禁用。三条都在 0.7.4 客户端上
+  逐一验证会失败。
+
 ## 0.7.4 — 2026-10-30
 
 第十六轮前后端审计（打磨轮）。后端 11 处、前端 7 处，每条都先用「修前 / 修后」

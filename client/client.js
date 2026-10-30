@@ -542,6 +542,7 @@ window.__ModuleLoader__.load({
       errorServerInvalidAccount: '账号不存在或已被删除',
       errorServerInvalidModelTest: '测试参数不正确',
       errorServerEventsClearFailed: '事件账本清空失败（可能只读或被占用）',
+      errorServerStatsResetFailed: '重置统计失败（文件来自更新版本，只读）',
       errorServerRequestFailed: '请求失败，请稍后重试',
       loading: '读取中…',
       probe: '检测账号可用模型',
@@ -695,6 +696,16 @@ window.__ModuleLoader__.load({
       loginOpening: '正在打开…',
       loginCancel: '取消',
       loginOpenManually: '没有自动打开？点这里',
+      loginPhaseStarting: '正在申请登录地址…',
+      loginPhaseWaiting: '已在浏览器打开登录页，登录后会自动完成',
+      loginPhaseWaitingManual: '请手动在浏览器打开下面的地址完成登录',
+      loginPhaseReading: '登录成功，正在读取账号信息…',
+      loginPhaseDone: '登录成功：{label}',
+      loginPhaseSaveFailed: '保存账号失败：{reason}',
+      loginPhaseFailed: '登录失败：{reason}',
+      loginPhaseCancelled: '已取消',
+      loginUnsupportedTrae: 'Trae 不需要单独登录：先在 Trae 客户端里登录一次，插件会直接读取本机登录态',
+      loginUnsupportedPat: '只有 WorkBuddy 支持浏览器登录；Qoder 请直接粘贴 PAT',
       // 1.0.0 新增：健康、用量、高级
       healthOk: '正常',
       healthDegraded: '近期波动',
@@ -769,6 +780,9 @@ window.__ModuleLoader__.load({
       lastFailureHistory: '历史失败：{code} · {model} · {time} · {ago}',
       settingsCorrupt: '设置文件读取失败，已使用默认值；原文件已备份，请检查 settings.json。',
       settingsCorruptBackup: '备份：{path}',
+      statsReadOnly: '用量统计文件来自更新版本（v{version}），本次只读显示、不会写回；请升级插件或恢复该文件。',
+      eventsReadOnly: '事件账本文件来自更新版本（v{version}），本次只读显示、不会写回；请升级插件或恢复该文件。',
+      readOnlyHint: '文件来自更新版本（v{version}），此操作不会生效',
       statusVersionMismatch: '客户端与宿主的状态版本不一致（宿主 v{host}，客户端期望 v{client}）。请刷新页面；仍然不一致时请重启 DeepSeek Harness，避免看到不完整的设置。',
       consecutiveFailures: '{count} 连败',
       imagesShort: '图',
@@ -994,6 +1008,7 @@ window.__ModuleLoader__.load({
       errorServerInvalidAccount: 'The account does not exist or was deleted',
       errorServerInvalidModelTest: 'The test parameters are invalid',
       errorServerEventsClearFailed: 'Could not clear the event journal (it may be read-only or locked)',
+      errorServerStatsResetFailed: 'Could not reset usage statistics (the file is from a newer version and is read-only)',
       errorServerRequestFailed: 'The request failed; try again shortly',
       loading: 'Loading…',
       probe: 'Check which models my account can use',
@@ -1146,6 +1161,16 @@ window.__ModuleLoader__.load({
       loginOpening: 'Opening…',
       loginCancel: 'Cancel',
       loginOpenManually: 'Not opened? Click here',
+      loginPhaseStarting: 'Requesting a sign-in URL…',
+      loginPhaseWaiting: 'The sign-in page is open in your browser; it completes automatically after you sign in',
+      loginPhaseWaitingManual: 'Open the address below in your browser to finish signing in',
+      loginPhaseReading: 'Signed in; reading account information…',
+      loginPhaseDone: 'Signed in: {label}',
+      loginPhaseSaveFailed: 'Could not save the account: {reason}',
+      loginPhaseFailed: 'Sign-in failed: {reason}',
+      loginPhaseCancelled: 'Cancelled',
+      loginUnsupportedTrae: 'Trae does not need a separate sign-in: sign in once in the Trae client and the plugin reads that local session',
+      loginUnsupportedPat: 'Only WorkBuddy supports browser sign-in; for Qoder, paste a PAT instead',
       // 1.0.0 additions: health, usage, advanced
       healthOk: 'Healthy',
       healthDegraded: 'Flaky',
@@ -1218,6 +1243,9 @@ window.__ModuleLoader__.load({
       lastFailureHistory: 'Earlier failure: {code} · {model} · {time} · {ago}',
       settingsCorrupt: 'Settings could not be read; defaults are in use. The original file was backed up — check settings.json.',
       settingsCorruptBackup: 'Backup: {path}',
+      statsReadOnly: 'Usage statistics come from a newer plugin version (v{version}); they are read-only and will not be written back. Upgrade the plugin or restore the file.',
+      eventsReadOnly: 'The event journal comes from a newer plugin version (v{version}); it is read-only and will not be written back. Upgrade the plugin or restore the file.',
+      readOnlyHint: 'The file is from a newer version (v{version}); this action will not take effect',
       statusVersionMismatch: 'The client and host status versions differ (host v{host}, client expects v{client}). Refresh the page; if it persists, restart DeepSeek Harness so the settings are not rendered incomplete.',
       consecutiveFailures: '{count} in a row',
       imagesShort: 'img',
@@ -1425,6 +1453,7 @@ window.__ModuleLoader__.load({
       'invalid-account': 'errorServerInvalidAccount',
       'invalid-model-test': 'errorServerInvalidModelTest',
       'events-clear-failed': 'errorServerEventsClearFailed',
+      'stats-reset-failed': 'errorServerStatsResetFailed',
       'request-failed': 'errorServerRequestFailed',
     }
 
@@ -2112,6 +2141,30 @@ window.__ModuleLoader__.load({
      * @param fallback - 没有可用键时的文本。
      * @returns 显示用文本。
      */
+    /**
+     * 浏览器登录任务的状态文案。
+     *
+     * 宿主会同时下发中文 `message` 与稳定的 `messageKey`（与事件账本同一套
+     * 规则）。有键就按当前语言渲染，没有键（老宿主）才回落到原文 —— 否则
+     * 英文界面里会突然冒出「正在申请登录地址…」。
+     *
+     * @param job - `status.providers[].login`。
+     * @param t - 文案函数。
+     * @returns 一句可显示的状态。
+     */
+    function loginMessageOf(job, t) {
+      if (job === null || typeof job !== 'object') return ''
+      var spec = job.messageKey !== null && typeof job.messageKey === 'object' ? job.messageKey : undefined
+      var key = spec !== undefined && typeof spec.key === 'string' ? spec.key : ''
+      if (key !== '') {
+        var params = spec.params !== null && typeof spec.params === 'object' ? spec.params : undefined
+        var text = bind(t, key, params)
+        // bind 对未知键回显键名本身（`loginPhaseDone`）：那比中文原文更糟，回落。
+        if (typeof text === 'string' && text !== '' && text !== key) return text
+      }
+      return typeof job.message === 'string' ? job.message : ''
+    }
+
     function eventMessageOf(event, t, fallback) {
       var spec = event !== null && typeof event === 'object' ? event.messageKey : undefined
       if (spec === null || typeof spec !== 'object' || typeof spec.key !== 'string' || spec.key === '') return fallback
@@ -3374,8 +3427,22 @@ window.__ModuleLoader__.load({
        * 清空对应条目。只覆盖模型/强制显示这类幂等的开关，账号与密钥仍走原逻辑。
        */
       var pendingModelToggles = useRef({})
-      /** 最近的写入序号：旧响应不能覆盖新响应。 */
+      /**
+       * 写入序号（单调递增）与「已经接管过界面的最大序号」。
+       *
+       * 每条意图单独记 seq：一次写入成功后只交还**它覆盖的**那些意图，
+       * 不能像旧实现那样把整个 `pendingModelToggles` 清空 —— 那只适合
+       * 「全局只有一次写入」的模型。用户在 Qoder 点一个模型、紧接着去
+       * WorkBuddy 改另一个时，后者的成功会把前者还没回来的意图一起抹掉，
+       * 前者的勾选就先跳回旧值、等下一轮 20 秒轮询才纠正。
+       */
       var writeSeq = useRef(0)
+      var lastAppliedSeq = useRef(0)
+      /** 取下一个写入序号（模型开关这类需要「先记意图、再发请求」的调用方用）。 */
+      var nextWriteSeq = function () {
+        writeSeq.current += 1
+        return writeSeq.current
+      }
 
       /**
        * 把一个 provider 的「用户已勾选的模型集合」算出来（含尚未落盘的本地改动）。
@@ -3393,7 +3460,8 @@ window.__ModuleLoader__.load({
         var merged = base.slice()
         if (local !== undefined) {
           Object.keys(local).forEach(function (id) {
-            var on = local[id]
+            var entry = local[id]
+            var on = entry !== null && typeof entry === 'object' ? entry.on === true : entry === true
             var at = merged.indexOf(id)
             if (on && at === -1) merged.push(id)
             else if (!on && at !== -1) merged.splice(at, 1)
@@ -3402,12 +3470,43 @@ window.__ModuleLoader__.load({
         return merged
       }
 
-      /** 记下一个本地改动，等下一次服务端响应回来时清掉。 */
-      var markPending = function (provider, field, id, on) {
+      /** 记下一个本地改动（带写入序号），等对应那次响应回来时按 seq 交还。 */
+      var markPending = function (provider, field, id, on, seq) {
         var key = provider + '::' + field
         var bucket = pendingModelToggles.current[key]
         if (bucket === undefined) bucket = pendingModelToggles.current[key] = {}
-        bucket[id] = on
+        bucket[id] = { on: on === true, seq: isFiniteNumber(seq) ? seq : 0 }
+      }
+
+      /**
+       * 交还**这次写入覆盖的 scope** 里序号 ≤ seq 的模型意图。
+       *
+       * 为什么必须带 scope：序号是全局单调的，B 家的写入序号一定大于 A 家
+       * 那次还在飞的写入。只按 seq 清会把 A 家的意图一起当「更旧」清掉 ——
+       * 正是这次要修的跨 provider 串台。只有同一个 `provider::field` 桶里的
+       * 低序号条目才是「已经被后来的点击取代」。
+       */
+      var clearModelIntents = function (seq, keys) {
+        if (!Array.isArray(keys)) return
+        var map = pendingModelToggles.current
+        keys.forEach(function (key) {
+          var bucket = map[key]
+          if (bucket === null || typeof bucket !== 'object') {
+            delete map[key]
+            return
+          }
+          var kept = {}
+          var count = 0
+          Object.keys(bucket).forEach(function (id) {
+            var entry = bucket[id]
+            var entrySeq = entry !== null && typeof entry === 'object' && isFiniteNumber(entry.seq) ? entry.seq : 0
+            if (entrySeq <= seq) return
+            kept[id] = entry
+            count += 1
+          })
+          if (count === 0) delete map[key]
+          else map[key] = kept
+        })
       }
 
       /**
@@ -3428,10 +3527,10 @@ window.__ModuleLoader__.load({
       var mutate = function (patch, options) {
         if (status === undefined) return Promise.resolve()
         beginBusy('save')
-        // 每次写入都占一个序号；只有最新一次的响应才允许覆盖本地状态，
-        // 否则「先发的慢响应」会把「后发的快响应」结果冲掉。
-        writeSeq.current += 1
-        var seq = writeSeq.current
+        // 模型开关会先记意图再调用；其它写入在这里取号。
+        var seq = options !== undefined && isFiniteNumber(options.seq) && options.seq > 0
+          ? options.seq
+          : nextWriteSeq()
         /**
          * 这一次写入已经落地：把对应的本地意图交还给服务端值。
          *
@@ -3455,18 +3554,23 @@ window.__ModuleLoader__.load({
         return postJson(SETTINGS_PATH, patch, status.key)
           .then(function (document) {
             // 意图的落地与「谁的响应接管界面」是两件事：被更新写入超过的响应
-            // 不再改界面，但它对应的那次保存**确实成功了**，意图必须交还。
+            // 不改横幅，但它对应的那次保存**确实成功了**，意图必须交还。
             settle()
-            if (seq !== writeSeq.current) return document
-            // 最新一次写入的响应就是权威状态：本地「未落盘的开关意图」到此
-            // 已全部并入它，必须清空。否则用户之后在 CLI/另一个窗口改的
-            // 模型开关会被这份陈旧意图永久盖住。
-            pendingModelToggles.current = {}
-            applyStatus(document)
-            setError(undefined)
-            endBusy('save')
-            if (options !== undefined && options.clearPatDraft === true) setPatDraft('')
-            if (options !== undefined && typeof options.onSuccess === 'function') options.onSuccess()
+            clearModelIntents(seq, options !== undefined ? options.modelKeys : undefined)
+            // 只按「响应到达顺序」推进界面：seq ≤ 已应用序号说明有更新的响应
+            // 先落地了，这份旧快照不能再把它盖回去。反过来，seq > 已应用序号
+            // 时即使还有更新的写入在飞也允许应用 —— 否则那家的界面会停在旧值
+            // 直到下一轮轮询；尚在飞的写入由各自的 pending 意图叠在上面。
+            if (seq > lastAppliedSeq.current) {
+              lastAppliedSeq.current = seq
+              applyStatus(document)
+            }
+            if (seq === writeSeq.current) {
+              setError(undefined)
+              endBusy('save')
+              if (options !== undefined && options.clearPatDraft === true) setPatDraft('')
+              if (options !== undefined && typeof options.onSuccess === 'function') options.onSuccess()
+            }
             return document
           })
           .catch(function (failure) {
@@ -3475,15 +3579,14 @@ window.__ModuleLoader__.load({
             // settle：先点的开关失败、后点的成功时，先点那个的意图永远留在
             // `pendingToggles` 里，界面停在用户点出来的值，连轮询也不再跟随。
             settle()
-            // 只有**最新一次**写入失败才回滚界面。更早的写入失败时，更新的
-            // 写入（已经包含用户在它之后做的改动）还在飞：清空本地意图会让
-            // 开关先跳回旧值、等新响应回来再跳一次；把 onError 交给旧写入
-            // 还会误删新写入的意图（provider 开关会卡在服务端旧值上）。
+            // 这次写入失败：只回滚它自己的模型意图（按 scope + seq），别家的还在飞。
+            clearModelIntents(seq, options !== undefined ? options.modelKeys : undefined)
+            // 只有**最新一次**写入失败才显示横幅。更早的写入失败时，更新的
+            // 写入（已经包含用户在它之后做的改动）还在飞；把 onError 交给旧
+            // 写入还会误删新写入的意图（provider 开关会卡在服务端旧值上）。
             if (seq !== writeSeq.current) return undefined
             endBusy('save')
             setError(String(failure && failure.message ? failure.message : failure))
-            // 失败时丢弃本地猜测，让界面回到服务端真实值。
-            pendingModelToggles.current = {}
             if (options !== undefined && typeof options.onError === 'function') {
               try {
                 options.onError(failure)
@@ -3585,27 +3688,32 @@ window.__ModuleLoader__.load({
         // 第二次（想撤销的那次）直接丢失。
         var pendingOf = function (scope) {
           var bucket = pendingModelToggles.current[entry.provider + '::' + scope]
-          return bucket !== undefined && bucket[model.id] !== undefined ? bucket[model.id] : undefined
+          var item = bucket !== undefined ? bucket[model.id] : undefined
+          if (item === undefined) return undefined
+          return item !== null && typeof item === 'object' ? item.on === true : item === true
         }
         if (model.unavailable) {
           var forcedNow = pendingOf('forced')
           var nextForced = forcedNow === undefined ? model.forced !== true : forcedNow !== true
           var forced = pendingSetFor(entry, 'forced').filter(function (id) { return id !== model.id })
           if (nextForced) forced.push(model.id)
-          markPending(entry.provider, 'forced', model.id, nextForced)
+          // 先取序号再记意图：响应回来时按这个序号只交还这一条。
+          var forceSeq = nextWriteSeq()
+          markPending(entry.provider, 'forced', model.id, nextForced, forceSeq)
           var forcePatch = { forcedModels: {} }
           forcePatch.forcedModels[entry.provider] = forced
-          mutate(forcePatch)
+          mutate(forcePatch, { seq: forceSeq, modelKeys: [entry.provider + '::forced'] })
           return
         }
         var disabledNow = pendingOf('disabled')
         var nextDisabled = disabledNow === undefined ? model.disabled !== true : disabledNow !== true
         var disabled = pendingSetFor(entry, 'disabled').filter(function (id) { return id !== model.id })
         if (nextDisabled) disabled.push(model.id)
-        markPending(entry.provider, 'disabled', model.id, nextDisabled)
+        var toggleSeqNow = nextWriteSeq()
+        markPending(entry.provider, 'disabled', model.id, nextDisabled, toggleSeqNow)
         var providersPatch = {}
         providersPatch[entry.provider] = { disabledModels: disabled }
-        mutate({ providers: providersPatch })
+        mutate({ providers: providersPatch }, { seq: toggleSeqNow, modelKeys: [entry.provider + '::disabled'] })
       }
 
       var setAllModels = function (entry, hidden) {
@@ -3620,12 +3728,14 @@ window.__ModuleLoader__.load({
         // 只发一个 id，把这次批量改动整份冲掉（全关后发现只有一个模型被关）。
         var key = entry.provider + '::disabled'
         var bucket = {}
+        // 批量改动也是一个「写入」：所有 id 共享同一个序号，成功/失败时整批交还。
+        var batchSeq = nextWriteSeq()
         safeArray(entry.models).forEach(function (row) {
           if (row.unavailable) return
-          bucket[row.id] = hidden === true
+          bucket[row.id] = { on: hidden === true, seq: batchSeq }
         })
         pendingModelToggles.current[key] = bucket
-        mutate({ providers: providersPatch })
+        mutate({ providers: providersPatch }, { seq: batchSeq, modelKeys: [key] })
       }
 
       /**
@@ -3921,6 +4031,8 @@ window.__ModuleLoader__.load({
 
       /** 重置用量统计。 */
       var resetStats = function () {
+        // 只读文件：按钮已禁用，这里再兜一层，避免键盘/脚本绕过。
+        if (statsReadOnlyInfo !== undefined) return
         if (status === undefined || busyNow('stats')) return
         beginBusy('stats')
         postJson(ACTION_PATH, { action: 'stats-reset' }, status.key)
@@ -3937,6 +4049,7 @@ window.__ModuleLoader__.load({
 
       /** 清空最近事件（只影响本机事件账本）。 */
       var clearEvents = function () {
+        if (eventsReadOnlyInfo !== undefined) return
         if (status === undefined || busyNow('events')) return
         var confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
           ? true
@@ -4128,6 +4241,23 @@ window.__ModuleLoader__.load({
             client: String(EXPECTED_STATUS_VERSION),
           }))
         : null
+
+      // 统计 / 事件账本被更高版本写过时，宿主只读加载（内存为空、拒绝写盘）。
+      // 不说明的话用户只会看到「今日 0 次 / 账本为空」，以为数据丢了。
+      var readOnlyInfoOf = function (value) {
+        return value !== null && typeof value === 'object' ? value : undefined
+      }
+      var statsReadOnlyInfo = readOnlyInfoOf(storage.statsReadOnly)
+      var eventsReadOnlyInfo = readOnlyInfoOf(storage.eventsReadOnly)
+      var readOnlyVersion = function (info) {
+        return info !== undefined && isFiniteNumber(info.version) ? String(info.version) : '?'
+      }
+      var statsReadOnly = statsReadOnlyInfo === undefined
+        ? null
+        : bind(t, 'statsReadOnly', { version: readOnlyVersion(statsReadOnlyInfo) })
+      var eventsReadOnly = eventsReadOnlyInfo === undefined
+        ? null
+        : bind(t, 'eventsReadOnly', { version: readOnlyVersion(eventsReadOnlyInfo) })
 
       // ── 服务商选择条 ─────────────────────────────────────────────
       //
@@ -4394,6 +4524,12 @@ window.__ModuleLoader__.load({
         settingsCorrupt === null
           ? null
           : h('div', { key: 'settings-corrupt', className: 'rpc-banner rpc-banner-warn' }, rpcIcon('alert', 15), settingsCorrupt),
+        statsReadOnly === null
+          ? null
+          : h('div', { key: 'stats-readonly', className: 'rpc-banner rpc-banner-warn', role: 'status' }, rpcIcon('alert', 15), statsReadOnly),
+        eventsReadOnly === null
+          ? null
+          : h('div', { key: 'events-readonly', className: 'rpc-banner rpc-banner-warn', role: 'status' }, rpcIcon('alert', 15), eventsReadOnly),
         versionMismatch === null
           ? null
           : h('div', { key: 'version-mismatch', className: 'rpc-banner rpc-banner-warn' }, rpcIcon('alert', 15), versionMismatch),
@@ -5106,7 +5242,8 @@ window.__ModuleLoader__.load({
                   ? null
                   : h('span', {
                       style: loginJob.phase === 'failed' ? S.hintWarn : S.hintTiny,
-                    }, loginJob.message),
+                      title: typeof loginJob.message === 'string' ? loginJob.message : undefined,
+                    }, loginMessageOf(loginJob, t)),
                 loginJob !== undefined && typeof loginJob.authUrl === 'string' && /^https?:\/\//i.test(loginJob.authUrl)
                   ? h('a', {
                       href: loginJob.authUrl,
@@ -5696,7 +5833,10 @@ window.__ModuleLoader__.load({
               type: 'button',
               className: 'rpc-btn rpc-btn-sm',
               onClick: resetStats,
-              disabled: isBusy('stats'),
+              disabled: isBusy('stats') || statsReadOnlyInfo !== undefined,
+              title: statsReadOnlyInfo === undefined
+                ? undefined
+                : bind(t, 'readOnlyHint', { version: readOnlyVersion(statsReadOnlyInfo) }),
             }, rpcIcon('refresh', 13), isBusy('stats') ? bind(t, 'usageResetting') : bind(t, 'usageReset'))),
         )
         if (isFiniteNumber(statsDoc.since) && statsDoc.since > 0) {
@@ -6968,7 +7108,10 @@ window.__ModuleLoader__.load({
                 : h('button', {
                     type: 'button',
                     className: 'rpc-btn rpc-btn-sm',
-                    disabled: isBusy('events'),
+                    disabled: isBusy('events') || eventsReadOnlyInfo !== undefined,
+                    title: eventsReadOnlyInfo === undefined
+                      ? undefined
+                      : bind(t, 'readOnlyHint', { version: readOnlyVersion(eventsReadOnlyInfo) }),
                     onClick: clearEvents,
                   }, rpcIcon('trash', 13), bind(t, 'eventClear'))),
             h('p', { key: 'hint', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'eventHint')),
