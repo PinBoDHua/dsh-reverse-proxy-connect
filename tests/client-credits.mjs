@@ -4351,7 +4351,13 @@ function extractFn(header) {
       if (!textOf(tree).includes(enT('creditsCachedHint'))) throw new Error('英文界面的 stale chip 文案不对')
       if (!textOf(tree).includes('HTTP 503')) throw new Error('英文界面丢了失败原因')
     }
-    console.log('✓ 额度失败原因 / 未登录文案 / busy 隔离 / 旧限额徽章 / 概览状态点 / 14 天空态')
+    console.log('✓ stale 额度显示失败原因，chip 不再谎称正在刷新')
+    console.log('✓ 未登录的 provider 三处文案一致')
+    console.log('✓ 签到 / 刷新额度的 busy 按 provider 隔离')
+    console.log('✓ 账号 × 模型不再挂过期限额徽章')
+    console.log('✓ 概览账号状态点与账号页一致')
+    console.log('✓ 零数据时 14 天用量显示空态')
+    console.log('✓ 英文界面 stale 额度文案正确')
   } finally {
     STATUS.providers = providersSnapshot
     STATUS.stats = statsSnapshot
