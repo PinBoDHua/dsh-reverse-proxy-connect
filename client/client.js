@@ -249,11 +249,12 @@ window.__ModuleLoader__.load({
           '.rpc-detail-meta{display:flex;align-items:center;gap:5px 8px;flex-wrap:wrap;font-size:12px;line-height:18px;color:var(--rpc-muted);min-width:0}',
           '.rpc-detail-actions{display:flex;align-items:center;gap:6px;flex-wrap:wrap;justify-content:flex-end}',
 
-          /* 页内导航 */
-          '.rpc-pagenav{display:flex;align-items:center;gap:2px;padding:4px;margin:13px 20px 0;overflow-x:auto;',
+          /* 页内导航：窄容器（设置弹窗约 470px）里六个页签放不下，
+             以前靠隐藏滚动条横向滚动 —— 用户看不到后面还有页签。
+             允许换行，宽容器仍是一行。 */
+          '.rpc-pagenav{display:flex;align-items:center;gap:2px;padding:4px;margin:13px 20px 0;flex-wrap:wrap;',
           'background:var(--rpc-surface-2);border:1px solid var(--rpc-border);border-radius:11px;width:fit-content;max-width:calc(100% - 40px);',
-          'scrollbar-width:none;box-sizing:border-box}',
-          '.rpc-pagenav::-webkit-scrollbar{display:none}',
+          'box-sizing:border-box}',
           '.rpc-pagetab{font:inherit;font-size:12.5px;line-height:1;height:29px;padding:0 10px;border:0;border-radius:8px;',
           'background:transparent;color:var(--rpc-muted);cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:0 0 auto;',
           'transition:background .12s,color .12s,box-shadow .12s}',
@@ -3688,16 +3689,19 @@ window.__ModuleLoader__.load({
       }
 
       var runCheckin = function (provider) {
-        if (status === undefined || busyNow('checkin')) return
-        beginBusy('checkin')
+        // 与额度刷新同一套规则：签到可能跑 10 分钟，按 provider 记 busy，
+        // 否则 WorkBuddy 的签到会让 Qoder 的按钮一直显示「签到中」。
+        var key = 'checkin:' + provider
+        if (status === undefined || busyNow(key)) return
+        beginBusy(key)
         postJson(ACTION_PATH, { action: 'checkin', provider: provider }, status.key, ACTION_TIMEOUT_MS)
           .then(function (document) {
             applyStatus(document)
-            endBusy('checkin')
+            endBusy(key)
             setError(undefined)
           })
           .catch(function (failure) {
-            endBusy('checkin')
+            endBusy(key)
             setError(String(failure && failure.message ? failure.message : failure))
           })
       }
@@ -3790,18 +3794,19 @@ window.__ModuleLoader__.load({
         }).length
       }
 
-      /** 刷新额度（强制绕过缓存）。 */
-      var refreshCredits = function () {
-        if (status === undefined || busyNow('credits')) return
-        beginBusy('credits')
+      /** 刷新额度（强制绕过缓存）。按 provider 记 busy：一家的慢请求不能锁住其它五家。 */
+      var refreshCredits = function (provider) {
+        var key = 'credits:' + provider
+        if (status === undefined || busyNow(key)) return
+        beginBusy(key)
         postJson(ACTION_PATH, { action: 'credits' }, status.key, REFRESH_TIMEOUT_MS)
           .then(function (document) {
             applyStatus(document)
-            endBusy('credits')
+            endBusy(key)
             setError(undefined)
           })
           .catch(function (failure) {
-            endBusy('credits')
+            endBusy(key)
             setError(String(failure && failure.message ? failure.message : failure))
           })
       }
@@ -4166,6 +4171,14 @@ window.__ModuleLoader__.load({
         // 关闭的服务商不能继续挂「无记录」/「正常」：那会被读成「配置有问题」，
         // 而真实原因是「你把它关了」。颜色也退回中性灰。
         var healthTone = disabled ? DOT_IDLE : signed ? healthColor(healthState) : DOT_OFF
+        // 文案必须和状态点同一判据：凭证失效时点已经变成琥珀色，文字却还写
+        // 「正常」，界面上同时出现「正常」和「未登录」两个相反结论。
+        var healthLabelText = disabled
+          ? bind(t, 'disabled')
+          : !signed ? bind(t, 'signedOut') : bind(t, healthTextKey(healthState))
+        var healthTextColor = disabled
+          ? 'var(--rpc-faint)'
+          : !signed ? 'var(--dsh-rpc-warn, #9d5c00)' : healthColor(healthState)
         return h(
           'button',
           {
@@ -4195,13 +4208,13 @@ window.__ModuleLoader__.load({
             h('span', {
               className: 'rpc-provider-dot',
               style: { background: healthTone },
-              title: disabled ? bind(t, 'disabled') : bind(t, healthTextKey(healthState)),
+              title: disabled ? bind(t, 'disabled') : !signed ? bind(t, 'signedOut') : bind(t, healthTextKey(healthState)),
             }),
             h('span', { className: 'rpc-provider-name' }, entry.displayName),
             h('span', {
               className: 'rpc-provider-health',
-              style: { color: disabled ? 'var(--rpc-faint)' : healthColor(healthState) },
-            }, disabled ? bind(t, 'disabled') : bind(t, healthTextKey(healthState)))),
+              style: { color: healthTextColor },
+            }, healthLabelText)),
           h('span', { className: 'rpc-provider-value' },
             h('span', {
               // 读不到额度时不要用品牌色画「—」：中性色 + 悬停原因。
@@ -4249,7 +4262,10 @@ window.__ModuleLoader__.load({
           provider: entry.provider,
           name: entry.displayName,
           tone: tone,
-          text: entry.enabled === false ? bind(t, 'disabled') : bind(t, healthTextKey(state)),
+          // 与 card 上同一个判据：未登录时不能再写「正常」。
+          text: entry.enabled === false
+            ? bind(t, 'disabled')
+            : !signed ? bind(t, 'signedOut') : bind(t, healthTextKey(state)),
         }
       })
       var fleetOk = fleet.filter(function (item) { return item.tone === 'ok' }).length
@@ -4530,13 +4546,17 @@ window.__ModuleLoader__.load({
           h('div', { key: 'h', style: S.sectionHead },
             h('span', { style: S.sectionTitle }, rpcIcon('shield', 14), bind(t, 'secStatus')),
             h('span', {
-              className: rpcChipClass(rpcHealthTone(statusChipState)),
-              title: latestModelTestFresh
-                ? latestModelTestTitle
-                : isFiniteNumber(activeHealth.consecutiveFailures) && activeHealth.consecutiveFailures > 0
-                  ? bind(t, 'consecutiveFailures', { count: activeHealth.consecutiveFailures })
-                  : '',
-            }, bind(t, healthTextKey(statusChipState))),
+              // 凭证失效时健康状态没有意义：同一屏已经写着「未登录」，
+              // 这里再挂一个绿色「正常」自相矛盾。凭证可用时才展示健康结论。
+              className: rpcChipClass(credential.status === 'signed-in' ? rpcHealthTone(statusChipState) : credentialTone),
+              title: credential.status === 'signed-in'
+                ? latestModelTestFresh
+                  ? latestModelTestTitle
+                  : isFiniteNumber(activeHealth.consecutiveFailures) && activeHealth.consecutiveFailures > 0
+                    ? bind(t, 'consecutiveFailures', { count: activeHealth.consecutiveFailures })
+                    : ''
+                : typeof credential.message === 'string' ? credential.message : '',
+            }, credential.status === 'signed-in' ? bind(t, healthTextKey(statusChipState)) : credentialLabel),
             h('span', { style: S.grow }),
             h('span', { className: 'rpc-chip' }, active.images === true ? bind(t, 'imagesShort') : bind(t, 'imagesShortOff'))),
           h('dl', { className: 'rpc-kv' },
@@ -5037,13 +5057,13 @@ window.__ModuleLoader__.load({
             h('button', {
               type: 'button',
               className: 'rpc-btn rpc-btn-sm',
-              disabled: isBusy('checkin') || checkinBlocked,
+              disabled: isBusy('checkin:' + active.provider) || checkinBlocked,
               title: checkinBlocked ? bind(t, 'checkinNeedLogin') : undefined,
               onClick: function () {
                 if (checkinBlocked) return
                 runCheckin(active.provider)
               },
-            }, rpcIcon('check', 13), isBusy('checkin') ? bind(t, 'checkinRunning') : bind(t, 'checkinNow')),
+            }, rpcIcon('check', 13), isBusy('checkin:' + active.provider) ? bind(t, 'checkinRunning') : bind(t, 'checkinNow')),
             h('label', { className: 'rpc-check-label' },
               h('input', {
                 type: 'checkbox',
@@ -5290,6 +5310,9 @@ window.__ModuleLoader__.load({
       // 它回答的是「现在是哪个账号、今天签到了没有」，不重复表格里的操作。
       if (accountRows.length > 0) {
         var overviewRow = activeRow
+        // 摘要里的状态点必须跟账号页同一判据：未配置 / 停用的账号以前也画
+        // 绿色圆点，概览说「正常」、账号页说「未登录」。
+        var overviewStatus = overviewRow === undefined ? undefined : accountStatusOf(overviewRow, active, t)
         sections.push(
           h('div', { key: 'overview-accounts', style: S.section },
             h('div', { key: 'h', style: S.sectionHead },
@@ -5302,7 +5325,7 @@ window.__ModuleLoader__.load({
                 onClick: function () { setActivePage('accounts') },
               }, bind(t, 'manageAccounts'), rpcIcon('chevron', 12))),
             h('div', { style: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minWidth: 0 } },
-              h('span', { style: dot(DOT_OK) }),
+              h('span', { style: dot(overviewStatus === undefined ? DOT_IDLE : toneColor(overviewStatus.tone)) }),
               h('span', { style: Object.assign({}, S.modelName, { fontWeight: 600 }), title: overviewRow !== undefined ? accountNameOf(overviewRow, t) : '' },
                 overviewRow !== undefined ? accountNameOf(overviewRow, t) : bind(t, 'accountFallback')),
               overviewRow !== undefined ? h('span', { className: 'rpc-chip rpc-chip-accent' }, bind(t, 'currentAccount')) : null,
@@ -5338,9 +5361,9 @@ window.__ModuleLoader__.load({
           key: 'b',
           type: 'button',
           className: 'rpc-btn rpc-btn-sm',
-          onClick: refreshCredits,
-          disabled: isBusy('credits'),
-        }, rpcIcon('refresh', 13), isBusy('credits') ? bind(t, 'creditsRefreshing') : bind(t, 'creditsRefresh')))
+          onClick: function () { refreshCredits(active.provider) },
+          disabled: isBusy('credits:' + active.provider),
+        }, rpcIcon('refresh', 13), isBusy('credits:' + active.provider) ? bind(t, 'creditsRefreshing') : bind(t, 'creditsRefresh')))
 
       var creditsBody = []
       if (credits.state === 'ok') {
@@ -5364,8 +5387,27 @@ window.__ModuleLoader__.load({
               : h('span', { className: 'rpc-credit-unit' }, creditsUnitOf(credits, t)),
             credits.planName ? h('span', { className: 'rpc-chip' }, credits.planName) : null,
             credits.exceeded ? h('span', { className: 'rpc-chip rpc-chip-warn' }, bind(t, qoderFreePlan ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
-            credits.stale === true ? h('span', { className: 'rpc-chip' }, bind(t, 'creditsStale')) : null),
+            credits.stale === true
+              ? h('span', {
+                className: 'rpc-chip',
+                title: typeof credits.error === 'string' && credits.error !== '' ? credits.error : undefined,
+              }, bind(t, isBusy('credits:' + active.provider) ? 'creditsStale' : 'creditsCachedHint'))
+              : null),
         )
+        // 保留旧数字时也必须说清「这一次读失败了」：旧实现只在 state==='error'
+        // 分支渲染原因，state 仍是 ok 的 stale 快照会一直挂着「正在刷新…」，
+        // 用户既看不到失败原因，也不知道插件其实已经不再重试。
+        var staleError = typeof credits.error === 'string' && credits.error !== '' ? credits.error : ''
+        if (staleError !== '') {
+          creditsBody.push(h('p', {
+            key: 'stale-err',
+            className: 'rpc-warn-text',
+            style: S.hintWarn,
+            title: staleError,
+          }, bind(t, 'creditsFailed', {
+            message: staleError.length > 80 ? staleError.slice(0, 80) + '…' : staleError,
+          })))
+        }
         if (creditsRatio !== undefined) {
           creditsBody.push(
             h('div', {
@@ -5674,7 +5716,10 @@ window.__ModuleLoader__.load({
         var validDaily = daily.filter(function (day) {
           return day !== null && typeof day === 'object' && typeof day.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(day.date)
         })
-        if (validDaily.length > 0) {
+        // 零数据也要画：以前只有 `validDaily.length > 0` 才进入这块，一家从未
+        // 发过请求的 provider 会让标题、峰值、柱状图和坐标轴一起消失 ——
+        // 里面那句「这 14 天还没有用量记录」恰好永远显示不出来。
+        if (statsDoc.enabled !== false && (validDaily.length > 0 || hasProviderDaily)) {
           var dailyByDate = {}
           validDaily.forEach(function (day) { dailyByDate[day.date] = day })
           // 窗口必须锚定在**今天**，不能锚在「最后一条有数据的日期」。
@@ -5909,8 +5954,10 @@ window.__ModuleLoader__.load({
               var item = list[index]
               if (item === null || typeof item !== 'object') continue
               if (item.provider !== active.provider || item.accountId !== accountId || item.model !== modelId) continue
-              if (item.kind !== 'error' || limitCodes[item.code] !== true) continue
-              return item
+              // `recent` 按时间倒序：第一条命中的就是**最近一次**请求。旧实现
+              // 跳过成功记录继续找错误，于是同一次限流之后即使连续成功，徽章
+              // 也会一直挂着「限额」，直到那条旧记录被挤出 40 条窗口。
+              return item.kind === 'error' && limitCodes[item.code] === true ? item : undefined
             }
             return undefined
           }

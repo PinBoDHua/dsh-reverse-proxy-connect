@@ -196,3 +196,33 @@ globalThis.fetch = async (url, init) => {
     rmSync(profile, { recursive: true, force: true })
   }
 })
+
+test('CLI：全部 provider 关闭时，probe / test / credits / checkin 都不能「什么都不做却 exit 0」', () => {
+  const profile = mkdtempSync(join(tmpdir(), 'dsh-rpc-cli-alldisabled-'))
+  try {
+    const dataDir = join(profile, '.dsh-reverse-proxy-connect')
+    mkdirSync(dataDir, { recursive: true })
+    writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({
+      version: 2,
+      providers: {
+        workbuddy: { enabled: false },
+        'workbuddy-ai': { enabled: false },
+        qoder: { enabled: false },
+        'qoder-global': { enabled: false },
+        trae: { enabled: false },
+        'trae-global': { enabled: false },
+      },
+    }))
+    for (const command of ['probe', 'test', 'credits', 'checkin']) {
+      const child = runCli([command, '--profile', profile], {
+        QODER_CN_PERSONAL_ACCESS_TOKEN: '',
+        QODER_PERSONAL_ACCESS_TOKEN: '',
+      })
+      const output = `${child.stdout ?? ''}${child.stderr ?? ''}`
+      assert.equal(child.status, 2, `${command} 在全部关闭时应 exit 2，实际 ${String(child.status)}；输出：${output}`)
+      assert.match(output, /已在设置里关闭/, `${command} 应说明为什么什么都没做`)
+    }
+  } finally {
+    rmSync(profile, { recursive: true, force: true })
+  }
+})

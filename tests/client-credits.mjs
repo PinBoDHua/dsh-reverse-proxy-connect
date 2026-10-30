@@ -293,8 +293,13 @@ const STATUS = {
 const calls = []
 // 失败注入：'status' 让 /status 直接 reject（首屏错误态），'action' 让 /action reject（刷新失败提示）。
 let fetchFailure = null
+// /action 的响应延迟：用来在「A 家的操作还在飞」时切到 B 家，验证 busy 键没有串台。
+let fetchDelayMs = 0
 async function fakeFetch(url, init) {
   const target = String(url)
+  if (fetchDelayMs > 0 && target.includes('/action')) {
+    await new Promise((resolve) => setTimeout(resolve, fetchDelayMs))
+  }
   calls.push({ url: target, method: init?.method ?? 'GET', body: init?.body })
   if (fetchFailure === 'status' && target.includes('/status')) throw new Error('fetch failed: ECONNREFUSED')
   if (fetchFailure === 'action' && target.includes('/action')) throw new Error('HTTP 500 upstream reset')
@@ -4198,6 +4203,159 @@ function extractFn(header) {
     STATUS.providers = providersSnapshot
     STATUS.stats = statsSnapshot
     STATUS.settings = settingsSnapshot
+  }
+}
+
+
+// ---------- 第十六轮审计（0.7.4）的前端回归 ----------
+{
+  const providersSnapshot = STATUS.providers
+  const statsSnapshot = STATUS.stats
+  const enT = (key, params) => {
+    let text = realLocale.en[key] !== undefined ? realLocale.en[key] : key
+    if (params !== undefined) {
+      text = String(text).replace(/\{(\w+)\}/g, (all, name) => (params[name] === undefined ? all : String(params[name])))
+    }
+    return text
+  }
+  const openPageWith = async (tree, t, key) => {
+    const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    const tab = tabs.find((node) => textOf(node).startsWith(t(key)))
+    if (tab === undefined) throw new Error(`找不到「${key}」页签`)
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+  const openProvider = async (tree, provider, t) => {
+    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+  try {
+    // 1) 额度读失败但还留着旧数字：必须显示失败原因，chip 不能再写「正在刷新…」。
+    {
+      const base = providersSnapshot[0]
+      STATUS.providers = [
+        {
+          ...base,
+          credits: { ...base.credits, stale: true, error: 'HTTP 503 upstream unavailable' },
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      const tree = await mount(card, { t: realT })
+      const text = textOf(tree)
+      if (!text.includes(realT('creditsFailed', { message: 'HTTP 503 upstream unavailable' }))) {
+        throw new Error('stale 额度没有显示读取失败原因')
+      }
+      if (text.includes(realT('creditsStale'))) throw new Error('没有请求在飞时仍写「正在刷新…」')
+      if (!text.includes(realT('creditsCachedHint'))) throw new Error('stale 额度缺少「显示上次结果」的说明')
+    }
+
+    // 2) 凭证失效时，服务商页签 / 页头 / 状态 chip 不能再写「正常」。
+    {
+      const base = providersSnapshot[1]
+      STATUS.providers = [
+        providersSnapshot[0],
+        { ...base, health: { state: 'degraded', consecutiveFailures: 2, lastErrorAt: Date.now() }, credential: { status: 'no-credential', reason: 'no-credential' } },
+        ...providersSnapshot.slice(2),
+      ]
+      let tree = await mount(card, { t: realT })
+      const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-workbuddy-ai')
+      if (!textOf(tab).includes(realT('signedOut'))) throw new Error('未登录的页签没有写「未登录」')
+      if (textOf(tab).includes(realT('healthDegraded'))) throw new Error('未登录的页签仍在写健康状态')
+      tree = await openProvider(tree, 'workbuddy-ai', realT)
+      if (textOf(tree).includes(realT('healthDegraded'))) throw new Error('未登录的详情区仍挂着「健康一般」')
+    }
+
+    // 3) 签到 / 刷新额度的 busy 键按 provider 隔离：A 家在跑，B 家按钮仍可用。
+    {
+      const tree0 = await mount(card, { t: realT })
+      let tree = await openPageWith(tree0, realT, 'navAccounts')
+      const checkinButton = findButton(tree, realT('checkinNow'))
+      if (checkinButton === undefined) throw new Error('找不到「立即签到」按钮')
+      fetchDelayMs = 120
+      checkinButton.props.onClick()
+      tree = await render(card, { t: realT })
+      tree = await openProvider(tree, 'qoder-global', realT)
+      tree = await openPageWith(tree, realT, 'navAccounts')
+      const other = findButton(tree, realT('checkinNow'))
+      if (other === undefined) throw new Error('切到 Qoder 后「立即签到」变成了别的文案（busy 串台）')
+      if (other.props.disabled === true) throw new Error('A 家签到把 B 家的按钮禁用了')
+      await new Promise((resolve) => setTimeout(resolve, 200))
+      fetchDelayMs = 0
+    }
+
+    // 4) 账号 × 模型状态列只看「最近一次请求」：之后已经成功，就不能再挂旧限额。
+    {
+      const recentSnapshot = STATUS.stats.recent
+      STATUS.stats = {
+        ...statsSnapshot,
+        recent: [
+          { at: Date.now(), provider: 'workbuddy', accountId: 'default', model: 'auto', kind: 'stop', durationMs: 800, totalTokens: 20 },
+          { at: Date.now() - 600_000, provider: 'workbuddy', accountId: 'default', model: 'auto', kind: 'error', code: 'RATE_LIMIT', durationMs: 300, totalTokens: 0 },
+        ],
+      }
+      try {
+        let tree = await mount(card, { t: realT })
+        tree = await openPageWith(tree, realT, 'navUsage')
+        // 只看「文字恰好是限额」的徽章：概览里「是否被限额」的说明句不算。
+        const badges = findAll(tree, (node) => textOf(node) === realT('limitBadge'))
+        if (badges.length > 0) throw new Error('最近一次已成功，仍挂着旧的「限额」徽章')
+      } finally {
+        STATUS.stats = statsSnapshot
+        void recentSnapshot
+      }
+    }
+
+    // 5) 概览的账号摘要点必须跟账号页同一判据：未配置不能画成绿色。
+    {
+      const base = providersSnapshot[0]
+      STATUS.providers = [
+        {
+          ...base,
+          accounts: [{ ...base.accounts[0], configured: false }],
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      const tree = await mount(card, { t: realT })
+      const section = find(tree, (node) => node.key === 'overview-accounts')
+      const point = section === undefined ? undefined : find(section, (node) => node.props?.style?.width === 6 && node.props?.style?.height === 6)
+      if (point === undefined) throw new Error('概览账号摘要缺少状态点')
+      if (point.props.style.background === 'var(--dsw-alias-state-success-primary, #1a8f5f)') {
+        throw new Error('未配置账号在概览里仍画成绿色')
+      }
+    }
+
+    // 6) 一家从未发过请求时，14 天用量块仍要在，并显示空态文案。
+    {
+      const dailySnapshot = STATUS.stats.providerDaily
+      STATUS.stats = { ...statsSnapshot, providerDaily: { ...dailySnapshot, 'qoder-global': [] } }
+      try {
+        let tree = await mount(card, { t: realT })
+        tree = await openProvider(tree, 'qoder-global', realT)
+        tree = await openPageWith(tree, realT, 'navUsage')
+        if (!textOf(tree).includes(realT('usageHeatEmpty'))) throw new Error('零数据时整块 14 天趋势消失，空态文案不可达')
+      } finally {
+        STATUS.stats = statsSnapshot
+      }
+    }
+
+    // 7) 英文界面的额度失败原因不是中文硬编码。
+    {
+      const base = providersSnapshot[0]
+      STATUS.providers = [
+        { ...base, credits: { ...base.credits, stale: true, error: 'HTTP 503' } },
+        ...providersSnapshot.slice(1),
+      ]
+      const tree = await mount(card, { t: enT })
+      if (!textOf(tree).includes(enT('creditsCachedHint'))) throw new Error('英文界面的 stale chip 文案不对')
+      if (!textOf(tree).includes('HTTP 503')) throw new Error('英文界面丢了失败原因')
+    }
+    console.log('✓ 额度失败原因 / 未登录文案 / busy 隔离 / 旧限额徽章 / 概览状态点 / 14 天空态')
+  } finally {
+    STATUS.providers = providersSnapshot
+    STATUS.stats = statsSnapshot
+    fetchDelayMs = 0
   }
 }
 
