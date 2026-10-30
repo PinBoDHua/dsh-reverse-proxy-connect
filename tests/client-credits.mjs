@@ -4033,4 +4033,172 @@ function extractFn(header) {
   }
 }
 
+// ---------- 第十五轮审计（0.7.3）的前端回归 ----------
+{
+  const providersSnapshot = STATUS.providers
+  const statsSnapshot = STATUS.stats
+  const settingsSnapshot = STATUS.settings
+  const enT = (key, params) => {
+    let text = realLocale.en[key] !== undefined ? realLocale.en[key] : key
+    if (params !== undefined) {
+      text = String(text).replace(/\{(\w+)\}/g, (all, name) => (params[name] === undefined ? all : String(params[name])))
+    }
+    return text
+  }
+  const openPageWith = async (tree, t, key) => {
+    const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    const tab = tabs.find((node) => textOf(node).startsWith(t(key)))
+    if (tab === undefined) throw new Error(`找不到「${key}」页签`)
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+  try {
+    // 1) 诊断按钮离开「动态」页后不能继续报 aria-expanded=true；从别的页
+    //    点它必须是「跳过去并打开」，不能是第一下反而关掉面板。
+    {
+      let tree = await mount(card, { t: realT })
+      const heroDiag = find(tree, (node) => node.type === 'button'
+        && node.props?.className === 'rpc-btn' && textOf(node) === realT('diagnostics'))
+      if (heroDiag === undefined) throw new Error('找不到页头诊断按钮')
+      heroDiag.props.onClick()
+      tree = await render(card, { t: realT })
+      if (find(tree, (node) => node.type === 'pre') === undefined) throw new Error('首次点诊断没有展开 JSON')
+      tree = await openPageWith(tree, realT, 'navAccounts')
+      const heroAfter = find(tree, (node) => node.type === 'button'
+        && node.props?.className === 'rpc-btn' && textOf(node) === realT('diagnostics'))
+      if (heroAfter.props['aria-expanded'] === true) throw new Error('离开动态页后 aria-expanded 仍是 true')
+      if (heroAfter.props['aria-controls'] !== undefined) throw new Error('离开动态页后 aria-controls 仍指向不可见节点')
+      heroAfter.props.onClick()
+      tree = await render(card, { t: realT })
+      const activity = find(tree, (node) => node.props?.id === 'dsh-rpc-page-activity')
+      if (activity === undefined || activity.props.style?.display !== 'flex') throw new Error('从其他页点诊断没有跳到动态页')
+      if (find(tree, (node) => node.type === 'pre') === undefined) throw new Error('从其他页点诊断把面板关掉了')
+      const heroOpen = find(tree, (node) => node.type === 'button'
+        && node.props?.className === 'rpc-btn' && textOf(node) === realT('diagnostics'))
+      if (heroOpen.props['aria-expanded'] !== true) throw new Error('打开后 aria-expanded 不是 true')
+      console.log('✓ 诊断按钮跨页后状态与可见性一致')
+    }
+
+    // 2) /status 一直失败时，侧栏小卡不能永远停在「读取中…」：要给失败文案
+    //    与可点的重试入口（宿主重启期间卡片已有重试，小卡没有）。
+    {
+      fetchFailure = 'status'
+      try {
+        await mount(pill, { t: realT, wide: true })
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        let tree = await render(pill, { t: realT, wide: true })
+        // 侧栏组件走 ctx.locale.bind（测试沙箱里是 key-only），所以这里断言 key。
+        if (!textOf(tree).includes('statusLoadFailed')) throw new Error('首屏读取失败仍显示「读取中」')
+        const retryButton = find(tree, (node) => node.type === 'button' && textOf(node).includes('retry'))
+        if (retryButton === undefined) throw new Error('读取失败没有重试按钮')
+        if (retryButton.props.disabled === true) throw new Error('重试按钮仍是 disabled')
+        const before = calls.length
+        retryButton.props.onClick()
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        if (calls.length <= before) throw new Error('点重试没有发出请求')
+        console.log('✓ 侧栏首屏读取失败给出重试入口')
+      } finally {
+        fetchFailure = null
+      }
+    }
+
+    // 3) provider 条目缺字符串 id 时，侧栏小卡不能整块崩掉（设置卡片是好的）。
+    {
+      const snapshot = STATUS.providers
+      try {
+        STATUS.providers = [{ ...snapshot[0], provider: undefined }, ...snapshot.slice(1)]
+        const tree = await mount(pill, { t: realT, wide: true })
+        if (tree === undefined) throw new Error('缺 provider id 时侧栏小卡没有渲染')
+        console.log('✓ provider 缺 id 时侧栏小卡不再抛 TypeError')
+      } finally {
+        STATUS.providers = snapshot
+      }
+    }
+
+    // 4) 账号 × 模型表的展开按钮在英文界面不能写成 “Show all N events”。
+    {
+      const statsSnapshotLocal = { accountModels: STATUS.stats.accountModels, accountModelToday: STATUS.stats.accountModelToday }
+      try {
+        const rows = {}
+        for (let index = 0; index < 10; index++) {
+          const model = `m${String(index).padStart(2, '0')}`
+          rows[`workbuddy::default::${model}`] = { provider: 'workbuddy', accountId: 'default', model, requests: 1, totalTokens: 10, avgDurationMs: 100 }
+        }
+        STATUS.stats.accountModels = rows
+        STATUS.stats.accountModelToday = rows
+        let tree = await mount(card, { t: enT })
+        tree = await openPageWith(tree, enT, 'navUsage')
+        const expand = find(tree, (node) => node.type === 'button'
+          && typeof textOf(node) === 'string' && textOf(node).includes('Show all 10'))
+        if (expand === undefined) throw new Error('英文界面找不到账号 × 模型的展开按钮')
+        if (textOf(expand).includes('events')) throw new Error('用量表的展开按钮写成了 events：' + textOf(expand))
+        if (!textOf(expand).includes('Show all 10 rows')) throw new Error('展开按钮文案不是 rows：' + textOf(expand))
+        console.log('✓ 英文界面用量表展开按钮不再指向 events')
+      } finally {
+        STATUS.stats.accountModels = statsSnapshotLocal.accountModels
+        STATUS.stats.accountModelToday = statsSnapshotLocal.accountModelToday
+      }
+    }
+
+    // 5) 最近请求不能静默截断成 6 行、摘要却按截断后的数字写。
+    {
+      const recentSnapshot = STATUS.stats.recent
+      try {
+        const recent = []
+        for (let index = 0; index < 12; index++) {
+          recent.push({
+            at: Date.now() - index * 60_000, provider: 'workbuddy', accountId: 'default',
+            model: `recent-${String(index).padStart(2, '0')}`, kind: 'stop', durationMs: 900, totalTokens: 20,
+          })
+        }
+        STATUS.stats.recent = recent
+        let tree = await mount(card, { t: realT })
+        tree = await openPageWith(tree, realT, 'navUsage')
+        const text = textOf(tree)
+        if (!text.includes(realT('usageRecent') + ' · 12')) throw new Error('最近请求摘要没有显示真实条数')
+        if (!text.includes('recent-11')) throw new Error('最近请求被截断，最后一条没有渲染')
+        console.log('✓ 最近请求展示全部条目，摘要与行数一致')
+      } finally {
+        STATUS.stats.recent = recentSnapshot
+      }
+    }
+
+    // 6) 停用账号的「请先启用」不能是死胡同：账号行要给一个可点的「启用」。
+    {
+      const base = providersSnapshot[0]
+      STATUS.providers = [
+        {
+          ...base,
+          credential: { status: 'signed-in' },
+          accounts: [
+            { id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: true, source: 'desktop', credits: { state: 'ok', remain: 10, total: 100, unit: 'credits' } },
+            { id: 'acc-off', label: '停用账号', active: false, enabled: false, kind: 'desktop', configured: true, source: 'browser-login', credits: { state: 'ok', remain: 5, total: 100, unit: 'credits' } },
+          ],
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      let tree = await mount(card, { t: realT })
+      tree = await openPageWith(tree, realT, 'navAccounts')
+      const enable = find(tree, (node) => node.type === 'button' && textOf(node) === realT('enableAccount'))
+      if (enable === undefined) throw new Error('停用账号没有「启用」入口')
+      if (enable.props.disabled === true) throw new Error('「启用」按钮不可点')
+      const before = calls.length
+      enable.props.onClick()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+      const posted = calls.slice(before).find((entry) => entry.method === 'POST'
+        && typeof entry.body === 'string' && entry.body.includes('acc-off'))
+      if (posted === undefined) throw new Error('点「启用」没有写出设置')
+      const patch = JSON.parse(posted.body)
+      const row = patch.accounts?.workbuddy?.[0]
+      if (row === undefined || row.enabled !== true) throw new Error('启用补丁没有把 enabled 设为 true')
+      if (row.label !== '停用账号') throw new Error('启用补丁丢了账号名（会被服务端改成「账号 N」）')
+      console.log('✓ 停用账号可在账号行直接启用')
+    }
+  } finally {
+    STATUS.providers = providersSnapshot
+    STATUS.stats = statsSnapshot
+    STATUS.settings = settingsSnapshot
+  }
+}
+
 console.log('client-credits: OK')

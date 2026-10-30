@@ -103,6 +103,22 @@ test('Qoder 流内 code:400 保留状态：档位限制能被探测识别', asyn
   assert.equal(accountLimitation(String(other.message), other.status), false)
 })
 
+test('Qoder 外层 body 是对象时，正文不能整段丢失', async () => {
+  // 同一个 body 字段在错误/排队响应里已经是对象形态；上游若把正常帧也改成
+  // 对象，旧实现直接拿 outer 当内层，`choices` 读不到，只剩心跳与空 stop，
+  // 运行时最终报 EMPTY_RESPONSE —— 用户看到一条完全空白的回答。
+  const outer = JSON.stringify({
+    statusCodeValue: 200,
+    body: { choices: [{ delta: { content: 'hello' } }] },
+  })
+  const events = []
+  for await (const event of parseStream(bodyOf(`data: ${outer}\n\ndata: [DONE]\n\n`), undefined)) events.push(event)
+  const text = events.filter((event) => event.type === 'text').map((event) => event.text).join('')
+  assert.equal(text, 'hello', '对象 body 里的正文必须照常产出')
+  const finish = events.find((event) => event.type === 'finish')
+  assert.equal(finish.kind, 'stop')
+})
+
 test('Qoder 内容安全拦截：终态带 CONTENT_FILTER failure，而不是一个没有 code 的 error', async () => {
   // 用户可见行为：模型因内容安全被拦截时，界面/统计要能显示「内容过滤」，
   // 而不是一句没有 code、没有 message 的通用错误。

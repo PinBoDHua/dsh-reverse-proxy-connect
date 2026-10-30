@@ -526,3 +526,121 @@ test('手动「立即签到」不会被正在跑的自动签到静默跳过', as
   }
 })
 
+test('额度定时刷新：到点必须真的请求，不能被「上一拍刚完成」的新鲜窗口跳过', async () => {
+  // 真实缺陷：调度器把 lastCreditsAt 记成「发起这一拍」的时刻，而新鲜窗口按
+  // 「上次请求完成」的时刻算。设 120 秒时第二拍会在 240 秒才真正请求（2 倍）。
+  // 这里用假时钟 + 捕获的 tick 直接复现两拍。
+  const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-credits-tick-'))
+  const dataDir = join(root, DATA_DIR_NAME)
+  mkdirSync(dataDir, { recursive: true })
+  writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({
+    version: 2,
+    providers: {
+      workbuddy: { enabled: false },
+      'workbuddy-ai': { enabled: false },
+      qoder: { enabled: true },
+      'qoder-global': { enabled: false },
+      trae: { enabled: false },
+      'trae-global': { enabled: false },
+    },
+    accounts: {
+      qoder: [{ id: 'default', label: '默认令牌', enabled: true, pat: 'pat-tick' }],
+    },
+    activeAccount: { qoder: 'default' },
+    advanced: { creditsRefreshMs: 120_000, catalogRefreshMs: 86_400_000 },
+  }))
+
+  const handlers = {}
+  const disposers = []
+  const originalFetch = globalThis.fetch
+  const originalNow = Date.now
+  const originalSetInterval = globalThis.setInterval
+  const T0 = originalNow()
+  let fakeNow = T0
+  let tick
+  let quotaCalls = 0
+  Date.now = () => fakeNow
+  // 只捕获调度器，不真的启动 30 秒节拍（测试里手动调用 tick）。
+  globalThis.setInterval = (fn) => {
+    tick = fn
+    return { unref() {} }
+  }
+  globalThis.fetch = async (url) => {
+    const text = String(url)
+    if (text.includes('/jobToken/exchange')) {
+      return new Response(JSON.stringify({ token: 'job-1', expires_at: new Date(fakeNow + 3_600_000).toISOString() }), { status: 200 })
+    }
+    if (text.includes('/api/v1/userinfo')) return new Response(JSON.stringify({ id: 'user-1' }), { status: 200 })
+    if (text.includes('/api/v2/quota/usage')) {
+      quotaCalls += 1
+      // 单次请求 2 秒：这一拍结束时的 fetchedAt 比 lastCreditsAt 晚 2 秒。
+      fakeNow += 2_000
+      return new Response(JSON.stringify({ userQuota: { total: 100, used: quotaCalls, remaining: 100 - quotaCalls } }), { status: 200 })
+    }
+    if (text.includes('/api/v2/user/plan')) return new Response(JSON.stringify({ plan_tier_name: 'Pro', is_paid_plan: true }), { status: 200 })
+    if (text.includes('/api/v3/user/status')) return new Response(JSON.stringify({ nextResetAt: fakeNow }), { status: 200 })
+    return new Response('{}', { status: 404 })
+  }
+
+  const ctx = {
+    get(name) {
+      if (name === 'profileContext') return { dir: root }
+      return undefined
+    },
+    inject(names, callback) {
+      if (names.includes('webServer')) {
+        callback({
+          webServer: fakeWebServer(handlers),
+          effect(fn) {
+            const dispose = fn()
+            disposers.push(dispose)
+            return dispose
+          },
+        })
+      }
+    },
+    effect(fn) {
+      const dispose = fn()
+      disposers.push(dispose)
+      return dispose
+    },
+    llm: { registerAdapter: () => () => {} },
+    emit() {},
+    logger: { info() {}, warn() {} },
+  }
+
+  try {
+    apply(ctx, {})
+    globalThis.setInterval = originalSetInterval
+    // 等首轮刷新完成（lastCreditsAt 在完成回调里才写入）。
+    for (let index = 0; index < 200 && quotaCalls === 0; index++) await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.equal(quotaCalls, 1, '首轮应当读取一次额度')
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    assert.equal(typeof tick, 'function', '没有捕获到调度器')
+
+    // 第一拍：到点 → 必须请求。
+    fakeNow += 2_000 + 120_000
+    tick()
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    assert.equal(quotaCalls, 2, '到点的那一拍必须真的请求')
+
+    // 第二拍：到点，但缓存只差 2 秒（旧实现会判「还新鲜」并跳过整整一拍）。
+    fakeNow += 118_000
+    tick()
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    assert.equal(quotaCalls, 3, '不能被 freshness 窗口跳过一整拍（120 秒的间隔不能变成 240 秒）')
+  } finally {
+    Date.now = originalNow
+    globalThis.setInterval = originalSetInterval
+    globalThis.fetch = originalFetch
+    for (const dispose of disposers) {
+      try {
+        if (typeof dispose === 'function') dispose()
+      } catch {
+        /* 忽略清理失败 */
+      }
+    }
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+

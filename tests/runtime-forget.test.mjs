@@ -90,6 +90,40 @@ test('删除账号后，在途额度刷新不得把它的额度与消耗历史�
   }
 })
 
+test('换凭证也要写额度墓碑：重启后不能先显示上一个账号的余额', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-cred-replace-'))
+  const settings = hangingSettings()
+  try {
+    // 旧凭证读到过的 500 分已经落盘。
+    writeFileSync(join(dir, 'credits-cache.json'), JSON.stringify({
+      version: 1,
+      entries: {
+        'qoder::default': {
+          data: { state: 'ok', remain: 500, total: 1000, unit: 'credits', items: [], fetchedAt: Date.now() - 1000 },
+          fetchedAt: Date.now() - 1000,
+        },
+      },
+    }))
+    const runtime = new Runtime({ settings: () => settings, dataDir: dir, logger: {} })
+    assert.equal(runtime.creditsFor('qoder', 'default').remain, 500, '启动先恢复到旧快照')
+
+    // 用户在卡片里把 PAT 换成另一个账号的令牌：内存条目清空，但磁盘上没有墓碑
+    // 时，下一次落盘按 key 合并会把旧条目并回来。
+    runtime.forgetCredentialState([{ provider: 'qoder', accountId: 'default' }])
+    assert.equal(runtime.creditsFor('qoder', 'default').state, 'none', '换凭证后内存里不能还留着旧余额')
+    runtime.flushCaches()
+
+    const doc = JSON.parse(readFileSync(join(dir, 'credits-cache.json'), 'utf8'))
+    assert.equal(doc.entries['qoder::default'], undefined, '磁盘缓存里不能留下旧凭证的余额')
+    assert.equal(doc.forgotten.includes('qoder::default'), true, '换凭证必须落一条墓碑')
+
+    const restarted = new Runtime({ settings: () => settings, dataDir: dir, logger: {} })
+    assert.equal(restarted.creditsFor('qoder', 'default').state, 'none', '重启后又读出了上一个账号的余额')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('删除账号的墓碑要挡住「保存时与磁盘合并」，重启后不能再读出它的余额', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-forget-disk-'))
   const settings = hangingSettings()

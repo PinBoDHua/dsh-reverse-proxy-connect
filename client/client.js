@@ -672,6 +672,8 @@ window.__ModuleLoader__.load({
       addAccount: '添加账号',
       useAccount: '使用',
       useAccountDisabled: '账号已停用，请先启用再切换',
+      enableAccount: '启用',
+      enableAccountHint: '启用该账号（当前为停用状态）',
       removeAccount: '删除',
       currentAccount: '当前',
       checkinNow: '立即签到',
@@ -853,6 +855,7 @@ window.__ModuleLoader__.load({
       eventCount: '{count} 条',
       eventMore: '展开全部 {count} 条',
       eventLess: '收起',
+      usageMore: '展开全部 {count} 行',
       eventStartup: '启动',
       eventSwitch: '换号',
       eventRefresh: '令牌续期',
@@ -1120,6 +1123,8 @@ window.__ModuleLoader__.load({
       addAccount: 'Add account',
       useAccount: 'Use',
       useAccountDisabled: 'This account is disabled; enable it before switching',
+      enableAccount: 'Enable',
+      enableAccountHint: 'Enable this account (currently disabled)',
       removeAccount: 'Remove',
       currentAccount: 'Current',
       checkinNow: 'Check in',
@@ -1299,6 +1304,7 @@ window.__ModuleLoader__.load({
       eventCount: '{count} events',
       eventMore: 'Show all {count} events',
       eventLess: 'Collapse',
+      usageMore: 'Show all {count} rows',
       eventStartup: 'Startup',
       eventSwitch: 'Account switch',
       eventRefresh: 'Token refresh',
@@ -1520,6 +1526,10 @@ window.__ModuleLoader__.load({
       if (provider === 'qoder-global') return 'QDG'
       if (provider === 'trae') return 'TRAE'
       if (provider === 'trae-global') return 'TRAEG'
+      // 状态文档来自宿主；某个 provider 条目缺 id 时（老宿主 / 半截文档），
+      // 这里会直接 TypeError，宿主错误边界把整个侧栏小卡清空。同文件其它
+      // provider 字段都做了类型守卫，这里是唯一漏掉的一处。
+      if (typeof provider !== 'string' || provider === '') return '—'
       return provider.slice(0, 4).toUpperCase()
     }
 
@@ -4308,10 +4318,18 @@ window.__ModuleLoader__.load({
           h('button', {
             type: 'button',
             className: 'rpc-btn',
-            'aria-expanded': showDiag,
-            'aria-controls': showDiag ? 'dsh-reverse-proxy-diagnostics' : undefined,
+            // 诊断面板只存在于「动态」页：在别的页上它不可见，aria-expanded
+            // 不能再报 true（读屏会以为展开着）。从别的页点这个按钮时，动作
+            // 是「跳到动态页并打开」，而不是对全局 showDiag 取反 —— 否则
+            // 第一次点击会跳到动态页却把面板关掉，用户只看到一张空页。
+            'aria-expanded': showDiag && activePage === 'activity',
+            'aria-controls': showDiag && activePage === 'activity' ? 'dsh-reverse-proxy-diagnostics' : undefined,
             onClick: function () {
-              setActivePage('activity')
+              if (activePage !== 'activity') {
+                setActivePage('activity')
+                setShowDiag(true)
+                return
+              }
               setShowDiag(!showDiag)
             },
           }, rpcIcon('pulse', 15), bind(t, 'diagnostics'))))
@@ -4809,6 +4827,25 @@ window.__ModuleLoader__.load({
               mutate(patch)
             },
           }, bind(t, 'useAccount')))
+          // 停用状态只能来自设置文件；不给入口的话，「请先启用」是一句死胡同。
+          // 只把 enabled 改回 true，切不切换由用户再点「使用」决定。
+          if (account.enabled === false) {
+            actionButtons.push(h('button', {
+              key: 'enable',
+              type: 'button',
+              style: S.buttonGhost,
+              disabled: isBusy('save'),
+              title: bind(t, 'enableAccountHint'),
+              onClick: function () {
+                // label 必须一起回传：服务端归一会给缺失 label 的行补「账号 N」，
+                // 合并后反而把用户起的名字覆盖掉。
+                var row = { id: account.id, label: account.label, enabled: true }
+                var patch = { accounts: {} }
+                patch.accounts[active.provider] = [row]
+                mutate(patch)
+              },
+            }, bind(t, 'enableAccount')))
+          }
         }
         actionButtons.push(h('button', {
           key: 'test',
@@ -5456,9 +5493,12 @@ window.__ModuleLoader__.load({
       var providerSession = statsDoc.providerCurrentSession !== undefined && statsDoc.providerCurrentSession !== null
         ? statsDoc.providerCurrentSession[active.provider]
         : statsDoc.currentSession
+      // 这里曾经 `.slice(0, 6)`：摘要按截断后的数量写「最近请求 · 6」，用户
+      // 拿不到「还有 N 条」的任何提示，会以为这张表就是全部。详情本来就默认
+      // 折叠（<details>），展开后应当给出该 provider 的全部最近请求。
       var recentRequests = safeArray(statsDoc.recent).filter(function (entry) {
         return entry.provider === active.provider
-      }).slice(0, 6)
+      })
 
       // 表格基础样式：描边、表头底色、行分隔线全部显式给出。
       // 之前的「一堆没有线的数字」看起来像排版事故，问题就在没有表格约束。
@@ -6027,7 +6067,9 @@ window.__ModuleLoader__.load({
                       onClick: function () { setAccountModelExpanded(!accountModelExpanded) },
                     }, accountModelExpanded === true
                       ? bind(t, 'eventLess')
-                      : bind(t, 'eventMore', { count: accountModelRows.length })))
+                      // 这里展开的是「用量行」，不是事件账本。英文界面复用
+                      // eventMore 会写成 “Show all N events”，指向完全不同的数据。
+                      : bind(t, 'usageMore', { count: accountModelRows.length })))
                 : null),
           )
         }
@@ -7141,12 +7183,22 @@ window.__ModuleLoader__.load({
         var statusState = useState(undefined)
         var status = statusState[0]
         var setStatus = statusState[1]
+        /** 是否至少成功读到过一次状态：区分「冷启动读取中」与「一直读不到」。 */
+        var hasStatusRef = useRef(false)
+        /** 首屏读取失败：按钮必须给一个明确的重试入口，而不是永远转圈。 */
+        var loadFailedState = useState(false)
+        var loadFailed = loadFailedState[0]
+        var setLoadFailed = loadFailedState[1]
+        /** `load()` 定义在 effect 里；重试按钮通过这个 ref 调它。 */
+        var retryRef = useRef(undefined)
         // 与卡片同名：写入点统一走这里（侧栏没有竞态，只起可读性作用）。
         var applyStatus = function (document) {
           if (document === null || typeof document !== 'object' || Array.isArray(document)) return
           // 每次落地都递增代数：在途的轻量 GET 回来时据此判断「自己是不是旧的」。
           // 只比对请求序号不够 —— 手动刷新（POST）的结果永远比同期的 GET 新。
           statusEpoch.current += 1
+          hasStatusRef.current = true
+          setLoadFailed(false)
           setStatus(document)
         }
         var busyState = useState(false)
@@ -7209,9 +7261,13 @@ window.__ModuleLoader__.load({
                 if (hasCredits(document)) settle()
               }, function () {
                 loading = false
-                /* 侧栏小卡不该弹错误；读不到就保持原样 */
+                // 已经有状态时保持原样（侧栏小卡不该为一次轮询失败弹错误）；
+                // 但一次都没读到过时不能再假装「读取中」—— 宿主重启期间它会
+                // 永远停在 loading，且按钮 disabled，用户没有重试入口。
+                if (!disposed && !hasStatusRef.current) setLoadFailed(true)
               })
           }
+          retryRef.current = load
 
           /** 进入常态轮询（只进一次）。 */
           var settle = function () {
@@ -7245,6 +7301,7 @@ window.__ModuleLoader__.load({
 
           return function () {
             disposed = true
+            retryRef.current = undefined
             if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
               document.removeEventListener('visibilitychange', onVisibility)
             }
@@ -7339,6 +7396,13 @@ window.__ModuleLoader__.load({
             // 状态还没回来（冷启动 / 宿主迟迟不就绪）时也要有东西可看：
             // 旧实现直接 return null，侧栏底部整块空白，和卡片的「读取中…」
             // 行为不一致，用户分不清「插件没装」还是「还没加载完」。
+            //
+            // 但「一直读不到」不能永远显示读取中：宿主重启或后端没就绪时，
+            // 旧实现会一直转圈且按钮 disabled，用户既看不到原因也无法重试。
+            var retryLoad = function () {
+              setLoadFailed(false)
+              if (typeof retryRef.current === 'function') retryRef.current()
+            }
             return h(
               'div',
               { style: { display: 'flex', width: '100%', minWidth: 0, boxSizing: 'border-box', margin: '0 0 4px' } },
@@ -7346,7 +7410,9 @@ window.__ModuleLoader__.load({
                 'button',
                 {
                   type: 'button',
-                  disabled: true,
+                  disabled: loadFailed !== true,
+                  onClick: loadFailed === true ? retryLoad : undefined,
+                  title: loadFailed === true ? bind(t, 'statusLoadFailedHint') : undefined,
                   style: {
                     font: 'inherit',
                     display: 'inline-flex',
@@ -7357,7 +7423,7 @@ window.__ModuleLoader__.load({
                     boxSizing: 'border-box',
                     padding: '4px 11px',
                     lineHeight: '18px',
-                    cursor: 'default',
+                    cursor: loadFailed === true ? 'pointer' : 'default',
                     borderRadius: 999,
                     border: '0.5px solid var(--dsw-alias-border-l2)',
                     background: 'transparent',
@@ -7366,7 +7432,10 @@ window.__ModuleLoader__.load({
                   },
                 },
                 h('span', { role: 'status' }, bind(t, 'summary') + ' —'),
-                h('span', {}, bind(t, 'loading')),
+                loadFailed === true
+                  ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary, #b3261e)' } }, bind(t, 'statusLoadFailed'))
+                  : h('span', {}, bind(t, 'loading')),
+                loadFailed === true ? h('span', {}, bind(t, 'retry')) : null,
               ),
             )
           }

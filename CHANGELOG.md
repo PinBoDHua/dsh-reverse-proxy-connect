@@ -1,5 +1,68 @@
 # 更新记录
 
+## 0.7.3 — 2026-10-30
+
+第十五轮前后端审计（打磨轮）。后端 6 处、前端 6 处，每条都先用最小脚本复现
+再修。状态接口仍是 v8，设置文件仍是 v2。测试 **386 后端 + 128 前端**。
+
+### 额度与缓存
+
+- **换凭证后重启仍先显示上一个账号的余额**：`forgetCredentialState()` 只删
+  内存条目，磁盘上没有墓碑，下一次落盘按 key 合并又把旧快照并回来，重启第一帧
+  显示旧余额（标着「上次结果」）。现在换 PAT / 登录文件与删号走同一套墓碑语义，
+  成功读到新额度时仍会自动撤销墓碑。[lib/runtime.js](lib/runtime.js)
+- **额度定时刷新实际是设置值的 2 倍**：调度器把 `lastCreditsAt` 记成「发起
+  这一拍」的时刻，而新鲜窗口按「上次请求完成」的时刻算；任何非零耗时都会让
+  到期的那一拍被判成「还新鲜」而跳过，下一次再等满满一个间隔（120 秒实测
+  240 秒一次）。定时刷新现在显式 `force`，并发去重仍由 `refreshCredits()`
+  负责。[lib/index.js](lib/index.js)
+- **首次额度读取失败显示成「未读取」**：没有旧数字时错误分支写
+  `emptyCredits()`（`state:'none'`），界面/CLI 的「读取失败」分支成了死代码。
+  现在只有「这个账号没有额度端点」才是 `none`，真正的上游失败是 `error`。
+- **删号后在途请求仍把账号写回「最近请求」**：迟到记录只跳过账号维度，
+  `recent` 仍无条件 `unshift`，已删账号重新出现在列表里。现在跳过账号维度时
+  也不写 `recent`，全局/provider 用量照常累计。[lib/stats.js](lib/stats.js)
+
+### 超时与上游
+
+- **调用方超时被当成用户取消**：`AbortSignal.timeout()` 的 reason 是
+  `DOMException{name:'TimeoutError', code:23}`（`code` 是数字），旧判定只认
+  字符串 kind/code，把它包成 `CancelledError` → ABORTED（不重试）。打开响应头、
+  流解析与 Qoder 传输的取消检查现在统一走 `abortReasonOf()`，超时归 TIMEOUT。
+  [lib/timeout.js](lib/timeout.js) [lib/runtime.js](lib/runtime.js)
+  [lib/qoder/transport.js](lib/qoder/transport.js)
+- **Qoder 外层 `body` 为对象时正文整段丢失**：同一个字段在错误/排队响应里
+  已经是对象形态；正常帧若也发对象，旧实现把 `outer` 当内层，读不到 `choices`，
+  只剩心跳与空 `stop`。现在对象 body 直接当内层解析。
+
+### 前端
+
+- **诊断按钮跨页后状态与可见性相反**：面板只在「动态」页存在，`showDiag`
+  却是全局状态；切到别的页后 `aria-expanded` 仍是 true，再点一次不是打开而是
+  关闭。现在从别的页点它 = 跳过去并打开，`aria-expanded` / `aria-controls`
+  只在面板真正可见时输出。[client/client.js](client/client.js)
+- **侧栏小卡永远停在「读取中…」**：`/status` 一直失败时轮询错误被静默吞掉，
+  按钮 disabled 且没有重试入口。首屏从未读到状态时现在显示「读取失败 + 重试」，
+  重试会真的重新请求；已经显示过数字的后台轮询失败仍保持安静。
+- **provider 条目缺 id 让侧栏整块崩掉**：`shortProviderName()` 是唯一没有类型
+  守卫的 provider 字符串处理，补上后坏状态也只显示 `—`。
+- **英文用量表展开按钮写成 “Show all N events”**：新增 `usageMore`
+  （`Show all {count} rows` / `展开全部 {count} 行`），事件账本仍用原来的文案。
+- **最近请求静默截断为 6 行**：摘要按截断后的数量写「最近请求 · 6」，用户拿不到
+  「还有 N 条」的任何提示。现在详情里渲染该 provider 的全部最近请求，摘要与
+  行数一致。
+- **停用账号的「请先启用」是死胡同**：账号行新增「启用」按钮（仅在停用状态
+  显示），补丁带 id + label + `enabled:true`，不会把用户起的名字覆盖成「账号 N」。
+
+### 测试
+
+- 后端新增 5 条用例（覆盖本轮 6 处修复，其中「首次失败 state:error」是改既有
+  用例）：换凭证额度墓碑、调用方 TimeoutError 归 TIMEOUT、删号迟到记录不写
+  recent、Qoder 对象 body 正常出字、额度定时刷新到点必请求（host 级假时钟
+  两拍复现）。
+- 前端新增 6 条：诊断按钮跨页、侧栏首屏失败重试、缺 provider id、英文用量
+  展开文案、最近请求全量渲染、停用账号一键启用。
+
 ## 0.7.2 — 2026-10-29
 
 第十四轮前后端审计（打磨轮）。后端 6 处、前端 10 处，每条都先用最小脚本复现

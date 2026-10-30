@@ -660,6 +660,30 @@ test('统计：删除账号时清掉该账号的累计与交叉维度', () => {
     rmSync(dir, { recursive: true, force: true })
   }
 })
+
+test('统计：删除账号后，在途请求的迟到记录不能把账号写回「最近请求」', () => {
+  const dir = tempDir()
+  try {
+    const stats = new Stats({ filePath: statsPathOf(dir), enabled: () => true })
+    stats.record({ provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop', durationMs: 1 })
+    stats.forgetAccount('workbuddy', 'a')
+    // 删除之前就已经在途的请求现在才返回：全局用量照常累计，但“最近请求”
+    // 里不能再出现这个账号（否则用户刚删掉的账号会在界面上复活）。
+    const beforeRecent = stats.snapshot().recent.length
+    const beforeTotal = stats.snapshot().totals.requests
+    stats.record({
+      provider: 'workbuddy', accountId: 'a', model: 'm', kind: 'stop',
+      durationMs: 1, startedAt: Date.now() - 5_000,
+    })
+    const after = stats.snapshot()
+    assert.equal(after.recent.length, beforeRecent, '迟到记录不能新增 recent 行')
+    assert.equal(after.totals.requests, beforeTotal + 1, '全局用量必须照常累计')
+    assert.equal(after.accounts['workbuddy::a'], undefined, '账号维度不能被复活')
+    stats.stop()
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
 test('统计合并：跨午夜时 providerToday / accountModelToday 不能把昨天并进今天', () => {
   // 只给 `today` 加日期门是不够的：另两个「今日」维度同样是无条件 max 合并，
   // 跨进程跨午夜后会显示「今日 3 次，WorkBuddy 今日 10 次」这种自相矛盾的数字。

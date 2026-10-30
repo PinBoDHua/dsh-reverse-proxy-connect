@@ -320,6 +320,19 @@ test('sleep() 保留 signal 的 reason，不把「测试超时」抹成「用户
   })
 })
 
+test('调用方 AbortSignal.timeout 到期必须归成 TIMEOUT，而不是「用户取消」', async () => {
+  // DOMException{name:'TimeoutError', code:23} 的 code 是数字：旧的
+  // `typeof reason.code === 'string'` 判定认不出来，会把它包成 CancelledError，
+  // 最终分类成 ABORTED（不重试）。CLI `ask` 与浏览器登录等待都会中招。
+  const pending = sleep(30_000, AbortSignal.timeout(5))
+  await assert.rejects(pending, (error) => {
+    assert.equal(error.name, 'TimeoutError')
+    assert.equal(error.code, 'timeout')
+    assert.equal(failureCodeOf(error), 'TIMEOUT', '超时必须可重试，不能是 ABORTED')
+    return true
+  })
+})
+
 test('429 限流：只有一个账号时保留上游错误，不伪造成功', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'dsh-rpc-failover-'))
   const originalFetch = globalThis.fetch

@@ -208,7 +208,7 @@ test('额度新鲜窗口跟随高级设置：把刷新间隔调到 30 秒必须�
   }
 })
 
-test('额度状态：读失败且没有旧数字时不标 stale（否则 0 会被当成真实余额）', async () => {
+test('额度状态：读失败且没有旧数字时不标 stale，状态必须是 error 而不是 none', async () => {
   const settings = settingsFor('workbuddy')
   settings.accounts.workbuddy = [{
     id: 'default',
@@ -233,7 +233,9 @@ test('额度状态：读失败且没有旧数字时不标 stale（否则 0 会�
       await runtime.refreshCredits('workbuddy', { force: true })
       const credits = runtime.creditsFor('workbuddy')
       // 从没读到过数字 → 不能显示成「0 / 0 · 缓存」。
-      assert.equal(credits.state, 'none')
+      // 同时必须是 error 而不是 none：none 的语义是「没有额度端点 / 还没配
+      // 凭证」，把一次 503 说成 none，界面会写「未读取」，用户以为插件没去读。
+      assert.equal(credits.state, 'error')
       assert.equal(credits.stale, undefined, '没有旧数字时不该标 stale')
       assert.equal(credits.remain, 0)
       assert.match(credits.error, /503/)
