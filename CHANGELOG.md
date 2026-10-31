@@ -1,5 +1,59 @@
 # 更新记录
 
+## 0.7.6 — 2026-10-31
+
+第十七轮前后端打磨。主题是「金额分位」与「刷新粒度」：0.7.2 只修了卡片上的
+美元/人民币两位小数，侧栏胶囊、CLI 与消耗曲线仍在按积分的一位小数舍入，
+`$0.04` 在这些地方仍然变成 `0`。后端 6 处、前端 3 处。状态接口仍是 v8，
+设置文件仍是 v2。测试 **404 后端 + 141 前端**。
+
+### 金额分位不再被抹零
+
+- **消耗曲线按一位小数舍入**：按美元计费的 Trae 账号一天可能只花 `$0.04`，
+  `summarizeHistory()` 的今日/7 天/充值累计会把它舍入成 0 —— 卡片趋势写着
+  「今日消耗 0」，余额却真的下降了。现在累计值保留两位小数；积分在界面
+  仍按一位小数收敛，显示不变。[lib/credit-history.js](lib/credit-history.js)
+- **CLI 的额度描述一律按积分一位小数**：`describeCredits()` 对 `$0.04` 打印
+  「0 usd」，脚本会读成「额度没动」。现在按单位收敛（金额两位、积分一位，
+  与浏览器同一套规则），趋势行同样走这套精度。[lib/format.js](lib/format.js)
+  [lib/bin.js](lib/bin.js)
+- **`credits` 命令的套餐包明细同样**：`remain` / `total` 以前也是
+  `Math.round(value * 10) / 10`，金额包会显示成 `0 / 1`。现在与余额同一口径。
+  [lib/bin.js](lib/bin.js)
+- **侧栏胶囊仍用积分格式化**：`compactNumber()` 把 `$0.04` 舍入成 `0`，而
+  同一行的 title 写着 `$0.04` —— 同一份数据两个结论。侧栏现在改走
+  `compactCreditsNumber()`（金额保留两位、积分仍可 k/M 缩写）。
+  [client/client.js](client/client.js)
+
+### 「刷新积分」真的只刷新这一家
+
+- **卡片按 provider 刷新，宿主却刷新六家**：按钮的 busy 键是
+  `credits:<provider>`，但请求体只有 `{action:'credits'}`，宿主走
+  `refreshAllCredits()` —— 点 WorkBuddy 的刷新会把 Qoder / Trae 也打一遍
+  （每家 × 每个账号的上游请求），界面只在 WorkBuddy 显示「读取中」。
+  现在卡片带上 `provider`，宿主只刷新这一家；不带 `provider` 的调用
+  （侧栏胶囊）保持全量语义。[lib/index.js](lib/index.js)
+  [client/client.js](client/client.js)
+- **只刷一家不再推进全局刷新时间戳**：`lastCreditsAt` 是调度器的全局节拍；
+  只刷一家时若也推进，其它五家的自动刷新会被整整推迟一个间隔（用户频繁点
+  一家 = 另外五家永远等不到自动刷新）。现在只有全量刷新才推进。
+  [lib/index.js](lib/index.js)
+
+### 诊断回退不再带出 PAT 尾号
+
+- `/diagnostics` 不可用（老宿主 / 接口 500）时，「复制诊断」会回退成整份
+  `/status` 的 JSON。其中的 `credential.patTail` 是 PAT 最后四位，之前原样
+  躺进可复制的文本框（截图、贴 issue 都会带出去）。现在客户端兜底与诊断
+  模块的敏感字段表都会把它替换成 `[redacted]`。[client/client.js](client/client.js)
+  [lib/diagnostics.js](lib/diagnostics.js)
+
+### 测试
+
+- 后端新增 4 条：金额消耗保留两位（`$0.04`）、`formatCreditsAmount` 单位精度、
+  诊断 `patTail` 脱敏、宿主按 provider 刷新额度（两家 Qoder，断言另一家零请求）。
+- 前端新增 3 条：侧栏胶囊 `$0.04`、刷新请求带 `provider`、诊断回退不泄漏
+  PAT 尾号。三条都在 0.7.5 客户端上逐一验证会失败。
+
 ## 0.7.5 — 2026-10-30
 
 0.7.4 遗留三项的收尾轮。后端 4 处、前端 3 处；状态接口仍是 v8，设置文件仍是 v2。

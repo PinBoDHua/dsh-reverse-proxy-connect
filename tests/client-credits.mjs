@@ -309,6 +309,7 @@ async function fakeFetch(url, init) {
   calls.push({ url: target, method: init?.method ?? 'GET', body: init?.body })
   if (fetchFailure === 'status' && target.includes('/status')) throw new Error('fetch failed: ECONNREFUSED')
   if (fetchFailure === 'action' && target.includes('/action')) throw new Error('HTTP 500 upstream reset')
+  if (fetchFailure === 'diagnostics' && target.includes('/diagnostics')) throw new Error('HTTP 500 diagnostics')
   return {
     ok: true,
     status: 200,
@@ -4476,6 +4477,68 @@ function extractFn(header) {
     STATUS.providers = providersSnapshot
     STATUS.storage = storageSnapshot
     fetchDelayFor = null
+  }
+}
+
+// ── 第十七轮：金额精度与刷新粒度 ─────────────────────────────────
+
+// 42) 侧栏胶囊的金额精度：$0.04 不能显示成 0（与卡片/明细同一把尺）。
+{
+  const snapshot = STATUS.providers[0].credits
+  try {
+    STATUS.providers[0].credits = { ...snapshot, unit: 'usd', remain: 0.04, total: 1, stale: false }
+    const tree = await mount(pill, { t: realT, wide: true })
+    const text = textOf(tree)
+    if (!text.includes('0.04')) {
+      throw new Error(`侧栏胶囊把 $0.04 舍入掉了：${JSON.stringify(text.slice(0, 160))}`)
+    }
+    assertNoBadNumbers(tree, 'pill credits.remain=0.04 usd')
+    console.log('✓ 侧栏胶囊的美元余额保留两位小数，$0.04 不再显示成 0')
+  } finally {
+    STATUS.providers[0].credits = snapshot
+  }
+}
+
+// 43) 「刷新积分」必须按 provider 收窄：请求体里要带 provider，宿主才不会
+//     把六家一起刷（界面只在这一家显示「读取中」）。
+{
+  const tree = await mount(card, { t: realT })
+  const button = findButton(tree, realT('creditsRefresh'))
+  if (button === undefined) throw new Error('找不到「刷新积分」按钮')
+  const before = calls.length
+  button.props.onClick()
+  await new Promise((resolve) => setTimeout(resolve, 30))
+  const actionCall = calls.slice(before)
+    .filter((call) => call.url.includes('/action'))
+    .find((call) => typeof call.body === 'string' && call.body.includes('"action":"credits"'))
+  if (actionCall === undefined) throw new Error('点「刷新积分」没有发出 /action 请求')
+  if (!actionCall.body.includes('"provider":"workbuddy"')) {
+    throw new Error(`刷新积分没有按 provider 收窄：${actionCall.body}`)
+  }
+  console.log('✓ 刷新积分按 provider 收窄，不再一次刷新六家')
+}
+
+// 44) 诊断回退 JSON 不能泄漏 PAT 尾号：/diagnostics 不可用时，旧宿主路径会
+//     把整份 /status 塞进可复制的文本框，`credential.patTail` 必须脱敏。
+{
+  const credentialSnapshot = STATUS.providers[0].credential
+  fetchFailure = 'diagnostics'
+  try {
+    STATUS.providers[0].credential = { ...credentialSnapshot, status: 'signed-in', source: 'pat', patTail: 'wxyz' }
+    let tree = await mount(card, { t: realT })
+    const copy = findButton(tree, realT('copyDiagnostics'))
+    if (copy === undefined) throw new Error('找不到「复制诊断」按钮')
+    copy.props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    tree = await render(card, { t: realT })
+    const area = find(tree, (node) => node.type === 'textarea'
+      && typeof node.props?.value === 'string' && node.props.value.includes('"plugin"'))
+    if (area === undefined) throw new Error('诊断接口失败时没有给出手动复制兜底')
+    if (area.props.value.includes('wxyz')) throw new Error('诊断回退 JSON 泄漏了 PAT 尾号')
+    console.log('✓ 诊断回退 JSON 不会泄漏 PAT 尾号')
+  } finally {
+    fetchFailure = null
+    STATUS.providers[0].credential = credentialSnapshot
   }
 }
 

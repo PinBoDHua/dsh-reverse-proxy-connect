@@ -32,6 +32,17 @@ test('额度历史：逐段累加下降量，充值不把已花掉的钱抹掉',
   assert.deepEqual(trend.points.map((point) => point.remain), [100, 80, 120, 110])
 })
 
+test('额度历史：金额消耗保留两位小数，$0.04 不会被抹成 0', () => {
+  // 按美元计费的 Trae 账号一次对话可能只花几分钱：只保留一位小数会让
+  // 「今日消耗」显示成 0，与余额真的下降了自相矛盾。
+  let entry = recordSample(undefined, { at: at(9), remain: 1 })
+  entry = recordSample(entry, { at: at(10), remain: 0.96 })
+  const trend = summarizeHistory(entry, { now: at(11) })
+  assert.equal(trend.spentToday, 0.04)
+  assert.equal(trend.spent7d, 0.04)
+  assert.equal(trend.topupToday, 0)
+})
+
 test('额度历史：消耗速度与耗尽时间按最近样本计算', () => {
   let entry
   for (let minute = 0; minute <= 60; minute += 10) {

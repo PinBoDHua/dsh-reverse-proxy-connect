@@ -20,7 +20,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { formatClock, formatDateOnly, formatDateTime, formatCompactDuration, formatDurationZh } from '../lib/format.js'
+import { formatClock, formatCreditsAmount, formatDateOnly, formatDateTime, formatCompactDuration, formatDurationZh } from '../lib/format.js'
 import { Runtime } from '../lib/runtime.js'
 import { defaults } from '../lib/settings.js'
 
@@ -64,6 +64,20 @@ test('时长格式：分钟/小时/天三档，且 252 天不再摊成六位数�
   assert.equal(formatDurationZh(3 * 3_600_000 + 20 * 60_000), '3 小时 20 分')
   assert.equal(formatDurationZh(252 * 86_400_000), '252 天')
   assert.equal(formatDurationZh(undefined), '—')
+})
+
+test('额度数字：金额保留两位、积分保留一位（CLI 与卡片同一口径）', () => {
+  // CLI 以前一律 `Math.round(value * 10) / 10`：$0.04 打印成「0 usd」，
+  // 用户与脚本都会读成「额度没动」。积分仍是一位小数，避免变啰嗦。
+  assert.equal(formatCreditsAmount(0.04, 'usd'), '0.04')
+  assert.equal(formatCreditsAmount(0.04, 'USD'), '0.04')
+  assert.equal(formatCreditsAmount(0.04, 'cny'), '0.04')
+  assert.equal(formatCreditsAmount(0.004, 'usd'), '0')
+  assert.equal(formatCreditsAmount(12.345, 'usd'), '12.35')
+  assert.equal(formatCreditsAmount(600.15, 'credits'), '600.2')
+  assert.equal(formatCreditsAmount(600.15, undefined), '600.2')
+  assert.equal(formatCreditsAmount(Number.NaN, 'usd'), '—')
+  assert.equal(formatCreditsAmount(Number.POSITIVE_INFINITY, 'usd'), '—')
 })
 
 test('时长格式与浏览器半边逐字一致：同一份数据两边不能显示成两个数', () => {

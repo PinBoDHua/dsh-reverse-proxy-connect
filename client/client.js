@@ -1465,7 +1465,10 @@ window.__ModuleLoader__.load({
      * 用户名缩掉，避免排障截图带出本机账号。
      */
     function displayStatus(status) {
-      var secretKeys = { key: true, pat: true, token: true, accesstoken: true, refreshtoken: true, authorization: true, cookie: true, secret: true }
+      // patTail 是 PAT 的最后四位：不是完整令牌，但它同样不该躺在一份会被
+      // 截图/贴进 issue 的 JSON 里（诊断接口本身不下发它，这里是旧宿主回退
+      // 路径的兜底）。
+      var secretKeys = { key: true, pat: true, token: true, accesstoken: true, refreshtoken: true, authorization: true, cookie: true, secret: true, pattail: true }
       var redactText = function (text) {
         return String(text)
           .replace(/([A-Za-z]:\\Users\\)[^\\\s"']+/g, '$1<user>')
@@ -3909,7 +3912,10 @@ window.__ModuleLoader__.load({
         var key = 'credits:' + provider
         if (status === undefined || busyNow(key)) return
         beginBusy(key)
-        postJson(ACTION_PATH, { action: 'credits' }, status.key, REFRESH_TIMEOUT_MS)
+        // 带上 provider：宿主只刷新这一家。旧实现只发 `{action:'credits'}`，
+        // 宿主会把六家一起刷新，但界面的「读取中」只标在这一家上，另外五家的
+        // 数字悄悄变化；一次点击还会打出六份上游请求。
+        postJson(ACTION_PATH, { action: 'credits', provider: provider }, status.key, REFRESH_TIMEOUT_MS)
           .then(function (document) {
             applyStatus(document)
             endBusy(key)
@@ -7813,7 +7819,10 @@ window.__ModuleLoader__.load({
                   whiteSpace: 'nowrap',
                 },
               },
-              snapshot.unlimited === true ? '∞' : freePlan ? bind(t, 'creditsFreeShort') : compactNumber(snapshot.remain),
+              // 必须走 compactCreditsNumber：金额（usd/cny）保留两位小数，否则
+              // $0.04 会被 compactNumber 的一位小数舍入成「0」——标题里写着
+              // $0.04，胶囊上却是 0。积分仍沿用 k/M 缩写。
+              snapshot.unlimited === true ? '∞' : freePlan ? bind(t, 'creditsFreeShort') : compactCreditsNumber(snapshot.remain, snapshot),
             ),
           )
         })

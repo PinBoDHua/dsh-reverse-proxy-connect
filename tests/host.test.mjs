@@ -653,6 +653,114 @@ test('额度定时刷新：到点必须真的请求，不能被「上一拍刚�
 })
 
 
+test('手动刷新额度：带 provider 时只刷新这一家，不带 provider 才刷全部', async () => {
+  // 卡片上的「刷新积分」在 provider 详情页里，一次点击却会把六家一起刷新：
+  // 界面只在这一家显示「读取中」，另外五家的数字悄悄变化，还多打五份上游请求。
+  const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-credits-scope-'))
+  const dataDir = join(root, DATA_DIR_NAME)
+  mkdirSync(dataDir, { recursive: true })
+  writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({
+    version: 2,
+    providers: {
+      workbuddy: { enabled: false },
+      'workbuddy-ai': { enabled: false },
+      qoder: { enabled: true },
+      'qoder-global': { enabled: true },
+      trae: { enabled: false },
+      'trae-global': { enabled: false },
+    },
+    accounts: {
+      qoder: [{ id: 'default', label: '国内', enabled: true, pat: 'cn-pat' }],
+      'qoder-global': [{ id: 'default', label: '国际', enabled: true, pat: 'global-pat' }],
+    },
+    activeAccount: { qoder: 'default', 'qoder-global': 'default' },
+    checkin: { enabled: false },
+    advanced: { creditsRefreshMs: 86_400_000, catalogRefreshMs: 86_400_000 },
+  }))
+
+  const handlers = {}
+  const disposers = []
+  const originalFetch = globalThis.fetch
+  const counts = { cn: 0, global: 0 }
+  const json = (value) => new Response(JSON.stringify(value), { status: 200 })
+  globalThis.fetch = async (url) => {
+    const text = String(url)
+    const region = text.includes('openapi.qoder.com.cn')
+      ? 'cn'
+      : text.includes('openapi.qoder.sh') ? 'global' : undefined
+    if (region === undefined) return new Response('{}', { status: 404 })
+    if (text.includes('/api/v1/jobToken/exchange')) {
+      return json({ token: `${region}-job`, expires_at: new Date(Date.now() + 3_600_000).toISOString() })
+    }
+    if (text.includes('/api/v1/userinfo')) return json({ id: `${region}-user` })
+    if (text.includes('/api/v2/quota/usage')) {
+      counts[region] += 1
+      return json({ userQuota: { total: 100, used: 1, remaining: 99 } })
+    }
+    if (text.includes('/api/v2/user/plan')) return json({ plan_tier_name: 'Pro', is_paid_plan: true })
+    if (text.includes('/api/v3/user/status')) return json({ nextResetAt: 0 })
+    return new Response('{}', { status: 404 })
+  }
+
+  const ctx = {
+    get(name) {
+      if (name === 'profileContext') return { dir: root }
+      return undefined
+    },
+    inject(names, callback) {
+      if (names.includes('webServer')) {
+        callback({
+          webServer: fakeWebServer(handlers),
+          effect(fn) {
+            const dispose = fn()
+            disposers.push(dispose)
+            return dispose
+          },
+        })
+      }
+    },
+    effect(fn) {
+      const dispose = fn()
+      disposers.push(dispose)
+      return dispose
+    },
+    llm: { registerAdapter: () => () => {} },
+    emit() {},
+    logger: { info() {}, warn() {} },
+  }
+
+  try {
+    apply(ctx, {})
+    // 等首轮额度刷新落定（两家各至少一次），再多等一会儿避免把收尾请求算进来。
+    for (let index = 0; index < 200 && (counts.cn === 0 || counts.global === 0); index++) {
+      await new Promise((resolve) => setTimeout(resolve, 10))
+    }
+    await new Promise((resolve) => setTimeout(resolve, 120))
+    const full = await get(handlers[STATUS_PATH], STATUS_PATH)
+    const before = { ...counts }
+
+    const scoped = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, { action: 'credits', provider: 'qoder' })
+    assert.equal(scoped.status, 200)
+    assert.ok(counts.cn > before.cn, '带 provider 时必须刷新这一家')
+    assert.equal(counts.global, before.global, '带 provider 时不能顺带刷新另一家')
+
+    const all = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, { action: 'credits' })
+    assert.equal(all.status, 200)
+    assert.ok(counts.global > before.global, '不带 provider 时仍要刷新全部')
+    assert.ok(counts.cn > before.cn)
+  } finally {
+    globalThis.fetch = originalFetch
+    for (const dispose of disposers) {
+      try {
+        if (typeof dispose === 'function') dispose()
+      } catch {
+        /* 忽略清理失败 */
+      }
+    }
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
 test('宿主入口：更高版本写过的 stats / events 在状态里标成只读，重置不会假成功', async () => {
   const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-host-readonly-'))
   const dataDir = join(root, DATA_DIR_NAME)

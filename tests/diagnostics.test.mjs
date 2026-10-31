@@ -73,6 +73,15 @@ test('诊断：控制密钥、令牌字段与绝对用户路径都不出现', ()
   assert.ok(!JSON.stringify(safe).includes('C:\\Users'))
 })
 
+test('诊断：PAT 尾号同样按密钥字段脱敏', () => {
+  // 旧宿主回退路径会把整份 /status 复制出去；patTail 虽然只有四位，也不该
+  // 出现在会被截图/贴进 issue 的 JSON 里。
+  const status = { providers: [{ credential: { status: 'signed-in', source: 'pat', patTail: 'wxyz' } }] }
+  const safe = redactStatus(status)
+  assert.equal(safe.providers[0].credential.patTail, '[redacted]')
+  assert.ok(!JSON.stringify(safe).includes('wxyz'))
+})
+
 test('诊断：文本包含可排障信息但没有密钥', () => {
   const { document, text } = buildDiagnostics(STATUS, { now: 1_800_000_000_000 })
   assert.equal(document.plugin.version, '1.1.0')
