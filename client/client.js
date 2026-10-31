@@ -494,6 +494,7 @@ window.__ModuleLoader__.load({
       catalogNone: '尚无目录',
       signedIn: '已登录',
       signedOut: '未登录',
+      credentialUnverified: '暂无法验证',
       save: '保存',
       saving: '保存中…',
       saved: '已保存',
@@ -963,6 +964,7 @@ window.__ModuleLoader__.load({
       catalogNone: 'No catalog yet',
       signedIn: 'Signed in',
       signedOut: 'Signed out',
+      credentialUnverified: 'Not verified',
       save: 'Save',
       saving: 'Saving…',
       saved: 'Saved',
@@ -1725,6 +1727,18 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 这份快照是不是「读失败后保留下来的上次结果」。
+     *
+     * stale / error 的数字不是当前事实：服务端的预警与自动换号都明确排除它们
+     * （lib/quota.js）。前端若继续按旧数字亮红色、写「额度已用尽」，就与
+     * 「插件不会因此换号」的行为相反 —— 用户刚充值完也会看到一张红卡。
+     */
+    function creditsStale(credits) {
+      return credits !== undefined && credits !== null
+        && (credits.stale === true || credits.error !== undefined)
+    }
+
+    /**
      * 额度是否该亮警示色。
      *
      * 三个条件任一成立：已用尽、上游标记超额、或剩余低于阈值。
@@ -1740,6 +1754,7 @@ window.__ModuleLoader__.load({
     function creditsWarning(credits, provider, ratio, enabled) {
       if (enabled === false) return false
       if (credits === undefined || credits === null || credits.state !== 'ok') return false
+      if (creditsStale(credits)) return false
       if (isQoderFreePlan(provider, credits)) return false
       return isCreditsLow(credits, ratio)
     }
@@ -1748,6 +1763,7 @@ window.__ModuleLoader__.load({
     function alertOfCredits(credits, ratio, provider, enabled) {
       if (enabled === false) return undefined
       if (credits === undefined || credits === null || credits.state !== 'ok') return undefined
+      if (creditsStale(credits)) return undefined
       if (isQoderFreePlan(provider, credits)) return undefined
       if (credits.alert === 'low' || credits.alert === 'exhausted') return credits.alert
       if (credits.unlimited === true) return undefined
@@ -2648,6 +2664,15 @@ window.__ModuleLoader__.load({
         ' ' + pad(date.getHours()) + ':' + pad(date.getMinutes()) + ':' + pad(date.getSeconds())
     }
 
+    /** 本机日期键（与宿主 `dayKey()` 同一口径）。无效时间返回 ''。 */
+    function localDayKey(ms) {
+      if (typeof ms !== 'number' || !Number.isFinite(ms)) return ''
+      var date = new Date(ms)
+      if (!Number.isFinite(date.getTime())) return ''
+      var pad = function (value) { return String(value).padStart(2, '0') }
+      return String(date.getFullYear()) + '-' + pad(date.getMonth() + 1) + '-' + pad(date.getDate())
+    }
+
     /** 表格里的紧凑时间：今天只显示时分秒，跨天再带日期。无效返回 `—`。 */
     function formatShortTime(ms) {
       if (typeof ms !== 'number' || !Number.isFinite(ms)) return '—'
@@ -2790,10 +2815,18 @@ window.__ModuleLoader__.load({
         var reason = typeof credential.reason === 'string' ? credential.reason : ''
         var unconfigured = reason === 'no-credential' || reason === 'app-not-found'
           || reason === 'app-ambiguous' || reason === 'app-path-invalid' || reason === 'region-mismatch'
+        // 瞬时失败（探测定时/取消/网络）不是「凭证失效」：模型可能下一秒就恢复，
+        // 红色「失效」徽章会误导用户去重新登录。与运行时只把凭证本身的状态
+        // 缓存成稳定失败是同一套口径。
+        var transient = reason === 'timeout' || reason === 'ABORTED'
+          || reason === 'upstream-error' || reason === 'soft-rate'
+        // 只有「令牌真的被拒 / 已过期」才配「失效」徽章；文件读不出来是另一类
+        // 问题（路径 / 权限 / 格式），文案由 title 里的完整原因说明。
+        var authBadge = reason === 'pat-invalid' || reason === 'credential-expired'
         return {
-          label: bind(t, unconfigured ? 'signedOut' : 'accountAuthFailed'),
-          tone: unconfigured ? 'muted' : 'error',
-          badge: unconfigured ? undefined : bind(t, 'authBadge'),
+          label: bind(t, unconfigured ? 'signedOut' : transient ? 'credentialUnverified' : 'accountAuthFailed'),
+          tone: unconfigured || transient ? 'muted' : 'error',
+          badge: authBadge ? bind(t, 'authBadge') : undefined,
           detail: detail,
           title: typeof credential.message === 'string' && credential.message !== '' ? credential.message : title,
         }
@@ -2810,8 +2843,11 @@ window.__ModuleLoader__.load({
         }
       }
       var credits = account.credits
+      // 与服务端 isExhaustedCredits() 同一判据：`exceeded` 也是用尽；stale /
+      // 读失败的旧快照不是当前事实，不能把账号写死成「额度用尽」。
       if (credits !== undefined && credits !== null && credits.state === 'ok'
-        && credits.unlimited !== true && isFiniteNumber(credits.remain) && credits.remain <= 0
+        && credits.unlimited !== true && !creditsStale(credits)
+        && (credits.exceeded === true || (isFiniteNumber(credits.remain) && credits.remain <= 0))
         && !isQoderFreePlan(provider.provider, credits)) {
         return {
           label: bind(t, 'accountCreditsExhausted'),
@@ -2836,8 +2872,20 @@ window.__ModuleLoader__.load({
       if (checkin === null || checkin === undefined || typeof checkin !== 'object') {
         return { label: bind(t, 'accountCheckinNone'), tone: 'muted' }
       }
-      if (checkin.enabled === false) return { label: bind(t, 'accountCheckinOff'), tone: 'muted' }
       var result = checkin.result !== null && typeof checkin.result === 'object' ? checkin.result : undefined
+      // 结果必须属于今天：昨天签到的账号不能一直显示「已签到」。
+      var resultAt = result !== undefined && isFiniteNumber(result.at) ? result.at : undefined
+      var resultToday = result !== undefined
+        && (resultAt === undefined || localDayKey(resultAt) === localDayKey(Date.now()))
+      if (!resultToday) {
+        // 自动签到关着时，手动「立即签到」今天跑出的结果仍然要显示（旧实现
+        // 先判 enabled===false，把这一格永远钉成「已关闭」，用户看不到结果）。
+        if (checkin.enabled === false) return { label: bind(t, 'accountCheckinOff'), tone: 'muted' }
+        return {
+          label: bind(t, account.configured === false ? 'accountCheckinSkipped' : 'accountCheckinNone'),
+          tone: 'muted',
+        }
+      }
       var outcomes = result === undefined ? [] : safeArray(result.outcomes)
       // 宿主在整轮签到抛错时只有一个兜底 outcome：`accountId: '*'`
       // （读设置/写盘直接失败，根本走不到账号循环）。旧实现只按 accountId /
@@ -3033,6 +3081,10 @@ window.__ModuleLoader__.load({
       var tabState = useState(props.initialProvider || 'workbuddy')
       var activeTab = tabState[0]
       var setActiveTab = tabState[1]
+      // 异步回调（保存成功 / 失败）要知道「现在看的是哪一家」：闭包里的
+      // activeTab 是点击那一刻的值，用户在请求在飞时切走就会被误伤。
+      var activeTabRef = useRef(activeTab)
+      activeTabRef.current = activeTab
       // 详情页分区。所有分区保持挂载（切换只改 display），既保留本地草稿，
       // 也让状态轮询不会因为切页而重置滚动位置。
       var pageState = useState('overview')
@@ -3330,11 +3382,35 @@ window.__ModuleLoader__.load({
         if (bucket === undefined) bucket = providerDrafts.current[active.provider] = {}
         bucket[field] = value
       }
-      /** 忘掉当前 provider 的某个草稿字段（保存成功后调用）。 */
-      var forgetDraft = function (field) {
-        if (active === undefined) return
-        var bucket = providerDrafts.current[active.provider]
+      /**
+       * 保存成功后清理草稿。
+       *
+       * 两个约束缺一不可：
+       * - **按发起保存的 provider 清，并且只清那一份**：可见的 PAT 输入是整张
+       *   卡片共用的，保存请求又要跑几秒；用户切到另一家继续粘贴时，旧实现
+       *   无条件 `setPatDraft('')` 会把新输入清掉（草稿表里还留着，界面上却空了）。
+       * - **只清「点击时那一份」**：请求在飞时用户又改了同一个输入框，新输入
+       *   不能被成功回调抹掉。
+       *
+       * @param provider - 发起保存的 provider。
+       * @param field - 草稿字段。
+       * @param snapshot - 点下按钮那一刻的草稿值（可能 undefined）。
+       * @param setter - 需要清空可见输入框时用的 setter（可选）。
+       * @returns 是否清理了草稿。
+       */
+      var completeDraft = function (provider, field, snapshot, setter) {
+        var bucket = providerDrafts.current[provider]
+        var latest = bucket === undefined ? undefined : bucket[field]
+        // 请求在飞时用户又改过（包括从空到有）：保留新输入。
+        if (latest !== snapshot) return false
         if (bucket !== undefined) delete bucket[field]
+        if (typeof setter === 'function' && activeTabRef.current === provider) setter('')
+        return true
+      }
+      /** 读某个 provider 的草稿快照（没有就是 undefined）。 */
+      var draftOf = function (provider, field) {
+        var bucket = providerDrafts.current[provider]
+        return bucket === undefined ? undefined : bucket[field]
       }
       useEffect(function () {
         var desktop = active === undefined
@@ -3542,7 +3618,7 @@ window.__ModuleLoader__.load({
        * 时用 `options.onError`。
        *
        * @param patch - 设置补丁。
-       * @param options - `{ clearPatDraft?, onSuccess?, onError? }`。
+       * @param options - `{ seq?, modelKeys?, settle?, onSuccess?, onError? }`。
        * @returns 最新的状态文档（失败时为 undefined）。
        */
       var mutate = function (patch, options) {
@@ -3589,7 +3665,6 @@ window.__ModuleLoader__.load({
             if (seq === writeSeq.current) {
               setError(undefined)
               endBusy('save')
-              if (options !== undefined && options.clearPatDraft === true) setPatDraft('')
               if (options !== undefined && typeof options.onSuccess === 'function') options.onSuccess()
             }
             return document
@@ -3787,16 +3862,25 @@ window.__ModuleLoader__.load({
           })
       }
 
-      /** 轮询登录进度，直到 done / failed / cancelled；token 变化后旧轮询自动停止。 */
+      /**
+       * 轮询登录进度，直到 done / failed / cancelled；token 变化后旧轮询自动停止。
+       *
+       * 必须走 `load()` 而不是自己 fetch + applyStatus：登录轮询每 2 秒一次，
+       * 完全可能和用户刚保存的设置撞在一起；绕过 statusEpoch 时，一个慢状态
+       * 响应会把刚保存的账号 / 开关整份盖回旧值。`load()` 自带 epoch 与
+       * 「同一时间只允许一个状态请求」的约束。
+       */
       var pollLogin = function (provider, attempt, token) {
         if (status === undefined || attempt > 150 || token !== loginPollToken.current) return
         loginPollTimer.current = setTimeout(function () {
           if (token !== loginPollToken.current) return
-          fetchStatus()
+          // load() 在已有一轮状态请求时返回 undefined：用当前快照判断任务是否
+          // 还在等待，下一拍继续轮询即可。
+          load()
             .then(function (document) {
               if (token !== loginPollToken.current) return
-              applyStatus(document)
-              var entry = safeArray(document.providers).find(function (item) { return item.provider === provider })
+              var latest = document !== undefined && document !== null ? document : status
+              var entry = safeArray(latest === undefined ? undefined : latest.providers).find(function (item) { return item.provider === provider })
               var job = entry === undefined ? undefined : entry.login
               if (job === undefined) return
               if (job.phase === 'waiting' || job.phase === 'starting') {
@@ -4145,48 +4229,69 @@ window.__ModuleLoader__.load({
 
       var savePat = function () {
         if (active === undefined) return
+        var provider = active.provider
         var pat = patDraft.trim()
         if (pat === '') return
+        // 成功回调只能清掉「点击时那一份草稿」：请求在飞时用户切走 / 继续输入时，
+        // 不能把另一家（或更新的一份）草稿一起抹掉。
+        var snapshot = draftOf(provider, 'pat')
+        var done = function () { completeDraft(provider, 'pat', snapshot, setPatDraft) }
         // 账号池存在时必须写进「当前账号」，否则写的是被忽略的旧字段，
         // 用户会看到「保存成功但状态没变」。
         if (accountRows.length > 0 && activeRow !== undefined) {
-          mutate(activeAccountPatch({ pat: pat }), { clearPatDraft: true, onSuccess: function () { forgetDraft('pat') } })
+          mutate(activeAccountPatch({ pat: pat }), { onSuccess: done })
           return
         }
         var patch = { qoder: {} }
-        patch.qoder[active.provider] = { pat: pat }
-        mutate(patch, { clearPatDraft: true, onSuccess: function () { forgetDraft('pat') } })
+        patch.qoder[provider] = { pat: pat }
+        mutate(patch, { onSuccess: done })
       }
 
       var clearPat = function () {
         if (active === undefined) return
+        var provider = active.provider
+        // 快照是点击那一刻的草稿（要清掉的就是它）；期间用户新粘贴的 PAT 会
+        // 改变草稿值，completeDraft 因此不会误清。
+        var snapshot = draftOf(provider, 'pat')
+        var done = function () { completeDraft(provider, 'pat', snapshot, setPatDraft) }
         if (accountRows.length > 0 && activeRow !== undefined) {
           // 清空草稿必须同时丢掉「按 provider 记住的草稿」：只清可见输入框的话，
           // 切走再切回会由草稿恢复 effect 把那串刚被清除的 PAT 重新填回来。
-          mutate(activeAccountPatch({ forget: true }), {
-            clearPatDraft: true,
-            onSuccess: function () { forgetDraft('pat') },
-          })
+          mutate(activeAccountPatch({ forget: true }), { onSuccess: done })
           return
         }
         var patch = { qoder: {} }
-        patch.qoder[active.provider] = { pat: '' }
-        mutate(patch, { clearPatDraft: true, onSuccess: function () { forgetDraft('pat') } })
+        patch.qoder[provider] = { pat: '' }
+        mutate(patch, { onSuccess: done })
       }
 
       var saveDesktop = function () {
         if (active === undefined) return
+        var provider = active.provider
+        var authFile = authFileDraft.trim()
+        var appPath = appPathDraft.trim()
+        var authSnapshot = draftOf(provider, 'authFile')
+        var appSnapshot = draftOf(provider, 'appPath')
         var patch = { workbuddy: {} }
-        patch.workbuddy[active.provider] = { electronPath: appPathDraft.trim(), authFile: authFileDraft.trim() }
-        mutate(patch, { onSuccess: function () { forgetDraft('authFile'); forgetDraft('appPath') } })
+        patch.workbuddy[provider] = { electronPath: appPath, authFile: authFile }
+        mutate(patch, {
+          onSuccess: function () {
+            // 不传 setter：输入框展示的是「当前生效的路径」，保存后没变就不该清空。
+            completeDraft(provider, 'authFile', authSnapshot)
+            completeDraft(provider, 'appPath', appSnapshot)
+          },
+        })
       }
 
       /** Trae 只保存 storage.json 的路径覆盖（凭证本身由客户端维护）。 */
       var saveTrae = function () {
         if (active === undefined) return
+        var provider = active.provider
+        var authFile = authFileDraft.trim()
+        var snapshot = draftOf(provider, 'authFile')
         var patch = { trae: {} }
-        patch.trae[active.provider] = { storageFile: authFileDraft.trim() }
-        mutate(patch, { onSuccess: function () { forgetDraft('authFile') } })
+        patch.trae[provider] = { storageFile: authFile }
+        mutate(patch, { onSuccess: function () { completeDraft(provider, 'authFile', snapshot) } })
       }
 
       var copyDiagnostics = function () {
@@ -4421,11 +4526,14 @@ window.__ModuleLoader__.load({
         var cardTest = freshModelTestOf(entry)
         var state = cardTest !== undefined && cardTest.state !== undefined ? cardTest.state : displayHealthState(health)
         var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
+        // 与 provider 卡同一个健康判据：'testedOk'（30 分钟内刚测可用）也是
+        // 绿色。旧实现只认 'ok'，同一份证据在卡片上写「刚测可用」、在六段条
+        // 上却是琥珀色，页头还少算一家「正常」。
         var tone = entry.enabled === false
           ? 'off'
           : !signed
             ? 'idle'
-            : state === 'ok' ? 'ok' : state === 'down' ? 'error' : state === 'unknown' ? 'idle' : 'warn'
+            : state === 'ok' || state === 'testedOk' ? 'ok' : state === 'down' ? 'error' : state === 'unknown' ? 'idle' : 'warn'
         return {
           provider: entry.provider,
           name: entry.displayName,
@@ -5110,8 +5218,12 @@ window.__ModuleLoader__.load({
         // 保存请求在飞时再点一次会创建两个同密钥账号（旧代码的 disabled
         // 依赖一个从未被设置的 'accounts' 键，等于没有保护）。
         if (busyNow('save')) return
+        var provider = active.provider
+        var labelDraft = accLabel.trim()
         var secret = accSecret.trim()
-        var label = accLabel.trim() === '' ? bind(t, 'accountDefaultLabel') : accLabel.trim()
+        var labelSnapshot = draftOf(provider, 'accLabel')
+        var secretSnapshot = draftOf(provider, 'accSecret')
+        var label = labelDraft === '' ? bind(t, 'accountDefaultLabel') : labelDraft
         var next = { id: newAccountId(), label: label, enabled: true }
         if (isPatProvider) {
           if (secret === '') return
@@ -5121,16 +5233,15 @@ window.__ModuleLoader__.load({
         }
         var patch = { accounts: {}, activeAccount: {} }
         // 增量 upsert：服务端会把这一条并进现有账号池，不会覆盖别的账号。
-        patch.accounts[active.provider] = [next]
+        patch.accounts[provider] = [next]
         // 新加的账号直接设为当前，省得用户再点一次。
-        patch.activeAccount[active.provider] = next.id
-        // 只有保存成功才清空输入；失败时保留用户刚粘贴的 PAT。
+        patch.activeAccount[provider] = next.id
+        // 只有保存成功才清空输入；失败时保留用户刚粘贴的 PAT。期间切走或又输入
+        // 了新账号时，completeDraft 会保留那份更新内容。
         mutate(patch, {
           onSuccess: function () {
-            setAccLabel('')
-            setAccSecret('')
-            forgetDraft('accLabel')
-            forgetDraft('accSecret')
+            completeDraft(provider, 'accLabel', labelSnapshot, setAccLabel)
+            completeDraft(provider, 'accSecret', secretSnapshot, setAccSecret)
           },
         })
       }
@@ -5140,18 +5251,22 @@ window.__ModuleLoader__.load({
       // 「上次尝试」必须用本 provider 的时间。`lastRunAt` 是整轮签到的全局
       // 时间戳：刚给 Qoder 手动签到后，WorkBuddy 也会显示「刚刚」，像它也签了。
       // 老宿主没有 lastAttemptAt，回落到 lastRunAt。
-      var checkinAttemptAt = isFiniteNumber(checkin.lastAttemptAt) && checkin.lastAttemptAt > 0
-        ? checkin.lastAttemptAt
+      // 老宿主没有 lastAttemptAt 字段才回落到全局 lastRunAt；新宿主显式下发 0
+      // 的含义是「这一家从未尝试过」—— 再回落会让刚给 Qoder 签完到后，
+      // WorkBuddy 也显示「上次尝试 刚刚」，像它也被跑过一轮。
+      var checkinAttemptAt = isFiniteNumber(checkin.lastAttemptAt)
+        ? (checkin.lastAttemptAt > 0 ? checkin.lastAttemptAt : undefined)
         : checkin.lastRunAt
       var checkinResult = checkin.result !== null && typeof checkin.result === 'object' ? checkin.result : undefined
+      // 昨天的签到结果不能当成今天的状态：凌晨调度器还没跑、或 provider 被关掉
+      // 时，卡片会一直写「今天已签到」，而今天的奖励其实还没领。
+      var checkinResultAt = checkinResult !== undefined && isFiniteNumber(checkinResult.at) ? checkinResult.at : undefined
+      var checkinResultToday = checkinResult !== undefined
+        && (checkinResultAt === undefined || localDayKey(checkinResultAt) === localDayKey(Date.now()))
       var checkinLabel
       var checkinTone = 'hintTiny'
       var checkinFailureRaw = ''
-      if (checkin.enabled === false) {
-        checkinLabel = bind(t, 'checkinOff')
-      } else if (checkinResult === undefined) {
-        checkinLabel = checkin.completedToday === true ? bind(t, 'checkinAutoDone') : bind(t, 'checkinNever')
-      } else {
+      if (checkinResultToday) {
         var claimedCount = isFiniteNumber(checkinResult.claimed) ? checkinResult.claimed : 0
         var claimedCredit = isFiniteNumber(checkinResult.credit) ? checkinResult.credit : 0
         var kinds = safeArray(checkinResult.outcomes).map(function (item) { return item.kind })
@@ -5179,8 +5294,15 @@ window.__ModuleLoader__.load({
         } else {
           checkinLabel = checkin.completedToday === true ? bind(t, 'checkinAutoDone') : bind(t, 'checkinNever')
         }
+      } else if (checkin.enabled === false) {
+        checkinLabel = bind(t, 'checkinOff')
+      } else {
+        // 今天还没跑过（上一次结果是昨天的）：说「今日未签」，不要沿用昨天的
+        // 「已签到」；上次尝试时间仍单独显示在右侧。
+        checkinLabel = checkin.completedToday === true ? bind(t, 'checkinAutoDone') : bind(t, 'checkinNever')
       }
-      var checkinFailed = checkinTone === 'hintWarn' && checkin.enabled !== false
+      // 失败提示与「自动签到已关闭」无关：手动「立即签到」失败时也要显性说出来。
+      var checkinFailed = checkinTone === 'hintWarn'
       // 凭证状态明确不是 signed-in（未登录 / 已禁用）时先禁掉按钮；credential
       // 缺省（老宿主）按可用处理，避免误伤现有用户。
       //
@@ -5188,8 +5310,12 @@ window.__ModuleLoader__.load({
       // 服务端的签到会逐账号探测、跳过未配置的那个，照样为它签到。只看当前
       // 账号会把整家的「立即签到」禁掉（实测：当前账号未登录，第二个账号
       // 显示「可签」却没有入口）。有其它可签到账号就放行。
+      //
+      // provider 本身被关掉时不能走这条豁免：服务端 `runCheckinInner()` 对
+      // 关闭的 provider 直接 continue，按钮可点却什么都不做。
+      var providerDisabled = credential.status === 'disabled' || active.enabled === false
       var checkinBlocked = credential.status !== undefined && credential.status !== null && credential.status !== 'signed-in'
-      if (checkinBlocked && accountRows.length > 0) {
+      if (checkinBlocked && !providerDisabled && accountRows.length > 0) {
         var activeAccountRow = accountRows.filter(function (row) {
           return row !== null && typeof row === 'object' && row.active === true
         })[0]
@@ -5200,14 +5326,14 @@ window.__ModuleLoader__.load({
         })
       }
       // 签到徽标的色调：成功/已签为绿，失败为橙，其余（未开始/无活动/未配置）保持中性。
+      // 只看「今天」的结果：昨天的成功不能把今天画成绿色。
       var checkinPositive = false
-      if (checkin.enabled !== false) {
-        if (checkin.completedToday === true) checkinPositive = true
-        if (checkinResult !== undefined) {
-          var checkinKinds = safeArray(checkinResult.outcomes).map(function (item) { return item.kind })
-          if (checkinKinds.indexOf('already') !== -1) checkinPositive = true
-          if (isFiniteNumber(checkinResult.claimed) && checkinResult.claimed > 0) checkinPositive = true
-        }
+      if (checkinResultToday) {
+        var checkinKinds = safeArray(checkinResult.outcomes).map(function (item) { return item.kind })
+        if (checkinKinds.indexOf('already') !== -1) checkinPositive = true
+        if (isFiniteNumber(checkinResult.claimed) && checkinResult.claimed > 0) checkinPositive = true
+      } else if (checkin.enabled !== false && checkin.completedToday === true) {
+        checkinPositive = true
       }
       var overviewCheckinTone = checkinTone === 'hintWarn'
         ? 'warn'
@@ -5238,7 +5364,7 @@ window.__ModuleLoader__.load({
               type: 'button',
               className: 'rpc-btn rpc-btn-sm',
               disabled: isBusy('checkin:' + active.provider) || checkinBlocked,
-              title: checkinBlocked ? bind(t, 'checkinNeedLogin') : undefined,
+              title: checkinBlocked ? bind(t, providerDisabled ? 'disabled' : 'checkinNeedLogin') : undefined,
               onClick: function () {
                 if (checkinBlocked) return
                 runCheckin(active.provider)
@@ -5396,8 +5522,12 @@ window.__ModuleLoader__.load({
         var testOk = testModelResult.ok === true
         var testLimit = testLimitCodes[testModelResult.code] === true
         var testAuth = testModelResult.code === 'AUTH'
-        var testAgo = isFiniteNumber(testModelResult.at) && testModelResult.at > 0
-          ? bind(t, 'testModelResultAt', { time: formatAgo(testModelResult.at, t) })
+        var testAt = isFiniteNumber(testModelResult.at) && testModelResult.at > 0 ? testModelResult.at : undefined
+        // 与账号 × 模型表同一道 30 分钟门禁：过期结论只能当「历史」参考，
+        // 不能再以绿色「可用」出现在测试面板里（面板默认还会选它来显示）。
+        var testStale = testAt !== undefined && Date.now() - testAt >= TEST_RESULT_TTL_MS
+        var testAgo = testAt !== undefined
+          ? bind(t, 'testModelResultAt', { time: formatAgo(testAt, t) })
           : ''
         var testDetail
         if (testOk) {
@@ -5410,13 +5540,14 @@ window.__ModuleLoader__.load({
           testDetail = shortErrorMessage(testModelResult.error, t) + (testAgo === '' ? '' : ' · ' + testAgo)
         }
         if (testModelResult.deep === true) testDetail = bind(t, 'testModelDeepBadge') + ' · ' + testDetail
+        if (testStale) testDetail = bind(t, 'testStaleHint', { ago: formatAgo(testAt, t) }) + ' · ' + testDetail
         testModelResultNode = h('div', {
           key: 'result',
           className: 'rpc-testresult',
           title: typeof testModelResult.error === 'string' ? testModelResult.error : '',
         },
         h('span', {
-          className: testOk ? 'rpc-chip rpc-chip-ok' : 'rpc-chip rpc-chip-warn',
+          className: testStale ? 'rpc-chip' : testOk ? 'rpc-chip rpc-chip-ok' : 'rpc-chip rpc-chip-warn',
         }, testOk ? bind(t, 'modelTestOk') : testLimit ? bind(t, 'limitBadge') : testAuth ? bind(t, 'authBadge') : bind(t, 'modelTestFailed')),
         h('span', { style: { minWidth: 0 } }, testDetail),
         h('span', { style: S.grow }),
@@ -8027,10 +8158,16 @@ window.__ModuleLoader__.load({
             var warn = creditsWarning(snapshot, row.entry.provider, sidebarAlertRatio, sidebarAlertsEnabled)
             var alert = alertOfCredits(snapshot, sidebarAlertRatio, row.entry.provider, sidebarAlertsEnabled)
             var qoderFree = isQoderFreePlan(row.entry.provider, snapshot)
-            var exhausted = snapshot.state === 'ok' && (snapshot.exceeded === true || (isFiniteNumber(snapshot.remain) && snapshot.remain <= 0))
+            // stale / 读失败的旧数字不参与「用尽」判定（与服务端一致）。
+            var exhausted = snapshot.state === 'ok' && !creditsStale(snapshot)
+              && (snapshot.exceeded === true || (isFiniteNumber(snapshot.remain) && snapshot.remain <= 0))
             var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
             var percent = creditsPercentOf(snapshot)
-            var parts = creditsValueParts(snapshot, t)
+            // Free 套餐的主值写「免费」而不是 0：0 会被读成「余额为零」，
+            // 而卡片上的同一份快照写的是「免费」，两处自相矛盾。
+            var parts = qoderFree
+              ? { big: bind(t, 'creditsFree'), small: '', unit: '' }
+              : creditsValueParts(snapshot, t)
             var ratio
             if (snapshot.unlimited !== true && Number.isFinite(snapshot.total) && snapshot.total > 0 && Number.isFinite(snapshot.remain)) {
               ratio = Math.max(0, Math.min(1, snapshot.remain / snapshot.total))

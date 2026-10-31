@@ -300,6 +300,10 @@ let fetchDelayFor = null
 // 按请求体在「请求发出时」拍一份状态快照再延迟返回：模拟服务端先序列化、
 // 响应晚到（客户端写入竞态只在响应内容不同的时候才看得出来）。
 let fetchSnapshotFor = null
+// 只延迟「下一次」/status：登录轮询与设置写入的竞态需要一个在飞的旧状态响应。
+let delayNextStatusMs = 0
+// /status 请求的到达计数（在延迟之前递增）：用来确认轮询请求已经发出。
+let statusRequestStarted = 0
 async function fakeFetch(url, init) {
   const target = String(url)
   const bodyText = String(init?.body ?? '')
@@ -308,6 +312,14 @@ async function fakeFetch(url, init) {
     : null
   if (fetchDelayMs > 0 && target.includes('/action')) {
     await new Promise((resolve) => setTimeout(resolve, fetchDelayMs))
+  }
+  if (target.includes('/status')) {
+    statusRequestStarted += 1
+    if (delayNextStatusMs > 0) {
+      const ms = delayNextStatusMs
+      delayNextStatusMs = 0
+      await new Promise((resolve) => setTimeout(resolve, ms))
+    }
   }
   if (typeof fetchDelayFor === 'function' && target.includes('/settings')) {
     const delay = Number(fetchDelayFor(String(init?.body ?? '')))
@@ -3424,7 +3436,9 @@ function extractFn(header) {
             provider: base.provider,
             claimed: 0,
             credit: 0,
-            at: 1792234000000,
+            // 必须是「今天」的结果：前端只把当天结果当成今天的状态，旧日期
+            // 会被正确地隐藏（本用例验的是 '*' 兜底映射，不是跨天语义）。
+            at: Date.now(),
             outcomes: [{ accountId: '*', label: '全部账号', kind: 'failed', message: 'settings.json 正被另一个进程写入' }],
           },
         },
@@ -4728,9 +4742,429 @@ try {
   console.log('✗ 签到上次尝试: ' + String(error && error.message ? error.message : error))
 }
 
-if (r18Failures.length > 0) {
-  console.error(`R18 前端回归 ${String(r18Failures.length)} 条失败：`)
-  for (const line of r18Failures) console.error('- ' + line)
+// ---------- 第十九轮审计（0.7.8）的前端回归 ----------
+const r19Failures = []
+{
+  const providersSnapshot = STATUS.providers
+  const settingsSnapshot = STATUS.settings
+  const enSnapshot = realLocale.en
+
+  const mountCard = async (t) => {
+    cardTree = await mount(card, { t })
+    return cardTree
+  }
+  const openAccounts = async (tree, t) => {
+    const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    const tab = tabs.find((node) => textOf(node).startsWith(t('navAccounts')))
+    if (tab === undefined) throw new Error('找不到账号页签')
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+  const openProviderById = async (tree, provider, t) => {
+    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+  const accountRowsOf = (tree) => findAll(tree, (node) => node.props?.role === 'row' && textOf(node).includes('本机登录'))
+  const checkinCellsOf = (tree) => findAll(tree, (node) => typeof node.props?.className === 'string'
+    && node.props.className.includes('rpc-acc-checkin'))
+  const patInputOf = (tree, t) => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === t('pat'))
+  const authFileInputOf = (tree, t) => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === t('authFile'))
+  const saveButtonsOf = (tree, t) => findAll(tree, (node) => node.type === 'button' && textOf(node) === t('save'))
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  try {
+    // 1) stale 额度只代表「上次结果」：不能亮预警、不能把账号写成「额度用尽」；
+    //    真正的新鲜 `exceeded` 必须写成用尽（与服务端同一判据）。
+    try {
+      const base = providersSnapshot[0]
+      const staleCredits = { state: 'ok', remain: 0, total: 100, unit: 'credits', stale: true, error: 'HTTP 503' }
+      STATUS.providers = [
+        {
+          ...base,
+          credits: staleCredits,
+          accounts: base.accounts.map((account, index) => (index === 0 ? { ...account, credits: staleCredits } : account)),
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      let tree = await mountCard(realT)
+      if (textOf(tree).includes(realT('alertBannerExhausted'))) {
+        throw new Error('stale 额度仍触发了「已用尽」预警横幅')
+      }
+      tree = await openAccounts(tree, realT)
+      for (const row of accountRowsOf(tree)) {
+        if (textOf(row).includes(realT('accountCreditsExhausted'))) {
+          throw new Error('stale 额度仍把账号写成「额度用尽」')
+        }
+      }
+
+      STATUS.providers = [
+        {
+          ...base,
+          credits: { state: 'ok', remain: 5, total: 100, unit: 'credits' },
+          accounts: base.accounts.map((account, index) => (index === 0
+            ? { ...account, credits: { state: 'ok', remain: 5, total: 100, unit: 'credits', exceeded: true } }
+            : account)),
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      tree = await mountCard(realT)
+      tree = await openAccounts(tree, realT)
+      const rows = accountRowsOf(tree)
+      if (rows.length === 0 || !textOf(rows[0]).includes(realT('accountCreditsExhausted'))) {
+        throw new Error('新鲜快照带 exceeded 时账号行没有显示「额度用尽」')
+      }
+      console.log('✓ stale 额度不再预警/换代；exceeded 与宿主同一判据')
+    } catch (error) {
+      r19Failures.push('stale 额度: ' + String(error && error.message ? error.message : error))
+      console.log('✗ stale 额度: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+    }
+
+    // 2) 签到结果只属于「今天」：昨天的成功不能冒充今天的已完成；
+    //    自动签到关闭时，手动「立即签到」今天的结果仍然要显示。
+    try {
+      const base = providersSnapshot[0]
+      const yesterday = Date.now() - 86_400_000
+      STATUS.providers = [
+        {
+          ...base,
+          checkin: {
+            enabled: true,
+            completedOn: '',
+            completedToday: false,
+            lastRunAt: yesterday,
+            lastAttemptAt: 0,
+            result: { provider: 'workbuddy', claimed: 1, credit: 100, at: yesterday, outcomes: [{ accountId: 'default', kind: 'claimed' }] },
+          },
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      let tree = await mountCard(realT)
+      if (!textOf(tree).includes(realT('checkinNever'))) {
+        throw new Error('昨天签到的结果仍被当成今天的状态')
+      }
+      if (textOf(tree).includes(realT('checkinClaimed'))) {
+        throw new Error('昨天领到的积分仍显示成「本次签到成功」')
+      }
+      for (const cell of checkinCellsOf(tree)) {
+        if (textOf(cell).includes(realT('accountCheckinDone'))) throw new Error('账号行仍挂着昨天的「已签到」')
+      }
+
+      const now = Date.now()
+      STATUS.providers = [
+        {
+          ...base,
+          checkin: {
+            enabled: false,
+            completedOn: '',
+            completedToday: false,
+            lastRunAt: now,
+            lastAttemptAt: now,
+            result: { provider: 'workbuddy', claimed: 1, credit: 100, at: now, outcomes: [{ accountId: 'default', kind: 'claimed' }] },
+          },
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      tree = await mountCard(realT)
+      if (!textOf(tree).includes(realT('checkinClaimed', { count: 1, credit: 100 }))) {
+        throw new Error('自动签到关闭时，手动签到的结果被吞掉了')
+      }
+      if (!checkinCellsOf(tree).some((cell) => textOf(cell).includes(realT('accountCheckinDone')))) {
+        throw new Error('自动签到关闭时，账号行没有显示本次签到结果')
+      }
+      console.log('✓ 签到结果按「今天」判断；手动签到结果不再被开关吞掉')
+    } catch (error) {
+      r19Failures.push('签到日期: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 签到日期: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+    }
+
+    // 3) provider 已关闭时，「立即签到」不能被「另一个已配置账号」豁免成可点。
+    try {
+      const base = providersSnapshot[0]
+      STATUS.providers = [
+        {
+          ...base,
+          enabled: false,
+          credential: { status: 'disabled', reason: 'disabled' },
+          checkin: { enabled: true, completedOn: '', completedToday: false, lastRunAt: 0, lastAttemptAt: 0 },
+          accounts: [
+            { id: 'default', label: '本机登录', active: true, kind: 'desktop', configured: true, source: 'desktop', credits: { state: 'ok', remain: 10, total: 100, unit: 'credits' } },
+            { id: 'acc-2', label: '备用账号', active: false, kind: 'desktop', configured: true, source: 'browser-login', credits: { state: 'ok', remain: 10, total: 100, unit: 'credits' } },
+          ],
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      let tree = await mountCard(realT)
+      tree = await openAccounts(tree, realT)
+      const button = findButton(tree, realT('checkinNow'))
+      if (button === undefined) throw new Error('找不到「立即签到」按钮')
+      if (button.props.disabled !== true) throw new Error('provider 已关闭，签到按钮仍可点')
+      if (button.props.title !== realT('disabled')) throw new Error('关闭的 provider 没有说清原因')
+      console.log('✓ provider 关闭时「立即签到」保持禁用')
+    } catch (error) {
+      r19Failures.push('关闭 provider 签到: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 关闭 provider 签到: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+    }
+
+    // 4) 六段健康条与 provider 卡共用判据：30 分钟内「刚测可用」必须是绿色。
+    try {
+      const base = providersSnapshot[0]
+      const now = Date.now()
+      STATUS.providers = [
+        {
+          ...base,
+          health: { state: 'down', consecutiveFailures: 3, lastErrorAt: now, lastSuccessAt: 0 },
+          accounts: base.accounts.map((account, index) => (index === 0
+            ? { ...account, modelTests: { auto: { ok: true, at: now - 60_000, latencyMs: 90, model: 'auto' } } }
+            : account)),
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      const tree = await mountCard(realT)
+      const segment = find(tree, (node) => node.props?.className === 'rpc-fleet-seg' && node.key === 'workbuddy')
+      if (segment === undefined) throw new Error('找不到 WorkBuddy 的健康段')
+      if (segment.props['data-tone'] !== 'ok') {
+        throw new Error(`刚测可用的 provider 在健康条上仍是 ${String(segment.props['data-tone'])}`)
+      }
+      if (!textOf(tree).includes(realT('fleetHealthy', { count: 1 }))) {
+        throw new Error('页头「几家正常」没有把刚测可用的 provider 算进去')
+      }
+      console.log('✓ 健康条把「刚测可用」算作正常')
+    } catch (error) {
+      r19Failures.push('健康条 testedOk: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 健康条 testedOk: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+    }
+
+    // 5) 侧栏展开面板：Free 套餐的主值写「免费」，不能写 0。
+    try {
+      let tree = await mount(pill, { t: realT, wide: true })
+      tree = await render(pill, { t: realT, wide: true })
+      const toggle = find(tree, (node) => node.type === 'button' && node.props?.['aria-expanded'] === false)
+      if (toggle === undefined) throw new Error('找不到侧栏胶囊')
+      toggle.props.onClick({ preventDefault() {} })
+      tree = await render(pill, { t: realT, wide: true })
+      const panel = find(tree, (node) => node.props?.id !== undefined && String(node.props.id).includes('credits-panel'))
+      if (panel === undefined) throw new Error('面板没有展开')
+      // 侧栏内部用 ctx.locale.bind()（测试里是 key-only），所以这里比较键名。
+      const bigValues = findAll(panel, (node) => node.props?.style?.fontSize === 19).map(textOf)
+      if (!bigValues.includes('creditsFree')) {
+        throw new Error(`Free 套餐的主值不是「免费」：${JSON.stringify(bigValues)}`)
+      }
+      if (bigValues.some((value) => value.trim() === '0')) {
+        throw new Error(`Free 套餐仍显示 0：${JSON.stringify(bigValues)}`)
+      }
+      console.log('✓ 侧栏展开面板对 Free 套餐显示「免费」')
+    } catch (error) {
+      r19Failures.push('侧栏 Free: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 侧栏 Free: ' + String(error && error.message ? error.message : error))
+    } finally {
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 6) 保存 PAT 期间继续输入：成功回调不能把新输入清掉。
+    try {
+      const delayBefore = fetchDelayFor
+      let tree = await mountCard(realT)
+      tree = await openProviderById(tree, 'qoder-global', realT)
+      let input = patInputOf(tree, realT)
+      if (input === undefined) throw new Error('找不到 PAT 输入框')
+      input.props.onChange({ target: { value: 'pt-first' } })
+      tree = await render(card, { t: realT })
+      const saves = saveButtonsOf(tree, realT)
+      if (saves.length === 0) throw new Error('找不到保存按钮')
+      fetchDelayFor = (body) => (body.includes('pt-first') ? 160 : 0)
+      saves[0].props.onClick()
+      tree = await render(card, { t: realT })
+      patInputOf(tree, realT).props.onChange({ target: { value: 'pt-second' } })
+      tree = await render(card, { t: realT })
+      await sleep(230)
+      tree = await render(card, { t: realT })
+      const value = patInputOf(tree, realT).props.value
+      if (value !== 'pt-second') throw new Error(`保存成功后把期间输入的新 PAT 清掉了：${JSON.stringify(value)}`)
+      fetchDelayFor = delayBefore
+      console.log('✓ 保存 PAT 不会清掉期间的新输入')
+    } catch (error) {
+      fetchDelayFor = null
+      r19Failures.push('PAT 输入保护: ' + String(error && error.message ? error.message : error))
+      console.log('✗ PAT 输入保护: ' + String(error && error.message ? error.message : error))
+    } finally {
+      fetchDelayFor = null
+      STATUS.providers = providersSnapshot
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 7) 跨 provider 的保存回调不能清掉另一家正在输入的 PAT。
+    try {
+      const delayBefore = fetchDelayFor
+      const tempQoder = {
+        ...providersSnapshot[2],
+        provider: 'qoder',
+        displayName: 'Qoder',
+        accounts: [{ ...providersSnapshot[2].accounts[0], label: 'Qoder 默认令牌' }],
+        checkin: { enabled: true, completedOn: '', completedToday: false, lastRunAt: 0, lastAttemptAt: 0 },
+      }
+      STATUS.providers = [...providersSnapshot, tempQoder]
+      STATUS.settings = {
+        ...STATUS.settings,
+        qoder: { ...STATUS.settings.qoder, qoder: { configured: true }, 'qoder-global': { configured: true } },
+      }
+      let tree = await mountCard(realT)
+      tree = await openProviderById(tree, 'qoder-global', realT)
+      patInputOf(tree, realT).props.onChange({ target: { value: 'pt-A' } })
+      tree = await render(card, { t: realT })
+      fetchDelayFor = (body) => (body.includes('pt-A') ? 180 : 0)
+      const saves = saveButtonsOf(tree, realT)
+      if (saves.length === 0) throw new Error('找不到保存按钮')
+      saves[0].props.onClick()
+
+      tree = await openProviderById(tree, 'qoder', realT)
+      tree = await render(card, { t: realT })
+      const inputB = patInputOf(tree, realT)
+      if (inputB === undefined) throw new Error('找不到 Qoder 的 PAT 输入框')
+      inputB.props.onChange({ target: { value: 'pt-B' } })
+      tree = await render(card, { t: realT })
+
+      await sleep(260)
+      // 不跑 effect：真实 React 的「按 provider 恢复草稿」effect 只在 activeTab
+      // 变化时执行，而本测试的迷你 hooks 每轮都会跑它 —— 那会把旧代码刚刚清
+      // 空的输入立刻从草稿里恢复，反而掩盖缺陷。
+      tree = await render(card, { t: realT }, true)
+      const value = patInputOf(tree, realT).props.value
+      if (value !== 'pt-B') throw new Error(`另一家的保存回调清掉了这里的 PAT：${JSON.stringify(value)}`)
+      fetchDelayFor = delayBefore
+      console.log('✓ 跨 provider 的保存回调不会清掉另一家的输入')
+    } catch (error) {
+      fetchDelayFor = null
+      r19Failures.push('跨 provider 输入: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 跨 provider 输入: ' + String(error && error.message ? error.message : error))
+    } finally {
+      fetchDelayFor = null
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 8) 可用性测试面板也要遵守 30 分钟证据门禁：一周前的绿色「可用」只能
+    //    降级成中性色 + 「历史结论」。
+    try {
+      const base = providersSnapshot[0]
+      STATUS.providers = [
+        {
+          ...base,
+          accounts: base.accounts.map((account, index) => (index === 0
+            ? { ...account, modelTests: { auto: { ok: true, at: Date.now() - 7 * 86_400_000, latencyMs: 88, model: 'auto' } } }
+            : account)),
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      const tree = await mountCard((key) => key)
+      const okChips = findAll(tree, (node) => textOf(node) === 'modelTestOk')
+      if (okChips.length === 0) throw new Error('可用性测试面板没有渲染结果')
+      if (okChips[0].props.className.includes('rpc-chip-ok')) {
+        throw new Error('一周前的测试结果仍以绿色「可用」展示')
+      }
+      if (!textOf(tree).includes('testStaleHint')) throw new Error('过期测试没有「历史结论」说明')
+      console.log('✓ 可用性测试的过期结论降级为历史参考')
+    } catch (error) {
+      r19Failures.push('可用性测试过期: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 可用性测试过期: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 9) 登录轮询走 load()：一个在飞的旧 /status 不能把刚保存的开关盖回去。
+    try {
+      const base = providersSnapshot[0]
+      const snapshotBefore = fetchSnapshotFor
+      const delayMsBefore = fetchDelayMs
+      STATUS.providers = [
+        { ...base, autoSwitch: true, login: undefined },
+        ...providersSnapshot.slice(1),
+      ]
+      let tree = await mountCard(realT)
+      tree = await openAccounts(tree, realT)
+      const add = findButton(tree, realT('loginAdd'))
+      if (add === undefined) throw new Error('找不到浏览器登录按钮')
+      fetchDelayMs = 30
+      add.props.onClick()
+      // 动作响应读到的是「任务已进入等待」的状态（fakeFetch 在延迟后读 STATUS）。
+      STATUS.providers[0] = { ...STATUS.providers[0], login: { phase: 'waiting', message: '等待登录', authUrl: 'https://x/login' } }
+      await sleep(120)
+      // 跳过 effect：迷你 hooks 会在每轮渲染都重跑挂载 effect（真实 React 只在
+      // 挂载时跑一次），那会额外触发一轮 load()，把要验证的旧响应盖过去。
+      tree = await render(card, { t: realT }, true)
+
+      const startedBefore = statusRequestStarted
+      delayNextStatusMs = 900
+      fetchSnapshotFor = (target) => target.includes('/status')
+      const deadline = Date.now() + 4000
+      while (statusRequestStarted <= startedBefore && Date.now() < deadline) await sleep(20)
+      if (statusRequestStarted <= startedBefore) throw new Error('登录轮询没有发出 /status 请求')
+
+      // 轮询请求已经带着「旧文档」在飞：这时保存一个开关。
+      STATUS.providers[0] = { ...STATUS.providers[0], autoSwitch: false }
+      const autoBox = (currentTree) => {
+        const label = find(currentTree, (node) => node.type === 'label' && textOf(node).includes(realT('autoSwitch')))
+        return label === undefined ? undefined : find(label, (node) => node.type === 'input')
+      }
+      const autoInput = autoBox(tree)
+      if (autoInput === undefined) throw new Error('找不到自动换号开关（登录页）')
+      autoInput.props.onChange()
+      tree = await render(card, { t: realT }, true)
+      await sleep(1000)
+      tree = await render(card, { t: realT }, true)
+      const after = autoBox(tree)
+      if (after === undefined || after.props.checked !== false) {
+        throw new Error('在飞的登录轮询把刚保存的开关盖回了旧值')
+      }
+
+      const cancel = findButton(tree, realT('loginCancel'))
+      if (cancel !== undefined) cancel.props.onClick()
+      fetchSnapshotFor = snapshotBefore
+      fetchDelayMs = delayMsBefore
+      delayNextStatusMs = 0
+      console.log('✓ 登录轮询不会用旧状态覆盖刚保存的开关')
+    } catch (error) {
+      r19Failures.push('登录轮询 epoch: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 登录轮询 epoch: ' + String(error && error.message ? error.message : error))
+    } finally {
+      fetchSnapshotFor = null
+      fetchDelayMs = 0
+      delayNextStatusMs = 0
+      STATUS.providers = providersSnapshot
+      await sleep(60)
+      cardTree = await mount(card, { t: (key) => key })
+    }
+  } finally {
+    STATUS.providers = providersSnapshot
+    STATUS.settings = settingsSnapshot
+    realLocale.en = enSnapshot
+    fetchDelayFor = null
+    fetchSnapshotFor = null
+    fetchDelayMs = 0
+    delayNextStatusMs = 0
+  }
+}
+
+if (r18Failures.length > 0 || r19Failures.length > 0) {
+  if (r18Failures.length > 0) {
+    console.error(`R18 前端回归 ${String(r18Failures.length)} 条失败：`)
+    for (const line of r18Failures) console.error('- ' + line)
+  }
+  if (r19Failures.length > 0) {
+    console.error(`R19 前端回归 ${String(r19Failures.length)} 条失败：`)
+    for (const line of r19Failures) console.error('- ' + line)
+  }
   process.exitCode = 1
 } else {
   console.log('client-credits: OK')
