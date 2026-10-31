@@ -741,6 +741,7 @@ window.__ModuleLoader__.load({
       usageReset: '重置统计',
       usageResetting: '重置中…',
       usageResetDone: '已重置',
+      statsResetConfirm: '重置用量统计？这会清空所有服务商的今日与累计历史，且不可恢复。',
       usageSince: '统计起点 {time}',
       usageModel: '模型',
       usageDuration: '耗时',
@@ -1206,6 +1207,7 @@ window.__ModuleLoader__.load({
       usageReset: 'Reset stats',
       usageResetting: 'Resetting…',
       usageResetDone: 'Reset',
+      statsResetConfirm: 'Reset usage stats? This clears today and all-time history for every provider and cannot be undone.',
       usageSince: 'Counting since {time}',
       usageModel: 'Model',
       usageDuration: 'Took',
@@ -3473,6 +3475,22 @@ window.__ModuleLoader__.load({
         return merged
       }
 
+      /**
+       * 读一个模型 id 的本地意图（`{on, seq}` 或老格式的布尔值）。
+       *
+       * 渲染复选框时**必须**经这里取布尔值：pending 条目在 0.7.5 变成了对象，
+       * 直接 `!entry` / `entry === true` 会得到恒 false（对象恒真）—— 点「启用」
+       * 后复选框仍为空、点「全部开启」后整列都是空。
+       *
+       * @returns 布尔值；没有本地意图时返回 undefined。
+       */
+      var pendingModelOn = function (provider, field, id) {
+        var bucket = pendingModelToggles.current[provider + '::' + field]
+        var item = bucket !== undefined ? bucket[id] : undefined
+        if (item === undefined) return undefined
+        return item !== null && typeof item === 'object' ? item.on === true : item === true
+      }
+
       /** 记下一个本地改动（带写入序号），等对应那次响应回来时按 seq 交还。 */
       var markPending = function (provider, field, id, on, seq) {
         var key = provider + '::' + field
@@ -3969,6 +3987,9 @@ window.__ModuleLoader__.load({
         beginBusy('advanced')
         setAdvSaved(false)
         setAdvNotice('')
+        // 高级设置也是 /settings 写入：必须和模型 / 账号写入共用写入序号，
+        // 否则更早发出、更晚返回的模型响应会把刚保存的高级设置整份盖回旧值。
+        var seq = nextWriteSeq()
         postJson(SETTINGS_PATH, {
           advanced: {
             idleTimeoutMs: toMs(advIdle, current.idleTimeoutMs || 180000),
@@ -3993,7 +4014,12 @@ window.__ModuleLoader__.load({
           .then(function (document) {
             // 保存成功：草稿已经落到服务端，从此重新跟随宿主下发值。
             advDirty.current = false
-            applyStatus(document)
+            // 与 mutate() 同一套规则：只有比已应用的响应更新才接管整份状态。
+            // 高级设置自己的字段仍然按本次响应回填（另一家的模型写入不会改它们）。
+            if (seq > lastAppliedSeq.current) {
+              lastAppliedSeq.current = seq
+              applyStatus(document)
+            }
             endBusy('advanced')
             setError(undefined)
             // 只有真的保存成功才显示「已保存」。
@@ -4040,6 +4066,12 @@ window.__ModuleLoader__.load({
         // 只读文件：按钮已禁用，这里再兜一层，避免键盘/脚本绕过。
         if (statsReadOnlyInfo !== undefined) return
         if (status === undefined || busyNow('stats')) return
+        // 清空的是**所有 provider** 的今日与累计历史，且不可恢复；按钮又紧挨着
+        // 「刷新积分」，没有确认的误触代价太大。
+        var confirmed = typeof window === 'undefined' || typeof window.confirm !== 'function'
+          ? true
+          : window.confirm(bind(t, 'statsResetConfirm'))
+        if (!confirmed) return
         beginBusy('stats')
         postJson(ACTION_PATH, { action: 'stats-reset' }, status.key)
           .then(function (document) {
@@ -5105,6 +5137,12 @@ window.__ModuleLoader__.load({
 
       // 签到状态：优先显示「今日已签 / 可领 N 分 / 无活动 / 失败原因」。
       var checkin = active.checkin || {}
+      // 「上次尝试」必须用本 provider 的时间。`lastRunAt` 是整轮签到的全局
+      // 时间戳：刚给 Qoder 手动签到后，WorkBuddy 也会显示「刚刚」，像它也签了。
+      // 老宿主没有 lastAttemptAt，回落到 lastRunAt。
+      var checkinAttemptAt = isFiniteNumber(checkin.lastAttemptAt) && checkin.lastAttemptAt > 0
+        ? checkin.lastAttemptAt
+        : checkin.lastRunAt
       var checkinResult = checkin.result !== null && typeof checkin.result === 'object' ? checkin.result : undefined
       var checkinLabel
       var checkinTone = 'hintTiny'
@@ -5221,8 +5259,8 @@ window.__ModuleLoader__.load({
             h('span', { style: S[checkinTone], title: checkinFailureRaw !== '' ? checkinFailureRaw : '' }, checkinLabel),
             checkinFailed ? h('span', { style: S.hintTiny }, bind(t, 'checkinRetryHint')) : null,
             h('span', { style: S.grow }),
-            isFiniteNumber(checkin.lastRunAt) && checkin.lastRunAt > 0
-              ? h('span', { style: S.modelMeta }, bind(t, 'checkinLastAt', { time: formatTime(checkin.lastRunAt) }))
+            isFiniteNumber(checkinAttemptAt) && checkinAttemptAt > 0
+              ? h('span', { style: S.modelMeta }, bind(t, 'checkinLastAt', { time: formatTime(checkinAttemptAt) }))
               : null),
           h('p', { key: 'checkinhint', className: 'rpc-inline-note' }, rpcIcon('clock', 13), bind(t, 'checkinAutoHint')),
           accountTable,
@@ -5474,8 +5512,8 @@ window.__ModuleLoader__.load({
               overviewRow !== undefined ? h('span', { className: 'rpc-chip rpc-chip-accent' }, bind(t, 'currentAccount')) : null,
               h('span', { style: S.grow }),
               h('span', { className: rpcChipClass(overviewCheckinTone), title: checkinFailureRaw !== '' ? checkinFailureRaw : '' }, checkinLabel)),
-            isFiniteNumber(checkin.lastRunAt) && checkin.lastRunAt > 0
-              ? h('p', { className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'checkinLastAt', { time: formatTime(checkin.lastRunAt) }))
+            isFiniteNumber(checkinAttemptAt) && checkinAttemptAt > 0
+              ? h('p', { className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'checkinLastAt', { time: formatTime(checkinAttemptAt) }))
               : null,
             h('label', { className: 'rpc-check-label', style: { cursor: 'pointer' } },
               h('input', {
@@ -6684,6 +6722,8 @@ window.__ModuleLoader__.load({
                     : h('p', { key: 'nomatch', className: 'rpc-tiny', style: S.hint }, bind(t, 'searchEmpty'))))
               : h('ul', { key: 'list', className: 'rpc-list rpc-model-list', style: S.modelList },
                 shown.map(function (model, index) {
+                  // 勾选态要带上「还没落盘的本地改动」，否则连点时界面会闪回旧值。
+                  var pendingDisabled = pendingModelOn(active.provider, 'disabled', model.id)
                   return h('li', {
                     key: model.id,
                     className: 'rpc-list-row rpc-model-row',
@@ -6692,11 +6732,7 @@ window.__ModuleLoader__.load({
                   h('input', {
                     type: 'checkbox',
                     className: 'rpc-check',
-                    // 勾选态要带上「还没落盘的本地改动」，否则连点时界面会闪回旧值。
-                    checked: pendingModelToggles.current[active.provider + '::disabled'] !== undefined
-                      && pendingModelToggles.current[active.provider + '::disabled'][model.id] !== undefined
-                      ? !pendingModelToggles.current[active.provider + '::disabled'][model.id]
-                      : !model.disabled,
+                    checked: pendingDisabled === undefined ? !model.disabled : !pendingDisabled,
                     'aria-label': modelLabelOf(model),
                     onChange: function () { toggleModel(active, model) },
                   }),
@@ -6716,6 +6752,10 @@ window.__ModuleLoader__.load({
             h('p', { className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'unavailableHint')),
             h('ul', { className: 'rpc-list', style: Object.assign({}, S.modelList, { marginTop: 6 }) },
               unavailable.map(function (model, index) {
+                // 与可用模型同一套「本地意图」：POST 没回来之前用
+                // pendingModelToggles 的值，否则连点两次都从旧的 forced === false
+                // 出发，两次都发「强制显示」，第二次无法撤销第一次。
+                var pendingForced = pendingModelOn(active.provider, 'forced', model.id)
                 return h('li', {
                   key: model.id,
                   className: 'rpc-list-row',
@@ -6724,13 +6764,7 @@ window.__ModuleLoader__.load({
                 h('input', {
                   type: 'checkbox',
                   className: 'rpc-check',
-                  // 与可用模型同一套「本地意图」：POST 没回来之前用
-                  // pendingModelToggles 的值，否则连点两次都从旧的 forced === false
-                  // 出发，两次都发「强制显示」，第二次无法撤销第一次。
-                  checked: pendingModelToggles.current[active.provider + '::forced'] !== undefined
-                    && pendingModelToggles.current[active.provider + '::forced'][model.id] !== undefined
-                    ? pendingModelToggles.current[active.provider + '::forced'][model.id] === true
-                    : model.forced === true,
+                  checked: pendingForced === undefined ? model.forced === true : pendingForced,
                   'aria-label': modelLabelOf(model),
                   title: bind(t, 'forceShow'),
                   onChange: function () { toggleModel(active, model) },

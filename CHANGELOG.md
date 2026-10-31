@@ -1,5 +1,125 @@
 # 更新记录
 
+## 0.7.7 — 2026-10-31
+
+第十八轮前后端打磨。主题是「流终态」与「只读保护」：Trae 的真实终帧
+`event: done` 里带着 `finish_reason` 与 `usage`，旧实现一看到 done 就跳出，
+被 `max_tokens` 截断的回答记成 tool-calls / stop，`content_filter` 记成成功；
+运行期的 `stats.json` 被更高版本替换后，旧进程的下一次 flush 仍会把它覆盖回
+旧格式。后端 16 处、前端 4 处。状态接口仍是 v8，设置文件仍是 v2。
+测试 **420 后端 + 145 前端**。
+
+### Trae 的终态与错误帧
+
+- **done 帧里的 finish_reason / usage 被整帧丢掉**：真实上游把终态放在
+  `event: done` + `data: {"finish_reason": ...}` 里。旧实现先 `break` 再解析，
+  于是 `length` 被兜底成 tool-calls（宿主拿半截工具参数去执行）、
+  `content_filter` 被兜底成正常结束、终帧 usage 整个丢失。现在先解析终帧
+  （`length` → max-tokens、`content_filter` → error + CONTENT_FILTER），
+  再收流。[lib/trae/transport.js](lib/trae/transport.js)
+- **event: error 的 data 形状不标准时被静默吞掉**：`data:` 为空、纯文本、
+  JSON 字符串（`data:"boom"`）三种情况旧实现都 `continue`，上游已经报错，
+  用户却拿到半截回答 + `finish: stop`。现在只要事件名是 error 就按失败收场，
+  原文带进 message；且错误判定先于 done，`event: error` + `[DONE]` 也不会
+  被当成正常结束。[lib/trae/transport.js](lib/trae/transport.js)
+- **续期优先用登录文件里的旧 refreshToken**：账号里的 JWT 比登录文件新时
+  （续期轮换过），旧实现仍无条件用文件里的 RT。新 RT 在手却被旧 RT 判失效，
+  用户被迫重新登录。现在按「哪份令牌更新」选择 RT 与 accessToken。
+  [lib/trae/credential.js](lib/trae/credential.js)
+- **登录文件带 UTF-8 BOM 时判成损坏**：Windows 记事本 / 同步工具回写会带
+  BOM，`JSON.parse` 直接抛错，Trae 明明已登录却显示未登录。现在读取后去掉
+  前导 BOM。[lib/trae/credential.js](lib/trae/credential.js)
+
+### WorkBuddy 的登录文件与续期
+
+- **字符串形式的 expiresAt 被读成 0**：上游会给 ISO / 数字字符串。旧实现只认
+  number，读成 0 之后 `needsRefresh()` 把「不知道」当「永不过期」，凭证过期后
+  每条请求 401，而刷新令牌明明可用。现在数字字符串与 ISO 都能解析成毫秒。
+  [lib/workbuddy/credentials.js](lib/workbuddy/credentials.js)
+- **BOM 同样让登录文件读不出来**：与 Trae 相同，读取后去掉前导 BOM。
+  [lib/workbuddy/credentials.js](lib/workbuddy/credentials.js)
+- **续期成功却不推进过期时间**：刷新端点可能只回 `expiresAt` 而旧值已经在
+  过去；旧实现只解析 `expiresIn`，于是续期成功的凭证仍然「需要续期」——
+  每个请求都多打一次刷新、反复写设置与账本。现在按 `expiresAt` → `expiresIn`
+  → JWT exp → 旧值（仍在未来）→ 30 分钟兜底解析；刷新令牌的过期时间单独处理，
+  不会用 30 分钟兜底。[lib/workbuddy/credentials.js](lib/workbuddy/credentials.js)
+
+### 额度、冷却与统计
+
+- **未配置的 WorkBuddy / Trae 被报成「额度读取失败」**：没登录、没装 App、
+  路径填错都属于 `isUnconfiguredCredential()` 的已知状态。旧实现的额度读取
+  一律落成 `state:'error'`，卡片写「读取失败」、账本每 10 分钟一条 warn，
+  CLI `credits` 还会 exit 1。现在与目录 / 签到同一分类，落成 `state:'none'`。
+  [lib/runtime.js](lib/runtime.js)
+- **超时 / 取消被缓存成「未登录」60 秒**：凭证探测把任何异常都塞进 60 秒
+  失败缓存；Qoder 身份交换 20 秒超时后，卡片在整整一分钟内都不再重试。另外
+  `AbortSignal.timeout()` 的 DOMException 只有数字 `code`（23），直接透出会
+  让前端按字符串比较的 `reason === 'timeout'` 全部失效。现在只缓存凭证本身
+  的状态（没登录 / 损坏 / PAT 无效 / 路径错），瞬时失败不缓存、reason 归一
+  成稳定字符串。[lib/runtime.js](lib/runtime.js)
+- **stale 额度仍按「已用尽」换号 / 预警**：读取失败时保留的是上一次成功的
+  快照。旧实现 `isExhaustedCredits()` 只看 `state:'ok'`，快照里的 0 会让账号
+  被自动切走、卡片亮红；用户刚充值完也可能被切。现在 stale / error 的旧数据
+  不参与耗尽判定与预警色。[lib/quota.js](lib/quota.js)
+- **手动测试成功仍显示「冷却至」**：测试走 `probe: true`，`#record()` 提前
+  返回，里面「成功清冷却」的逻辑永远不执行。现在测试成功后立刻解除该账号
+  的失败冷却。[lib/runtime.js](lib/runtime.js)
+- **运行期更高版本的 stats.json 仍会被覆盖**：入口的只读检查只覆盖启动时。
+  磁盘在运行期被更高版本写过时，`#adoptExternalReset()` 会置位 `writeBlocked`，
+  但 flush 没再检查就继续写回旧格式。现在采纳外部状态后复检；`reset()` 跳过
+  外部合并且走同一套版本检查。新版本的统计不再被降级覆盖。
+  [lib/stats.js](lib/stats.js)
+
+### 宿主接口与刷新
+
+- **动作响应复用「动作前」的状态缓存**：`handleAction` 只在入口失效 750ms
+  缓存；刷新 / 签到 / 探测要跑几秒，期间卡片或侧栏的 GET `/status` 会把动作
+  前的文档写进缓存，动作结束后的响应直接复用 —— 用户点刷新，拿回来的却是
+  点击前的快照。现在所有写动作与 `/settings` 的响应在返回前再失效一次。
+  [lib/index.js](lib/index.js)
+- **改登录文件路径保存后不生效**：令牌续期会把隐式默认账号连同当时的
+  `authFile` 物化成显式行；之后卡片改 `trae.storageFile` /
+  `workbuddy.*.authFile` 只写旧字段，而 `accountsFor()` 一旦有显式行就忽略
+  旧字段。现在写入时把新路径同步进默认账号行（只改路径，不动 label /
+  enabled），Trae 与 WorkBuddy 都能在卡片上改完立即生效。
+  [lib/accounts.js](lib/accounts.js) [lib/index.js](lib/index.js)
+- **无效 provider 的 action 被当成「全部」**：`{action:'credits', provider:'拼错'}`
+  以前静默退化成刷新六家；`checkin` 更会推进全局 `lastRunAt`，把「最近签到」
+  点亮。现在两者与 `test-account` 一致回 400 `invalid-provider`；不传 provider
+  的旧语义（侧栏胶囊 = 刷全部）保持不变。[lib/index.js](lib/index.js)
+- **换号请求的平均耗时只算最后一次尝试**：`startedAt` 每个候选都会重置，
+  429 → 换号成功的请求实际等了约 120ms，用量卡记 1ms。现在 `durationMs` 用
+  整次请求的起点；`startedAt` 仍按候选记录，只用于删除墓碑判定。
+  [lib/runtime.js](lib/runtime.js)
+
+### 前端
+
+- **模型复选框不反映本次点击**：0.7.5 把 pending 意图改成 `{on, seq}`，但渲染
+  仍按布尔值读（对象恒真）—— 点「启用」后复选框仍为空、「全部开启」后整列
+  都是空、强制显示也永远显示未勾选。现在统一经 `pendingModelOn()` 取布尔值。
+  [client/client.js](client/client.js)
+- **更早的模型写入把高级设置回填成旧值**：高级设置保存绕过 `writeSeq` /
+  `lastAppliedSeq`，一个更早发出、更晚返回的模型写入会把刚保存的高级设置整份
+  盖回去。现在高级保存也取写入序号，只有更新的响应能接管界面。
+  [client/client.js](client/client.js)
+- **「重置统计」没有确认**：它会清空所有 provider 的今日与累计历史且不可恢复，
+  按钮又紧挨着「刷新积分」。现在先弹确认（中英文案都已补）。
+  [client/client.js](client/client.js)
+- **签到「上次尝试」显示全局时间**：状态里已有每 provider 的 `lastAttemptAt`，
+  前端一直读全局 `lastRunAt` —— 刚给 Qoder 签到，WorkBuddy 也显示「刚刚」。
+  现在优先使用 `lastAttemptAt`，老宿主缺字段时回落 `lastRunAt`。
+  [client/client.js](client/client.js)
+
+### 测试
+
+- 后端新增 16 条：Trae 流协议 5 条（done 终态 / usage、error 帧形状、RT
+  新旧、BOM）、数据与运行时 8 条（未配置额度、瞬时探测缓存、stats 只读、
+  stale 耗尽、测试清冷却、换号耗时、WorkBuddy BOM + 字符串过期、续期过期）、
+  宿主 3 条（动作后状态、登录路径同步、无效 provider）。每条都在 0.7.6 上
+  逐一验证会失败。
+- 前端新增 4 条：复选框回显、高级设置写入序号、重置确认、签到 lastAttemptAt。
+  四条都在 0.7.6 客户端上逐一验证会失败。
+
 ## 0.7.6 — 2026-10-31
 
 第十七轮前后端打磨。主题是「金额分位」与「刷新粒度」：0.7.2 只修了卡片上的

@@ -15,7 +15,7 @@
 
 import assert from 'node:assert/strict'
 import { createCipheriv, createHash } from 'node:crypto'
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -858,4 +858,137 @@ test('Trae：两个变体的端点不混用', () => {
   assert.equal(endpointsFor('trae-global').apiHost, 'https://api.trae.ai')
   assert.equal(endpointsFor('trae-global').chatHost, 'https://a0ai-api-sg.byteintlapi.com')
   assert.equal(endpointsFor('unknown').apiHost, 'https://api.trae.cn')
+})
+
+test('Trae：event:done 帧里的 finish_reason 不能被丢掉（截断/内容拦截必须说真话）', async () => {
+  // 真实上游把终态放在 done 帧：`event: done` + `data: {"finish_reason": ...}`。
+  // 旧实现一看到 done 就 break，帧里的 finish_reason 从未被读取：`length`
+  // 被兜底成 tool-calls（宿主拿半截工具参数去执行），content_filter 被兜底
+  // 成 stop（内容被拦截却记成功）。
+  const truncated = [
+    'event:output',
+    'data:{"response":"","tool_calls":[{"index":0,"id":"c1","function_call":{"name":"do_it","arguments":"{\\"a\\":"}}]}',
+    '',
+    'event:done',
+    'data:{"finish_reason":"length"}',
+    '',
+  ].join('\n')
+  const truncatedEvents = []
+  for await (const event of parseStream(bodyOf(truncated), undefined)) truncatedEvents.push(event)
+  assert.equal(truncatedEvents.at(-1).type, 'finish')
+  assert.equal(truncatedEvents.at(-1).kind, 'max-tokens', '被 max_tokens 截断时必须报 max-tokens')
+
+  const filtered = [
+    'event:output',
+    'data:{"response":"half"}',
+    '',
+    'event:done',
+    'data:{"finish_reason":"content_filter"}',
+    '',
+  ].join('\n')
+  const filteredEvents = []
+  for await (const event of parseStream(bodyOf(filtered), undefined)) filteredEvents.push(event)
+  const finish = filteredEvents.at(-1)
+  assert.equal(finish.kind, 'error')
+  assert.equal(finish.failure?.code, 'CONTENT_FILTER')
+})
+
+test('Trae：event:done 帧带 usage 时也要记用量', async () => {
+  const text = [
+    'event:output',
+    'data:{"response":"hi"}',
+    '',
+    'event:done',
+    'data:{"finish_reason":"stop","usage":{"prompt_tokens":30,"completion_tokens":5,"cache_read_input_tokens":10}}',
+    '',
+  ].join('\n')
+  const events = []
+  for await (const event of parseStream(bodyOf(text), undefined)) events.push(event)
+  const usage = events.find((event) => event.type === 'usage')
+  assert.ok(usage !== undefined, 'done 帧里的 usage 不能丢')
+  assert.equal(usage.usage.inputTokens, 20)
+  assert.equal(usage.usage.outputTokens, 5)
+  assert.equal(usage.usage.cacheReadTokens, 10)
+  assert.equal(events.at(-1).kind, 'stop')
+})
+
+test('Trae：event:error 的 data 为空 / 非 JSON / 字符串时仍然按失败收场', async () => {
+  const cases = [
+    ['event:error', 'data:', ''],
+    ['event:error', 'data:"boom"', ''],
+    ['event:error', 'data:upstream exploded', ''],
+  ]
+  for (const lines of cases) {
+    const text = ['event:output', 'data:{"response":"half"}', '', ...lines, ''].join('\n')
+    await assert.rejects(async () => {
+      for await (const _event of parseStream(bodyOf(text), undefined)) {
+        /* 只关心抛错 */
+      }
+    }, (error) => error.kind === 'server' && typeof error.message === 'string', `错误帧被静默吞掉：${JSON.stringify(text)}`)
+  }
+})
+
+test('Trae：续期优先使用账号里更新的 refreshToken，而不是登录文件里的旧值', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-trae-rt-'))
+  const originalFetch = globalThis.fetch
+  const seen = []
+  const now = Date.now()
+  const file = join(root, 'storage.json')
+  writeFileSync(file, JSON.stringify({
+    'iCubeAuthInfo://icube.cloudide': JSON.stringify({
+      token: 'disk-jwt',
+      refreshToken: 'rt-old',
+      expiredAt: new Date(now - 3_600_000).toISOString(),
+      userId: 'u1',
+      account: { username: 'tester' },
+    }),
+  }))
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url: String(url), body: JSON.parse(init.body) })
+    return {
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({ Result: { Token: 'new-jwt', RefreshToken: 'rt-newer', TokenExpireAt: Date.now() + 7 * 24 * 3600_000 } })
+      },
+    }
+  }
+  try {
+    const credential = await resolveTraeCredential({
+      variantId: 'trae',
+      stored: {
+        accessToken: 'cached-jwt',
+        refreshToken: 'rt-new',
+        expiresAtMs: now + 3_600_000,
+        uid: 'u1',
+      },
+      authFile: file,
+    })
+    assert.equal(seen.length, 1, '应当走一次 ExchangeToken')
+    assert.equal(seen[0].body.RefreshToken, 'rt-new', '账号里轮换后的 RT 比登录文件里的旧 RT 新')
+    assert.equal(credential.jwt, 'new-jwt')
+    assert.equal(credential.refreshToken, 'rt-newer')
+  } finally {
+    globalThis.fetch = originalFetch
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('Trae：登录文件带 UTF-8 BOM 时仍然可以解析', () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-trae-bom-'))
+  const file = join(root, 'storage.json')
+  writeFileSync(file, '\uFEFF' + JSON.stringify({
+    'iCubeAuthInfo://icube.cloudide': JSON.stringify({
+      token: 'bom-token',
+      refreshToken: 'rt',
+      expiredAt: new Date(Date.now() + 86_400_000).toISOString(),
+      userId: 'u1',
+      account: { username: 'bom' },
+    }),
+  }))
+  try {
+    assert.equal(readStoredAuth('trae', file).token, 'bom-token')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
 })

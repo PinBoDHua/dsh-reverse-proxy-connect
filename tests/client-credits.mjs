@@ -297,8 +297,15 @@ let fetchFailure = null
 let fetchDelayMs = 0
 // 按请求体给 /settings 单独延迟：用来制造「A 家的写入还没回来、B 家已经成功」。
 let fetchDelayFor = null
+// 按请求体在「请求发出时」拍一份状态快照再延迟返回：模拟服务端先序列化、
+// 响应晚到（客户端写入竞态只在响应内容不同的时候才看得出来）。
+let fetchSnapshotFor = null
 async function fakeFetch(url, init) {
   const target = String(url)
+  const bodyText = String(init?.body ?? '')
+  const snapshot = typeof fetchSnapshotFor === 'function' && fetchSnapshotFor(target, bodyText)
+    ? JSON.parse(JSON.stringify(STATUS))
+    : null
   if (fetchDelayMs > 0 && target.includes('/action')) {
     await new Promise((resolve) => setTimeout(resolve, fetchDelayMs))
   }
@@ -313,7 +320,7 @@ async function fakeFetch(url, init) {
   return {
     ok: true,
     status: 200,
-    json: async () => STATUS,
+    json: async () => snapshot ?? STATUS,
     text: async () => JSON.stringify({ ok: true, diagnostics: 'audit' }),
   }
 }
@@ -4542,4 +4549,189 @@ function extractFn(header) {
   }
 }
 
-console.log('client-credits: OK')
+// 本轮新增的回归先逐条跑完再统一结算：一条失败不能掩盖后面几条的证据。
+const r18Failures = []
+
+// 45) 模型复选框必须反映「本次点击」：pending 意图已经是 `{on, seq}`，渲染时
+//     不能再把它当布尔值（对象恒真 → 启用后仍显示未勾选、全部开启后全空）。
+try {
+  const snapshot = STATUS.providers[0]
+  const delayBefore = fetchDelayFor
+  try {
+    STATUS.providers[0] = {
+      ...snapshot,
+      models: [
+        { id: 't1', name: 'T1', contextWindow: 1000, maxTokens: 100, supportsImages: false, reasoningEfforts: [], disabled: true },
+        { id: 't2', name: 'T2', contextWindow: 1000, maxTokens: 100, supportsImages: false, reasoningEfforts: [], disabled: true },
+        { id: 'u1', name: 'U1', contextWindow: 1000, maxTokens: 100, supportsImages: false, reasoningEfforts: [], disabled: false, unavailable: true, forced: false },
+      ],
+      modelCount: 3,
+    }
+    fetchDelayFor = (body) => body.includes('"providers"') || body.includes('"forcedModels"') ? 120 : 0
+    cardTree = await mount(card, { t: (key) => key })
+    const boxOf = (label) => find(cardTree, (node) => node.type === 'input'
+      && node.props?.type === 'checkbox' && node.props?.['aria-label'] === label)
+    const t1 = boxOf('T1')
+    if (t1 === undefined) throw new Error('找不到 T1 复选框')
+    if (t1.props.checked !== false) throw new Error('T1 初始应为未勾选（disabled）')
+    t1.props.onChange()
+    cardTree = await render(card, { t: (key) => key })
+    if (boxOf('T1').props.checked !== true) throw new Error('点击启用后复选框仍显示未勾选（本地意图被当成对象）')
+
+    const showAll = find(cardTree, (node) => node.type === 'button' && textOf(node) === 'showAll')
+    if (showAll === undefined) throw new Error('找不到「全部开启」按钮')
+    showAll.props.onClick()
+    cardTree = await render(card, { t: (key) => key })
+    if (boxOf('T1').props.checked !== true || boxOf('T2').props.checked !== true) {
+      throw new Error('「全部开启」后复选框仍显示未勾选')
+    }
+
+    const forced = boxOf('U1')
+    if (forced === undefined) throw new Error('找不到不可用模型的复选框')
+    forced.props.onChange()
+    cardTree = await render(card, { t: (key) => key })
+    if (boxOf('U1').props.checked !== true) throw new Error('强制显示后复选框仍显示未勾选')
+    console.log('✓ 模型 / 强制显示复选框立即反映本次点击')
+    await new Promise((resolve) => setTimeout(resolve, 150))
+  } finally {
+    fetchDelayFor = delayBefore
+    STATUS.providers[0] = snapshot
+  }
+} catch (error) {
+  r18Failures.push('模型复选框: ' + String(error && error.message ? error.message : error))
+  console.log('✗ 模型复选框: ' + String(error && error.message ? error.message : error))
+}
+
+// 46) 高级设置保存也要走写入序号：更早发出、更晚返回的模型写入不能把
+//     刚保存的高级设置回填成旧值。
+try {
+  const providerSnapshot = STATUS.providers[0]
+  const advancedSnapshot = STATUS.settings.advanced
+  const delayBefore = fetchDelayFor
+  const snapshotBefore = fetchSnapshotFor
+  const failureBefore = fetchFailure
+  try {
+    STATUS.providers[0] = {
+      ...providerSnapshot,
+      models: [{ id: 't1', name: 'T1', contextWindow: 1000, maxTokens: 100, supportsImages: false, reasoningEfforts: [], disabled: false }],
+      modelCount: 1,
+    }
+    STATUS.settings.advanced = { ...advancedSnapshot, idleTimeoutMs: 180000 }
+    fetchSnapshotFor = (target, body) => body.includes('"providers"')
+    fetchDelayFor = (body) => body.includes('"providers"') ? 160 : body.includes('"advanced"') ? 20 : 0
+    cardTree = await mount(card, { t: (key) => key })
+    const t1 = find(cardTree, (node) => node.type === 'input'
+      && node.props?.type === 'checkbox' && node.props?.['aria-label'] === 'T1')
+    if (t1 === undefined) throw new Error('找不到 T1 复选框')
+    t1.props.onChange()
+    // 模拟服务端随后接受了高级设置：它的响应会带新值。
+    STATUS.settings.advanced = { ...STATUS.settings.advanced, idleTimeoutMs: 240000 }
+    const idle = find(cardTree, (node) => node.type === 'input' && node.props?.['aria-label'] === 'advancedIdle')
+    if (idle === undefined) throw new Error('找不到 idle 超时输入框')
+    idle.props.onChange({ target: { value: '240' } })
+    cardTree = await render(card, { t: (key) => key }, true)
+    const save = findButton(cardTree, 'advancedSave')
+    if (save === undefined) throw new Error('找不到高级设置保存按钮')
+    save.props.onClick()
+    // 测试 harness 的 effect 每轮都会重新 load()；真实浏览器的下一次轮询要
+    // 20 秒，旧响应会停留一整个轮询周期。这里让轮询失败，避免「实时状态」
+    // 立刻把竞态盖回去。
+    fetchFailure = 'status'
+
+    await new Promise((resolve) => setTimeout(resolve, 45))
+    cardTree = await render(card, { t: (key) => key })
+    const afterSave = String(find(cardTree, (node) => node.type === 'input' && node.props?.['aria-label'] === 'advancedIdle').props.value)
+    if (afterSave !== '240') throw new Error(`高级设置保存后显示 ${afterSave}，不是 240`)
+    await new Promise((resolve) => setTimeout(resolve, 180))
+    cardTree = await render(card, { t: (key) => key })
+    const finalValue = String(find(cardTree, (node) => node.type === 'input' && node.props?.['aria-label'] === 'advancedIdle').props.value)
+    if (finalValue !== '240') throw new Error(`更早发出的模型写入把高级设置回填成 ${finalValue}`)
+    console.log('✓ 高级设置保存不被更早的写入响应回填')
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  } finally {
+    fetchDelayFor = delayBefore
+    fetchSnapshotFor = snapshotBefore
+    fetchFailure = failureBefore
+    STATUS.providers[0] = providerSnapshot
+    STATUS.settings.advanced = advancedSnapshot
+    await new Promise((resolve) => setTimeout(resolve, 200))
+    cardTree = await mount(card, { t: (key) => key })
+  }
+} catch (error) {
+  r18Failures.push('高级设置写入序号: ' + String(error && error.message ? error.message : error))
+  console.log('✗ 高级设置写入序号: ' + String(error && error.message ? error.message : error))
+}
+
+// 47) 「重置统计」必须二次确认：它会清空所有 provider 的历史，且按钮就挨着
+//     「刷新积分」，没有确认的误触不可恢复。
+try {
+  cardTree = await mount(card, { t: (key) => key })
+  const reset = findButton(cardTree, 'usageReset')
+  if (reset === undefined) throw new Error('找不到「重置统计」按钮')
+  const countResets = () => calls.filter((call) => call.method === 'POST'
+    && String(call.url).includes('/action')
+    && String(call.body).includes('stats-reset')).length
+  const before = countResets()
+  sandbox.window.confirm = () => false
+  try {
+    reset.props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    if (countResets() !== before) throw new Error('取消确认后仍然重置了统计')
+  } finally {
+    delete sandbox.window.confirm
+  }
+  sandbox.window.confirm = () => true
+  try {
+    reset.props.onClick()
+    await new Promise((resolve) => setTimeout(resolve, 20))
+    if (countResets() !== before + 1) throw new Error('确认后没有发出 stats-reset')
+  } finally {
+    delete sandbox.window.confirm
+  }
+  console.log('✓ 重置统计先确认，取消时不发请求')
+} catch (error) {
+  r18Failures.push('重置统计确认: ' + String(error && error.message ? error.message : error))
+  console.log('✗ 重置统计确认: ' + String(error && error.message ? error.message : error))
+}
+
+// 48) 签到「上次尝试」必须用本 provider 的 lastAttemptAt，而不是全局 lastRunAt。
+try {
+  const checkinSnapshot = STATUS.providers[0].checkin
+  try {
+    const runAt = Date.now() - 60_000
+    const attemptAt = Date.now() - 7_200_000
+    STATUS.providers[0].checkin = {
+      enabled: true,
+      lastRunAt: runAt,
+      lastAttemptAt: attemptAt,
+      result: { provider: 'workbuddy', claimed: 0, credit: 0, outcomes: [] },
+    }
+    cardTree = await mount(card, { t: realT })
+    const stamp = (ms) => {
+      const date = new Date(ms)
+      const pad = (value) => String(value).padStart(2, '0')
+      return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`
+        + ` ${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+    }
+    const text = textOf(cardTree)
+    if (!text.includes(stamp(attemptAt))) {
+      throw new Error(`签到「上次尝试」没有使用本 provider 的时间（期望 ${stamp(attemptAt)}）`)
+    }
+    if (text.includes(stamp(runAt))) throw new Error('签到「上次尝试」仍显示全局 lastRunAt')
+    console.log('✓ 签到「上次尝试」使用按 provider 的 lastAttemptAt')
+  } finally {
+    STATUS.providers[0].checkin = checkinSnapshot
+    cardTree = await mount(card, { t: (key) => key })
+  }
+} catch (error) {
+  r18Failures.push('签到上次尝试: ' + String(error && error.message ? error.message : error))
+  console.log('✗ 签到上次尝试: ' + String(error && error.message ? error.message : error))
+}
+
+if (r18Failures.length > 0) {
+  console.error(`R18 前端回归 ${String(r18Failures.length)} 条失败：`)
+  for (const line of r18Failures) console.error('- ' + line)
+  process.exitCode = 1
+} else {
+  console.log('client-credits: OK')
+}

@@ -840,3 +840,294 @@ test('宿主入口：更高版本写过的 stats / events 在状态里标成只�
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('刷新 / 签到等动作的响应必须是动作之后的状态，不能复用动作前的缓存', async () => {
+  // 缺陷：handleAction 只在入口失效状态缓存；动作要跑几秒，期间卡片/侧栏的
+  // GET /status 会把「动作前」的文档写进 750ms 缓存，动作结束后的响应直接
+  // 复用它 —— 用户点了「刷新」，拿回来的却是点击前的快照，界面回退且要等
+  // 下一轮轮询才更新。
+  const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-fresh-status-'))
+  const dataDir = join(root, DATA_DIR_NAME)
+  mkdirSync(dataDir, { recursive: true })
+  writeFileSync(join(dataDir, 'settings.json'), JSON.stringify({
+    version: 2,
+    providers: {
+      workbuddy: { enabled: true },
+      'workbuddy-ai': { enabled: false },
+      qoder: { enabled: false },
+      'qoder-global': { enabled: false },
+      trae: { enabled: false },
+      'trae-global': { enabled: false },
+    },
+    accounts: {
+      workbuddy: [{
+        id: 'a',
+        label: 'A',
+        enabled: true,
+        token: {
+          accessToken: 'tok', refreshToken: '', expiresAtMs: Date.now() + 3600_000,
+          refreshExpiresAtMs: 0, domain: 'codebuddy.cn', uid: 'u', enterpriseId: '',
+        },
+      }],
+    },
+    activeAccount: { workbuddy: 'a' },
+  }))
+
+  const handlers = {}
+  const disposers = []
+  const originalFetch = globalThis.fetch
+  let catalogCalls = 0
+  let releaseCatalog
+  const catalogGate = new Promise((resolve) => { releaseCatalog = resolve })
+
+  globalThis.fetch = async (url) => {
+    const text = String(url)
+    if (text.includes('/v3/config')) {
+      catalogCalls += 1
+      await catalogGate
+      return new Response(JSON.stringify({
+        code: 0,
+        data: { agents: [{ name: 'cli', models: ['auto'] }], models: [{ id: 'auto', maxInputTokens: 8000, maxOutputTokens: 1000 }] },
+      }), { status: 200 })
+    }
+    if (text.includes('/meter/get-user-resource')) {
+      return new Response(JSON.stringify({ code: 0, data: { Response: { Data: { Accounts: [] } } } }), { status: 200 })
+    }
+    return new Response('{}', { status: 200 })
+  }
+
+  const ctx = {
+    get(name) {
+      if (name === 'profileContext') return { dir: root }
+      return undefined
+    },
+    inject(names, callback) {
+      if (names.includes('webServer')) {
+        callback({
+          webServer: fakeWebServer(handlers),
+          effect(fn) {
+            const dispose = fn()
+            disposers.push(dispose)
+            return dispose
+          },
+        })
+      }
+    },
+    effect(fn) {
+      const dispose = fn()
+      disposers.push(dispose)
+      return dispose
+    },
+    llm: { registerAdapter: () => () => {} },
+    emit() {},
+    logger: { info() {}, warn() {} },
+  }
+
+  try {
+    apply(ctx, {})
+    for (let index = 0; index < 100 && catalogCalls === 0; index++) await new Promise((resolve) => setTimeout(resolve, 10))
+    assert.equal(catalogCalls, 1, '首轮目录刷新应当已经发出')
+
+    const full = await get(handlers[STATUS_PATH], STATUS_PATH)
+    const eventsBefore = full.body.events.count
+
+    const actionRes = fakeResponse()
+    const req = new EventEmitter()
+    req.method = 'POST'
+    req.url = ACTION_PATH
+    req.headers = { host: '127.0.0.1:65466', 'x-rpc-key': full.body.key }
+    req.socket = { remoteAddress: '127.0.0.1' }
+    process.nextTick(() => {
+      req.emit('data', Buffer.from(JSON.stringify({ action: 'refresh' })))
+      req.emit('end')
+    })
+    handlers[ACTION_PATH](req, actionRes)
+
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    assert.equal(actionRes.status, 0, '刷新动作应当还在等首轮目录')
+    // 动作进行中：侧栏/卡片轮询会把「动作前」的文档写进缓存。
+    const during = await get(handlers[STATUS_PATH], STATUS_PATH)
+    assert.equal(during.body.events.count, eventsBefore)
+
+    releaseCatalog()
+    await actionRes.done
+    assert.equal(actionRes.status, 200)
+    const after = JSON.parse(actionRes.body)
+    assert.ok(
+      after.events.items.some((event) => event.type === 'catalog' && /手动刷新/.test(String(event.message))),
+      `动作响应里缺少「已手动刷新」事件：${JSON.stringify(after.events.items?.slice(0, 3))}`,
+    )
+    assert.ok(after.events.count > eventsBefore, '动作响应必须是动作之后的状态')
+  } finally {
+    releaseCatalog?.()
+    globalThis.fetch = originalFetch
+    for (const dispose of disposers) {
+      try {
+        if (typeof dispose === 'function') dispose()
+      } catch {
+        /* 忽略清理失败 */
+      }
+    }
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('修改登录文件路径会同步到已物化的默认账号，卡片保存后真的生效', async () => {
+  // 缺陷：令牌续期会把隐式默认账号连同当时的 authFile 物化成显式行；之后
+  // 卡片改 `trae.storageFile` / `workbuddy.*.authFile` 只写旧字段，而
+  // accountsFor() 一旦有显式行就忽略旧字段 —— 用户看到「已保存」，实际仍读旧路径。
+  const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-legacy-path-'))
+  const dataDir = join(root, DATA_DIR_NAME)
+  mkdirSync(dataDir, { recursive: true })
+  const settingsFile = join(dataDir, 'settings.json')
+  writeFileSync(settingsFile, JSON.stringify({
+    version: 2,
+    providers: {
+      workbuddy: { enabled: false },
+      'workbuddy-ai': { enabled: false },
+      qoder: { enabled: false },
+      'qoder-global': { enabled: false },
+      trae: { enabled: false },
+      'trae-global': { enabled: false },
+    },
+    workbuddy: { workbuddy: { authFile: 'C:/old/workbuddy.info' } },
+    trae: { trae: { storageFile: 'C:/old/storage.json' } },
+    accounts: {
+      workbuddy: [{ id: 'default', label: '本机登录', enabled: true, authFile: 'C:/old/workbuddy.info' }],
+      trae: [{ id: 'default', label: '本机登录', enabled: true, authFile: 'C:/old/storage.json' }],
+    },
+  }))
+
+  const handlers = {}
+  const disposers = []
+  const ctx = {
+    get(name) {
+      if (name === 'profileContext') return { dir: root }
+      return undefined
+    },
+    inject(names, callback) {
+      if (names.includes('webServer')) {
+        callback({
+          webServer: fakeWebServer(handlers),
+          effect(fn) {
+            const dispose = fn()
+            disposers.push(dispose)
+            return dispose
+          },
+        })
+      }
+    },
+    effect(fn) {
+      const dispose = fn()
+      disposers.push(dispose)
+      return dispose
+    },
+    llm: { registerAdapter: () => () => {} },
+    emit() {},
+    logger: { info() {}, warn() {} },
+  }
+
+  try {
+    apply(ctx, {})
+    const full = await get(handlers[STATUS_PATH], STATUS_PATH)
+    const saved = await post(handlers[SETTINGS_PATH], SETTINGS_PATH, full.body.key, {
+      workbuddy: { workbuddy: { authFile: 'C:/new/workbuddy.info' } },
+      trae: { trae: { storageFile: 'C:/new/storage.json' } },
+    })
+    assert.equal(saved.status, 200)
+    const doc = JSON.parse(readFileSync(settingsFile, 'utf8'))
+    assert.equal(doc.accounts.workbuddy[0].authFile, 'C:/new/workbuddy.info', 'WorkBuddy 默认账号仍在读旧路径')
+    assert.equal(doc.accounts.trae[0].authFile, 'C:/new/storage.json', 'Trae 默认账号仍在读旧路径')
+    assert.equal(doc.accounts.trae[0].label, '本机登录', '同步路径不能顺手改掉账号名')
+    assert.equal(doc.accounts.trae[0].enabled, true, '同步路径不能顺手改掉停用状态')
+    assert.equal(saved.body.settings.trae.trae.storageFile, 'C:/new/storage.json')
+  } finally {
+    for (const dispose of disposers) {
+      try {
+        if (typeof dispose === 'function') dispose()
+      } catch {
+        /* 忽略清理失败 */
+      }
+    }
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('无效 provider 的 action 不会被静默当成「全部」或写进签到状态', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-invalid-provider-'))
+  const dataDir = join(root, DATA_DIR_NAME)
+  mkdirSync(dataDir, { recursive: true })
+  const settingsFile = join(dataDir, 'settings.json')
+  writeFileSync(settingsFile, JSON.stringify({
+    version: 2,
+    providers: {
+      workbuddy: { enabled: false },
+      'workbuddy-ai': { enabled: false },
+      qoder: { enabled: false },
+      'qoder-global': { enabled: false },
+      trae: { enabled: false },
+      'trae-global': { enabled: false },
+    },
+  }))
+
+  const handlers = {}
+  const disposers = []
+  const ctx = {
+    get(name) {
+      if (name === 'profileContext') return { dir: root }
+      return undefined
+    },
+    inject(names, callback) {
+      if (names.includes('webServer')) {
+        callback({
+          webServer: fakeWebServer(handlers),
+          effect(fn) {
+            const dispose = fn()
+            disposers.push(dispose)
+            return dispose
+          },
+        })
+      }
+    },
+    effect(fn) {
+      const dispose = fn()
+      disposers.push(dispose)
+      return dispose
+    },
+    llm: { registerAdapter: () => () => {} },
+    emit() {},
+    logger: { info() {}, warn() {} },
+  }
+
+  try {
+    apply(ctx, {})
+    const full = await get(handlers[STATUS_PATH], STATUS_PATH)
+    const badCheckin = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, {
+      action: 'checkin',
+      provider: 'not-a-provider',
+    })
+    assert.equal(badCheckin.status, 400)
+    assert.equal(badCheckin.body.error, 'invalid-provider')
+    const badCredits = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, {
+      action: 'credits',
+      provider: 'not-a-provider',
+    })
+    assert.equal(badCredits.status, 400)
+    assert.equal(badCredits.body.error, 'invalid-provider')
+    // 不传 provider 的旧语义保持不变（侧栏胶囊 = 刷全部）。
+    const allCredits = await post(handlers[ACTION_PATH], ACTION_PATH, full.body.key, { action: 'credits' })
+    assert.equal(allCredits.status, 200)
+    // 无效 provider 不能把「最近签到」点亮。
+    const doc = JSON.parse(readFileSync(settingsFile, 'utf8'))
+    assert.equal(doc.checkin?.lastRunAt ?? 0, 0)
+  } finally {
+    for (const dispose of disposers) {
+      try {
+        if (typeof dispose === 'function') dispose()
+      } catch {
+        /* 忽略清理失败 */
+      }
+    }
+    rmSync(root, { recursive: true, force: true })
+  }
+})
