@@ -1,5 +1,91 @@
 # 更新记录
 
+## 0.8.0 — 2026-11-01
+
+第二十一轮前后端打磨。主题是「瞬时故障不当成登录失效」与「证据按时间说话」：
+Trae 续期被一次 429 / 5xx 说成登录过期并触发换号；两个请求共享一次凭证续期
+时，一方取消会拖死另一方；Trae 额度接口 200 但形状不对时被伪装成「Free / 0」；
+登录任务结束后永久驻留；未知 provider 的删除行能写进三份墓碑文件。前端：被
+后续写入超过的保存响应不释放 busy，按钮永久「保存中…」；接入开关与守卫用
+不同的 busy 键；25 分钟前的测试结论压过 1 分钟前的真实失败；Qoder Free 的悬停
+写着「0 积分」；「已保存」不随新的编辑失效；重复点当前服务商会把页面弹回概览。
+后端 5 处、前端 7 处。状态接口仍是 v8，设置文件仍是 v2，事件文件仍是 v1，额度
+缓存仍是 v1。测试 **439 后端 + 165 前端**。
+
+### Trae
+
+- **一次 429 / 5xx 就要求重新登录**：`exchangeRefreshToken()` 只要
+  `!response.ok` 就抛 `credential-expired`，`failureCodeOf()` 归成 AUTH ——
+  上游一次限流 / 抖动就会换到另一个账号、给该账号打 2 分钟 AUTH 冷却，凭证
+  结论还被缓存 60 秒。现在只有 401/403 判「登录失效」，429 归限流、408/5xx
+  归 `upstream-error`，与 Qoder 的令牌交换同一套口径。
+  [lib/trae/credential.js](lib/trae/credential.js)
+- **额度接口 200 但形状不对被当成 Free 0**：`parseCredits()` 直接取
+  `body.usage_summary ?? {}`，字段缺失时 total/consumed 都是 0，再被
+  `freePlan = total <= 0` 判成「免费 / 0 积分」——上游改 schema 或 200 包一层
+  错误体时，读取失败被伪装成「你真的没有额度」，还不进任何失败分支。现在要求
+  响应是对象、业务码为 0、`usage_summary` 里至少有一个可读金额，否则
+  `state: 'error'` 并写清原因。 [lib/trae/transport.js](lib/trae/transport.js)
+
+### 凭证续期
+
+- **一方取消，另一方也拿到「凭证过期」**：同一个账号的两个请求共用一次续期，
+  旧实现把共享任务直接绑在**第一个**调用方的 signal 上。第一个请求被取消，
+  共享 fetch 随之中断，第二个没取消、还在等结果的请求收到 AbortError，被分类
+  成 AUTH 并触发换号。现在共享任务用独立的超时信号跑完，每个调用方各自
+  `raceAbort()` 等待 —— 取消只影响自己这一次等待。WorkBuddy 与 Trae 两条
+  续期路径都改了。 [lib/runtime.js](lib/runtime.js)
+  [lib/timeout.js](lib/timeout.js)
+
+### 登录与设置
+
+- **登录任务结束后永不出表**：`loginJobs` 只在「取消」时删除，登录成功几小时
+  后再打开设置，仍写着「登录成功：X」和一条早已失效的登录链接。现在终态任务
+  标记 `finishedAt` 并只保留 5 分钟，完成 / 失败时同时丢掉 `authUrl`。
+  [lib/index.js](lib/index.js)
+- **未知 provider 的删除行写进墓碑**：`sanitizePatch()` 已把未知 provider 丢掉，
+  但删除清单遍历的是浏览器提交的原始 JSON —— `accounts.evil: [{id:'x',
+  forget:true}]` 能把 `evil::x` 写进统计 / 额度历史 / 目录缓存三份文件，HTTP
+  还回 200。现在清单取自 sanitize 后的补丁。 [lib/index.js](lib/index.js)
+
+### 前端
+
+- **被后续写入超过的保存永久卡在「保存中…」**：`endBusy(saveKey)` 写在
+  `seq === writeSeq.current` 里，先点的保存被后面的模型开关超过后永远不释放
+  该家的 busy 键，按钮一直禁用、同 provider 的开关点击也被吞掉。现在 busy
+  释放不受写入序号约束；busy 键同时改成**计数**，两个写入共享一个键时也不会
+  被先到的响应提前点亮。 [client/client.js](client/client.js)
+- **接入开关与守卫用不同的键**：开关的 `disabled` 看全局 `save`（任何一家的
+  模型写入都让六家变灰），而 `toggleProvider()` 守卫看 `save:<provider>`
+  （本家保存时开关可点却毫无反应）。两边统一成 `save:<provider>`。
+  [client/client.js](client/client.js)
+- **更早的测试结论压过更新的真实失败**：25 分钟前「刚测可用」、1 分钟前真实
+  请求失败，卡片仍是绿色「正常」，同一屏下方又写「最近失败 1 分钟前」。现在
+  只有测试时刻晚于最后一次失败才作数，卡片 / 六段健康条 / 状态 chip 同一判据。
+  [client/client.js](client/client.js)
+- **Qoder Free 的悬停写着「0 积分」**：界面上是「免费」，title / aria-label
+  却拼出「0 积分」，读起来像余额归零。Free 套餐的悬停统一说明「免费模型排队」
+  （汇总卡、账号行、侧栏胶囊、展开面板）。
+  [client/client.js](client/client.js)
+- **「已保存」不随新的编辑失效**：保存成功后 1.6 秒内改了输入，chip 仍写
+  「已保存」；连续保存两次时前一次的定时器还会提前关掉后一次的提示。现在
+  任何编辑都立刻撤掉提示，定时器带代数、只关自己那一次。
+  [client/client.js](client/client.js)
+- **重复点当前服务商等于切换**：停在「用量」页再点一次当前卡会弹回概览、清空
+  模型搜索词。现在点当前 provider 是空操作。 [client/client.js](client/client.js)
+- **缺字段时画出字面 undefined**：状态文档缺 `displayName` 时卡片名字 / title /
+  aria-label 出现「undefined」；`planName` 是对象时真实 React 会整卡抛错。
+  名称统一走 `providerNameOf()` 回落短名，`planName` 只认字符串。
+  [client/client.js](client/client.js)
+
+### 验证
+
+- 修前 / 修后双跑：`tests/audit-r21.test.mjs` 的 5 条在 0.7.9 快照
+  （`D:\Questions\_audit-r21\pre`）上全部失败；`client-credits` 的 7 条新断言
+  全部失败。修后全部通过。
+- `node --test tests/*.test.mjs` → 439 通过；`node tests/client-credits.mjs`
+  → `client-credits: OK`（165 个检查点）。
+
 ## 0.7.9 — 2026-11-01
 
 第二十轮前后端打磨。主题是「读视图对齐」与「按家隔离」：另一个进程清空事件

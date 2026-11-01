@@ -2406,22 +2406,26 @@ delete sandbox.navigator.clipboard
 console.log('✓ 复制失败有可见反馈与手动复制兜底；恢复后兜底会收掉')
 
 // ── 2.4.0 UI 打磨回归 ────────────────────────────────────────────
-// 18) Qoder Free 的汇总卡大数字显示「免费」，不再显示 0；完整额度留在 title。
+// 18) Qoder Free 的汇总卡大数字显示「免费」，不再显示 0；悬停也必须说「免费」
+//     而不是「0 积分」（后者会被读成「余额已归零」）。
 cardTree = await mount(card, { t: (key) => key })
 const freeValueSpan = find(cardTree, (node) => node.type === 'span'
   && node.props?.style?.fontSize === 20
   && textOf(node) === 'creditsFree')
 if (freeValueSpan === undefined) throw new Error('Qoder Free 汇总卡仍显示 0，没有显示「免费」')
-if (String(freeValueSpan.props?.title ?? '').indexOf('creditsUnit') === -1) {
-  throw new Error('Qoder Free 汇总卡的 title 没有保留完整额度文案')
+if (String(freeValueSpan.props?.title ?? '').indexOf('creditsFreeQueue') === -1) {
+  throw new Error('Qoder Free 汇总卡的 title 仍写成「0 积分」，没有说明这是免费套餐')
 }
-// 19) 侧栏胶囊里的 Qoder Free 显示短版「免费」，title/aria-label 仍是完整文案。
+if (String(freeValueSpan.props?.title ?? '').indexOf('creditsUnit') !== -1) {
+  throw new Error('Qoder Free 汇总卡的 title 仍把免费套餐说成 0 积分')
+}
+// 19) 侧栏胶囊里的 Qoder Free 显示短版「免费」，title/aria-label 同样不写 0 积分。
 fixPill = await mount(pill, { t: (key) => key, wide: true })
 if (!textOf(fixPill).includes('creditsFreeShort')) throw new Error('胶囊里的 Qoder Free 没有显示短版「免费」')
-const freeSegment = find(fixPill, (node) => String(node.props?.title ?? '').includes('creditsUnit')
+const freeSegment = find(fixPill, (node) => String(node.props?.title ?? '').includes('creditsFreeQueue')
   && String(node.props.title).indexOf('Qoder Global') !== -1)
-if (freeSegment === undefined) throw new Error('胶囊段的 title 没有保留完整额度文案')
-console.log('✓ Qoder Free 在汇总卡/胶囊显示「免费」，完整额度保留在 title')
+if (freeSegment === undefined) throw new Error('胶囊段的 title 没有说明免费套餐')
+console.log('✓ Qoder Free 在汇总卡/胶囊显示「免费」，悬停不再写成 0 积分')
 
 // 20) 读不到额度：中性色「—」+ 原因 title，不再用 provider 强调色；不换行保证 6 卡高度稳定。
 const savedCredits01 = STATUS.providers[0].credits
@@ -4920,7 +4924,8 @@ const r19Failures = []
       STATUS.providers = [
         {
           ...base,
-          health: { state: 'down', consecutiveFailures: 3, lastErrorAt: now, lastSuccessAt: 0 },
+          // 失败是 10 分钟前、测试是 1 分钟前：测试结论更新，才允许压过健康状态。
+          health: { state: 'down', consecutiveFailures: 3, lastErrorAt: now - 10 * 60_000, lastSuccessAt: 0 },
           accounts: base.accounts.map((account, index) => (index === 0
             ? { ...account, modelTests: { auto: { ok: true, at: now - 60_000, latencyMs: 90, model: 'auto' } } }
             : account)),
@@ -5309,7 +5314,256 @@ const r20Failures = []
   }
 }
 
-if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0) {
+// ---------- 第二十一轮审计（0.8.0）的前端回归 ----------
+const r21Failures = []
+{
+  const providersSnapshot = STATUS.providers
+  const settingsSnapshot = STATUS.settings
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const mountCard = async (t) => {
+    cardTree = await mount(card, { t })
+    return cardTree
+  }
+  const openProviderById = async (tree, provider, t) => {
+    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+  const patInputOf = (tree, t) => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === t('pat'))
+  const saveButtonsOf = (tree, t) => findAll(tree, (node) => node.type === 'button' && textOf(node) === t('save'))
+  const switchInputOf = (tree) => find(tree, (node) => node.type === 'input' && node.props?.className === 'rpc-switch-input')
+  const modelBoxOf = (tree, label) => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === label)
+  const advancedInputOf = (tree, t) => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === t('advancedIdle'))
+  const pageOf = (tree, id) => find(tree, (node) => node.props?.id === 'dsh-rpc-page-' + id)
+
+  try {
+    // 1) 被后续写入超过的保存响应也必须释放 busy：否则该家的按钮永久「保存中…」。
+    try {
+      let tree = await mountCard(realT)
+      tree = await openProviderById(tree, 'qoder-global', realT)
+      const patInput = patInputOf(tree, realT)
+      if (patInput === undefined) throw new Error('找不到 PAT 输入框')
+      patInput.props.onChange({ target: { value: 'r21-pat' } })
+      tree = await render(card, { t: realT })
+      const save = saveButtonsOf(tree, realT)[0]
+      if (save === undefined) throw new Error('找不到 Qoder 的保存按钮')
+      fetchDelayFor = (body) => (body.includes('r21-pat') ? 320 : 0)
+      save.props.onClick()
+      tree = await render(card, { t: realT }, true)
+      // 保存还在飞时，另一家的模型开关发起一次更晚的写入（写入序号更大）。
+      tree = await openProviderById(tree, 'workbuddy', realT)
+      const modelBox = modelBoxOf(tree, 'Auto')
+      if (modelBox === undefined) throw new Error('找不到 WorkBuddy 的模型复选框')
+      modelBox.props.onChange()
+      await sleep(420)
+      fetchDelayFor = null
+      tree = await openProviderById(tree, 'qoder-global', realT)
+      const after = saveButtonsOf(tree, realT)
+      if (after.length === 0) throw new Error('保存结束后按钮仍停在「保存中…」')
+      if (after[0].props.disabled === true) throw new Error('保存结束后按钮仍被禁用')
+      console.log('✓ 被后续写入超过的保存响应也会释放 busy')
+    } catch (error) {
+      fetchDelayFor = null
+      r21Failures.push('busy 释放: ' + String(error && error.message ? error.message : error))
+      console.log('✗ busy 释放: ' + String(error && error.message ? error.message : error))
+    } finally {
+      fetchDelayFor = null
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      await sleep(80)
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 2) 接入开关的禁用判据必须与 toggleProvider() 的守卫同一个键。
+    try {
+      // 2a：本家的保存在飞时，开关应当可见地禁用（而不是可点但被静默吞掉）。
+      let tree = await mountCard(realT)
+      tree = await openProviderById(tree, 'qoder-global', realT)
+      const patInput = patInputOf(tree, realT)
+      patInput.props.onChange({ target: { value: 'r21-switch' } })
+      tree = await render(card, { t: realT })
+      const save = saveButtonsOf(tree, realT)[0]
+      if (save === undefined) throw new Error('找不到 Qoder 的保存按钮')
+      fetchDelayFor = (body) => (body.includes('r21-switch') ? 200 : 0)
+      save.props.onClick()
+      tree = await render(card, { t: realT }, true)
+      const sw = switchInputOf(tree)
+      if (sw === undefined) throw new Error('找不到接入开关')
+      if (sw.props.disabled !== true) throw new Error('本家保存进行中时开关仍可点（点击会被静默丢弃）')
+      await sleep(240)
+      fetchDelayFor = null
+      console.log('✓ 接入开关在自家保存期间显示为禁用')
+    } catch (error) {
+      fetchDelayFor = null
+      r21Failures.push('接入开关禁用: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 接入开关禁用: ' + String(error && error.message ? error.message : error))
+    } finally {
+      fetchDelayFor = null
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      await sleep(80)
+      cardTree = await mount(card, { t: (key) => key })
+    }
+    try {
+      // 2b：别处的模型写入（共用 `save` 键）在飞时，开关不能被牵连。
+      let tree = await mountCard(realT)
+      const modelBox = modelBoxOf(tree, 'Auto')
+      if (modelBox === undefined) throw new Error('找不到 WorkBuddy 的模型复选框')
+      fetchDelayFor = (body) => (body.includes('"disabledModels"') ? 140 : 0)
+      modelBox.props.onChange()
+      tree = await render(card, { t: realT }, true)
+      const sw = switchInputOf(tree)
+      if (sw === undefined) throw new Error('找不到接入开关')
+      if (sw.props.disabled === true) throw new Error('模型写入在飞时六家的接入开关都被锁住了')
+      await sleep(180)
+      fetchDelayFor = null
+      console.log('✓ 模型写入不会锁住接入开关')
+    } catch (error) {
+      fetchDelayFor = null
+      r21Failures.push('接入开关串台: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 接入开关串台: ' + String(error && error.message ? error.message : error))
+    } finally {
+      fetchDelayFor = null
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      await sleep(80)
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 3) 更新的真实失败必须压过更早的「刚测可用」，不能同屏两个相反结论。
+    try {
+      const base = providersSnapshot[0]
+      const now = Date.now()
+      STATUS.providers = [
+        {
+          ...base,
+          health: { state: 'down', consecutiveFailures: 3, lastErrorAt: now - 60_000, lastSuccessAt: 0 },
+          accounts: base.accounts.map((account, index) => (index === 0
+            ? { ...account, modelTests: { auto: { ok: true, at: now - 25 * 60_000, latencyMs: 90, model: 'auto' } } }
+            : account)),
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      const tree = await mountCard(realT)
+      const tab = find(tree, (node) => node.props?.id === 'dsh-rpc-tab-workbuddy')
+      if (tab === undefined) throw new Error('找不到 WorkBuddy 的卡片')
+      const tabText = textOf(tab)
+      if (tabText.includes(realT('testedAvailableShort'))) {
+        throw new Error('25 分钟前的测试结论压过了 1 分钟前的真实失败')
+      }
+      if (!tabText.includes(realT('healthDown'))) throw new Error('卡片没有显示「连续失败」')
+      const segment = find(tree, (node) => node.props?.className === 'rpc-fleet-seg' && node.key === 'workbuddy')
+      if (segment === undefined) throw new Error('找不到 WorkBuddy 的健康段')
+      if (segment.props['data-tone'] === 'ok') throw new Error('健康条仍把已被失败覆盖的旧测试结论算作正常')
+      console.log('✓ 更新的失败压过更早的测试结论')
+    } catch (error) {
+      r21Failures.push('证据新旧: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 证据新旧: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 4) 「已保存」提示必须随新的编辑立即失效，不能继续挂在输入框上方。
+    try {
+      let tree = await mountCard(realT)
+      const idle = advancedInputOf(tree, realT)
+      if (idle === undefined) throw new Error('找不到 setTimeout 输入框')
+      idle.props.onChange({ target: { value: '120' } })
+      tree = await render(card, { t: realT })
+      const save = find(tree, (node) => node.type === 'button' && textOf(node) === realT('advancedSave'))
+      if (save === undefined) throw new Error('找不到高级设置保存按钮')
+      fetchDelayFor = null
+      save.props.onClick()
+      await sleep(60)
+      tree = await render(card, { t: realT }, true)
+      if (!textOf(tree).includes(realT('advancedSaved'))) throw new Error('保存成功后没有出现「已保存」')
+      advancedInputOf(tree, realT).props.onChange({ target: { value: '150' } })
+      tree = await render(card, { t: realT }, true)
+      if (textOf(tree).includes(realT('advancedSaved'))) throw new Error('继续编辑后仍显示「已保存」')
+      console.log('✓ 继续编辑会让「已保存」立即失效')
+    } catch (error) {
+      r21Failures.push('已保存失效: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 已保存失效: ' + String(error && error.message ? error.message : error))
+    } finally {
+      fetchDelayFor = null
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      await sleep(80)
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 5) 重复点当前服务商不是「切换」：不能把用量页弹回概览、清空搜索词。
+    try {
+      let tree = await mountCard(realT)
+      const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+      const usageTab = tabs.find((node) => textOf(node).startsWith(realT('navUsage')))
+      if (usageTab === undefined) throw new Error('找不到用量页签')
+      usageTab.props.onClick()
+      tree = await render(card, { t: realT })
+      if (pageOf(tree, 'usage')?.props?.style?.display !== 'flex') throw new Error('用量页没有打开')
+      const current = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-workbuddy')
+      if (current === undefined) throw new Error('找不到当前服务商的卡片')
+      current.props.onClick()
+      tree = await render(card, { t: realT })
+      if (pageOf(tree, 'usage')?.props?.style?.display !== 'flex') throw new Error('再点当前服务商把用量页弹回了概览')
+      console.log('✓ 重复点当前服务商保持当前页')
+    } catch (error) {
+      r21Failures.push('重复点服务商: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 重复点服务商: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 6) 状态文档缺字段时的兜底：不能把字面 undefined / [object Object] 画到界面上。
+    try {
+      const base = providersSnapshot[0]
+      const withoutName = { ...base }
+      delete withoutName.displayName
+      const qoder = providersSnapshot[2]
+      STATUS.providers = [
+        withoutName,
+        ...providersSnapshot.slice(1, 2),
+        {
+          ...qoder,
+          credits: { ...qoder.credits, planName: { name: 'Free' } },
+        },
+      ]
+      let tree = await mountCard(realT)
+      const surfaces = [textOf(tree)]
+      for (const node of findAll(tree, () => true)) {
+        if (node.props?.title !== undefined) surfaces.push(String(node.props.title))
+        if (node.props?.['aria-label'] !== undefined) surfaces.push(String(node.props['aria-label']))
+      }
+      if (surfaces.join(' | ').includes('undefined')) throw new Error('缺 displayName 时界面出现了字面 undefined')
+      tree = await openProviderById(tree, 'qoder-global', realT)
+      const qoderText = textOf(tree)
+      if (qoderText.includes('[object Object]')) throw new Error('planName 是对象时被直接渲染成 [object Object]')
+      console.log('✓ 缺 displayName / planName 非字符串时有安全兜底')
+    } catch (error) {
+      r21Failures.push('字段兜底: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 字段兜底: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      cardTree = await mount(card, { t: (key) => key })
+    }
+  } finally {
+    STATUS.providers = providersSnapshot
+    STATUS.settings = settingsSnapshot
+    fetchDelayFor = null
+    fetchDelayMs = 0
+    fetchSnapshotFor = null
+    delayNextStatusMs = 0
+  }
+}
+
+if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0 || r21Failures.length > 0) {
   if (r18Failures.length > 0) {
     console.error(`R18 前端回归 ${String(r18Failures.length)} 条失败：`)
     for (const line of r18Failures) console.error('- ' + line)
@@ -5321,6 +5575,10 @@ if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0) 
   if (r20Failures.length > 0) {
     console.error(`R20 前端回归 ${String(r20Failures.length)} 条失败：`)
     for (const line of r20Failures) console.error('- ' + line)
+  }
+  if (r21Failures.length > 0) {
+    console.error(`R21 前端回归 ${String(r21Failures.length)} 条失败：`)
+    for (const line of r21Failures) console.error('- ' + line)
   }
   process.exitCode = 1
 } else {

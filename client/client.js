@@ -1571,6 +1571,25 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * provider 的显示名。
+     *
+     * `displayName` 直接拼进 `title` / `aria-label` 时，缺字段的老宿主或
+     * 半截状态文档会让界面出现字面「undefined · 0 积分」。非字符串一律
+     * 回落到短名，与 `modelLabelOf()` 同一套兜底哲学。
+     *
+     * @param entry - 状态文档里的 provider 条目。
+     * @returns 可显示的字符串。
+     */
+    function providerNameOf(entry) {
+      if (entry !== null && typeof entry === 'object'
+        && typeof entry.displayName === 'string' && entry.displayName !== '') return entry.displayName
+      var provider = entry !== null && typeof entry === 'object' && typeof entry.provider === 'string'
+        ? entry.provider
+        : ''
+      return shortProviderName(provider)
+    }
+
+    /**
      * 账号的显示名。
      *
      * 隐式默认账号（`id === 'default'`）的名字是**插件生成的**（「本机登录」/
@@ -1961,6 +1980,25 @@ window.__ModuleLoader__.load({
     }
 
     /**
+     * 额度快照的悬停/读屏描述。
+     *
+     * Free 套餐（Qoder Free：remain 0 / total 0）界面上写「免费」，但
+     * `formatCreditsText()` 会给出一句「0 积分」—— 拼进 title / aria-label
+     * 后读起来像「余额已归零」而不是「这个账号本来就走免费模型」。
+     *
+     * @param credits - 额度快照。
+     * @param provider - provider id（用于识别 Qoder Free）。
+     * @param t - 文案绑定。
+     * @returns 描述文本。
+     */
+    function creditsHoverOf(credits, provider, t) {
+      if (credits !== undefined && credits !== null && credits.state === 'ok' && isQoderFreePlan(provider, credits)) {
+        return bind(t, 'creditsFreeQueue')
+      }
+      return formatCreditsText(credits, t)
+    }
+
+    /**
      * 模型在界面上的可显示名字。
      *
      * 目录可能来自手改/降级的缓存，`name` 有可能是对象、数字或缺失：
@@ -2051,6 +2089,26 @@ window.__ModuleLoader__.load({
       var lastErrorAt = health.lastErrorAt
       if (isFiniteNumber(lastErrorAt) && lastErrorAt > 0 && Date.now() - lastErrorAt > HEALTH_EVIDENCE_TTL_MS) return 'stale'
       return state
+    }
+
+    /**
+     * 把「30 分钟内的账号测试结论」与「历史健康」按**证据时间**取新的那个。
+     *
+     * 旧判据只看测试结果是否在 30 分钟内：25 分钟前点了「测试账号」显示可用，
+     * 但 1 分钟前真实请求刚失败（`health.lastErrorAt` 更新），测试结论仍然
+     * 压过失败 —— 同一张卡上写着绿色「正常」+ 下面一行「最近失败 1 分钟前」。
+     * 只有测试时刻**晚于**最后一次失败，它才是更新的证据。
+     *
+     * @param entry - 状态文档里的 provider 条目。
+     * @param health - `entry.health`。
+     * @returns 展示用健康状态。
+     */
+    function healthStateWithTest(entry, health) {
+      var test = freshModelTestOf(entry)
+      if (test === undefined || test.state === undefined) return displayHealthState(health)
+      var lastErrorAt = health !== null && typeof health === 'object' && isFiniteNumber(health.lastErrorAt) ? health.lastErrorAt : 0
+      if (lastErrorAt > 0 && !(test.result.at > lastErrorAt)) return displayHealthState(health)
+      return test.state
     }
 
     /** 健康状态的颜色。 */
@@ -3068,16 +3126,22 @@ window.__ModuleLoader__.load({
       var busy = busyState[0]
       var setBusy = busyState[1]
       var busyRef = useRef({})
+      // busy 键用**计数**而不是布尔：同一类操作可以有两个写入同时在飞
+      // （例如先点保存、再切模型开关），任何一个先回来都不能把还在飞的那个
+      // 的「保存中…」提前点亮回可点状态。旧实现是布尔键，先到的响应一
+      // `delete` 就把另一个请求的可视状态一起清掉了。
       var beginBusy = function (key) {
-        busyRef.current[key] = true
+        busyRef.current[key] = (busyRef.current[key] || 0) + 1
         setBusy(Object.assign({}, busyRef.current))
       }
       var endBusy = function (key) {
-        delete busyRef.current[key]
+        var left = (busyRef.current[key] || 0) - 1
+        if (left > 0) busyRef.current[key] = left
+        else delete busyRef.current[key]
         setBusy(Object.assign({}, busyRef.current))
       }
-      var isBusy = function (key) { return busy[key] === true }
-      var busyNow = function (key) { return busyRef.current[key] === true }
+      var isBusy = function (key) { return isFiniteNumber(busy[key]) && busy[key] > 0 }
+      var busyNow = function (key) { return isFiniteNumber(busyRef.current[key]) && busyRef.current[key] > 0 }
       /**
        * 「保存这一家」的 busy 键。
        *
@@ -3346,6 +3410,9 @@ window.__ModuleLoader__.load({
        * @param provider - provider id。
        */
       var selectProvider = function (provider) {
+        // 重复点当前这一家不算「切换服务商」：旧实现照样回概览、清空模型
+        // 搜索词，用户在「用量」页上再点一次当前卡就被弹回概览，筛选词也没了。
+        if (provider === activeTab) return
         setActiveTab(provider)
         setActivePage('overview')
         setSearchDraft('')
@@ -3472,9 +3539,29 @@ window.__ModuleLoader__.load({
        * 每次输入 / 勾选都 +1；只有点保存时的代数没变，才允许回填与清脏。
        */
       var advEditSeq = useRef(0)
+      /**
+       * 「已保存」提示的代数。
+       *
+       * 成功提示只活 1.6 秒，但用户完全可能在提示还亮着的时候就改了下拉值：
+       * 此时旧实现既不撤掉提示，也不区分「哪一次保存亮的」——连续保存两次时
+       * 前一次的定时器还会提前关掉后一次的提示。每次亮起 / 编辑都 +1，
+       * 只有代数是自己那一次时才允许把自己点亮的状态关掉。
+       */
+      var advSavedSeq = useRef(0)
       var advTouch = function () {
         advEditSeq.current += 1
+        advSavedSeq.current += 1
+        setAdvSaved(false)
         advDirty.current = true
+      }
+      /** 亮起「已保存」，1.6 秒后自动消失（被后续编辑或新的保存取代时不误关）。 */
+      var flashAdvSaved = function () {
+        advSavedSeq.current += 1
+        var token = advSavedSeq.current
+        setAdvSaved(true)
+        later(function () {
+          if (advSavedSeq.current === token) setAdvSaved(false)
+        }, 1600)
       }
 
       // 高级设置：只要用户没在编辑，就跟随宿主每次下发的值（含外部修改）。
@@ -3695,9 +3782,13 @@ window.__ModuleLoader__.load({
               lastAppliedSeq.current = seq
               applyStatus(document)
             }
+            // busy 的释放**不受**写入序号约束：被更新写入超过的响应仍然代表
+            // 「这一次请求结束了」。旧实现把它放在 `seq === writeSeq.current`
+            // 里，先点的保存被后面的模型开关超过后，这个 provider 的保存
+            // 按钮会永久停在「保存中…」并被禁用，直到重开设置卡片。
+            endBusy(saveKey)
             if (seq === writeSeq.current) {
               setError(undefined)
-              endBusy(saveKey)
               if (options !== undefined && typeof options.onSuccess === 'function') options.onSuccess()
             }
             return document
@@ -3710,11 +3801,13 @@ window.__ModuleLoader__.load({
             settle()
             // 这次写入失败：只回滚它自己的模型意图（按 scope + seq），别家的还在飞。
             clearModelIntents(seq, options !== undefined ? options.modelKeys : undefined)
+            // 与成功分支同一理由：这一次请求结束了，busy 必须释放；
+            // 只有「显示谁的失败」受序号约束。
+            endBusy(saveKey)
             // 只有**最新一次**写入失败才显示横幅。更早的写入失败时，更新的
             // 写入（已经包含用户在它之后做的改动）还在飞；把 onError 交给旧
             // 写入还会误删新写入的意图（provider 开关会卡在服务端旧值上）。
             if (seq !== writeSeq.current) return undefined
-            endBusy(saveKey)
             setError(String(failure && failure.message ? failure.message : failure))
             if (options !== undefined && typeof options.onError === 'function') {
               try {
@@ -4151,8 +4244,9 @@ window.__ModuleLoader__.load({
             endBusy('advanced')
             setError(undefined)
             if (!unchangedSinceSave) return document
-            // 只有真的保存成功才显示「已保存」。
-            setAdvSaved(true)
+            // 只有真的保存成功才显示「已保存」；期间改过的输入由 advTouch()
+            // 关掉提示，不会被这次成功回调重新点亮。
+            flashAdvSaved()
             // 用服务端夹取后的值回填草稿：用户输入 9999 秒会被夹到 900 秒，
             // 不能继续显示 9999 却告诉用户「已保存」。
             var savedAdvanced = (document && document.settings && document.settings.advanced) || {}
@@ -4182,7 +4276,6 @@ window.__ModuleLoader__.load({
             if (savedAuto) setAdvSwitch(percentInputOf(savedAuto.thresholdRatio, advSwitch))
             setAdvStats(savedAdvanced.stats !== false)
             setAdvCache(savedAdvanced.catalogCache !== false)
-            later(function () { setAdvSaved(false) }, 1600)
           })
           .catch(function (failure) {
             endBusy('advanced')
@@ -4458,12 +4551,9 @@ window.__ModuleLoader__.load({
       // 概览，也是 provider tab。
       var providerCards = providers.map(function (entry) {
         var health = entry.health || { state: 'unknown' }
-        // 最近一次模型测试比历史 health 更及时；有 30 分钟内的结果时，
-        // provider 卡也显示「刚测可用 / 刚测限额」，而不是继续挂「待验证」。
-        var cardTest = freshModelTestOf(entry)
-        var healthState = cardTest !== undefined && cardTest.state !== undefined
-          ? cardTest.state
-          : displayHealthState(health)
+        // 最近一次模型测试比历史 health 更及时；但只有它**晚于**最近一次
+        // 真实失败时才作数（见 healthStateWithTest）。
+        var healthState = healthStateWithTest(entry, health)
         var disabled = entry.enabled === false
         var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
         var credits = entry.credits || { state: 'none' }
@@ -4477,7 +4567,7 @@ window.__ModuleLoader__.load({
           ? credits.unlimited === true ? '∞' : freePlan ? bind(t, 'creditsFree') : compactCreditsNumber(credits.remain, credits)
           : '—'
         var valueTitle = credits.state === 'ok'
-          ? formatCreditsText(credits, t)
+          ? creditsHoverOf(credits, entry.provider, t)
           : typeof credits.error === 'string' && credits.error !== ''
             ? bind(t, credits.state === 'error' ? 'creditsUnreadable' : 'creditsNone') + ': ' + credits.error
             : bind(t, credits.state === 'none' ? 'creditsNone' : 'creditsUnreadable')
@@ -4526,7 +4616,7 @@ window.__ModuleLoader__.load({
               '--rpc-provider-accent': accent,
               opacity: entry.enabled === false ? 0.62 : 1,
             },
-            title: entry.displayName + ' · ' + valueTitle,
+            title: providerNameOf(entry) + ' · ' + valueTitle,
             onClick: function () { selectProvider(entry.provider) },
           },
           h('span', { className: 'rpc-provider-top' },
@@ -4535,7 +4625,7 @@ window.__ModuleLoader__.load({
               style: { background: healthTone },
               title: disabled ? bind(t, 'disabled') : !signed ? bind(t, 'signedOut') : bind(t, healthTextKey(healthState)),
             }),
-            h('span', { className: 'rpc-provider-name' }, entry.displayName),
+            h('span', { className: 'rpc-provider-name' }, providerNameOf(entry)),
             h('span', {
               className: 'rpc-provider-health',
               style: { color: healthTextColor },
@@ -4575,8 +4665,8 @@ window.__ModuleLoader__.load({
       // 比三个数字更容易一眼扫完；段色与 provider 卡上的状态点同一套。
       var fleet = providers.map(function (entry) {
         var health = entry.health || { state: 'unknown' }
-        var cardTest = freshModelTestOf(entry)
-        var state = cardTest !== undefined && cardTest.state !== undefined ? cardTest.state : displayHealthState(health)
+        // 与 provider 卡同一个证据判据（测试结论必须比最近失败更新）。
+        var state = healthStateWithTest(entry, health)
         var signed = entry.credential !== undefined && entry.credential !== null && entry.credential.status === 'signed-in'
         // 与 provider 卡同一个健康判据：'testedOk'（30 分钟内刚测可用）也是
         // 绿色。旧实现只认 'ok'，同一份证据在卡片上写「刚测可用」、在六段条
@@ -4588,7 +4678,7 @@ window.__ModuleLoader__.load({
             : state === 'ok' || state === 'testedOk' ? 'ok' : state === 'down' ? 'error' : state === 'unknown' ? 'idle' : 'warn'
         return {
           provider: entry.provider,
-          name: entry.displayName,
+          name: providerNameOf(entry),
           tone: tone,
           // 与 card 上同一个判据：未登录时不能再写「正常」。
           text: entry.enabled === false
@@ -4606,10 +4696,10 @@ window.__ModuleLoader__.load({
         : []
       var exhaustedNames = alertProviders
         .filter(function (entry) { return alertOfCredits(entry.credits, alertRatio, entry.provider, alertsEnabled) === 'exhausted' })
-        .map(function (entry) { return entry.displayName })
+        .map(function (entry) { return providerNameOf(entry) })
       var lowNames = alertProviders
         .filter(function (entry) { return alertOfCredits(entry.credits, alertRatio, entry.provider, alertsEnabled) === 'low' })
-        .map(function (entry) { return entry.displayName })
+        .map(function (entry) { return providerNameOf(entry) })
       var alertLines = []
       if (exhaustedNames.length > 0) alertLines.push(bind(t, 'alertBannerExhausted', { names: exhaustedNames.join(bind(t, 'listSeparator')) }))
       if (lowNames.length > 0) alertLines.push(bind(t, 'alertBannerLow', { names: lowNames.join(bind(t, 'listSeparator')) }))
@@ -4774,7 +4864,12 @@ window.__ModuleLoader__.load({
             latestModelTestResult.error,
           ].filter(function (value) { return typeof value === 'string' && value !== '' }).join(' · ')
         : ''
-      var statusChipState = latestModelTestFresh && latestModelTestEvidence.state !== undefined
+      // 与卡片 / 六段条同一个判据：测试结论只有晚于最近一次真实失败才作数。
+      // 否则会出现「绿色：刚测可用」与下面「最近失败 1 分钟前」同屏矛盾。
+      var latestTestBeatsFailure = latestModelTestFresh
+        && latestModelTestEvidence.state !== undefined
+        && !(healthLastErrorAt > 0 && !(latestModelTestResult.at > healthLastErrorAt))
+      var statusChipState = latestTestBeatsFailure
         ? latestModelTestEvidence.state
         : activeHealthState
       var latestTestStaleHint
@@ -4840,7 +4935,7 @@ window.__ModuleLoader__.load({
       var detailHeader = h('div', { className: 'rpc-detail-head' },
         h('div', { className: 'rpc-detail-main' },
           h('div', { className: 'rpc-detail-title' },
-            h('h4', {}, active.displayName),
+            h('h4', {}, providerNameOf(active)),
             h('span', { className: 'rpc-chip' }, kindLabel),
             h('span', { className: rpcChipClass(credentialTone) }, credentialLabel)),
           h('div', { className: 'rpc-detail-meta' },
@@ -4865,7 +4960,11 @@ window.__ModuleLoader__.load({
             checked: pendingProviderEnabled.current[active.provider] !== undefined
               ? pendingProviderEnabled.current[active.provider] === true
               : active.enabled !== false,
-            disabled: isBusy('save'),
+            // 禁用判据必须与 toggleProvider() 的守卫用同一个键（这一家的
+            // `save:<provider>`）。旧实现看的是全局 `save`：任何一家的模型
+            // 写入在飞时六家的开关都变灰；而本家的保存正在飞时开关却可点，
+            // 点下去又被守卫静默吞掉 —— 用户以为开关坏了。
+            disabled: isBusy(saveKeyOf(active.provider)),
             onChange: function () { toggleProvider(active) },
           }),
           h('span', { className: 'rpc-switch-track', 'aria-hidden': 'true' }),
@@ -5756,7 +5855,11 @@ window.__ModuleLoader__.load({
             isFiniteNumber(credits.total) && credits.total > 0
               ? h('span', { className: 'rpc-credit-unit' }, '/ ' + formatCreditsNumber(credits.total, credits) + ' ' + creditsUnitOf(credits, t))
               : h('span', { className: 'rpc-credit-unit' }, creditsUnitOf(credits, t)),
-            credits.planName ? h('span', { className: 'rpc-chip' }, credits.planName) : null,
+            // planName 来自宿主 / 上游，非字符串（对象、数字）交给 React 会当场
+            // 抛「Objects are not valid as a React child」，整张卡变空白。
+            typeof credits.planName === 'string' && credits.planName !== ''
+              ? h('span', { className: 'rpc-chip' }, credits.planName)
+              : null,
             credits.exceeded ? h('span', { className: 'rpc-chip rpc-chip-warn' }, bind(t, qoderFreePlan ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
             credits.stale === true
               ? h('span', {
@@ -7971,7 +8074,7 @@ window.__ModuleLoader__.load({
           // Qoder Free：窄胶囊里显示短版「免费」，完整额度仍在 title / aria-label 里。
           var freePlan = isQoderFreePlan(row.entry.provider, snapshot)
           var dotColor = warn ? 'var(--dsh-rpc-warn, #9d5c00)' : accent
-          var label = row.entry.displayName + ' ' + formatCreditsText(snapshot, t) + (stale ? ' · ' + bind(t, 'creditsCached') : '')
+          var label = providerNameOf(row.entry) + ' ' + creditsHoverOf(snapshot, row.entry.provider, t) + (stale ? ' · ' + bind(t, 'creditsCached') : '')
           return h(
             'span',
             {
@@ -8094,7 +8197,7 @@ window.__ModuleLoader__.load({
             'aria-controls': expanded === true && wide ? PANEL_ID : undefined,
             'aria-label': rows
               .map(function (row) {
-                return row.entry.displayName + ' ' + formatCreditsText(row.credits, t)
+                return providerNameOf(row.entry) + ' ' + creditsHoverOf(row.credits, row.entry.provider, t)
               })
               .join(bind(t, 'listSeparator')),
             style: {
@@ -8244,7 +8347,8 @@ window.__ModuleLoader__.load({
               : typeof snapshot.error === 'string' ? snapshot.error : ''
             var meta = []
             if (problem !== undefined) meta.push(h('span', { key: 'problem', style: microChip('var(--dsh-rpc-warn, #9d5c00)'), title: problemDetail }, problem))
-            if (snapshot.planName !== undefined && snapshot.planName !== '') meta.push(h('span', { key: 'plan', style: microChip() }, snapshot.planName))
+            // 同样只认字符串：对象形式的 planName 会让侧栏面板整块渲染失败。
+            if (typeof snapshot.planName === 'string' && snapshot.planName !== '') meta.push(h('span', { key: 'plan', style: microChip() }, snapshot.planName))
             if (percent !== undefined) meta.push(h('span', { key: 'pct', style: microChip(warn ? 'var(--dsh-rpc-warn, #9d5c00)' : accent) }, bind(t, 'creditsPercent', { percent: percent })))
             if (activeAccount !== undefined && problem === undefined) meta.push(h('span', { key: 'acc', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', maxWidth: 108, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, bind(t, 'creditsCurrent', { label: accountNameOf(activeAccount, t) })))
             if (isFiniteNumber(snapshot.resetAtMs) && snapshot.resetAtMs > 0) meta.push(h('span', { key: 'reset', style: { fontSize: 10.5, color: 'var(--dsw-alias-label-secondary)', whiteSpace: 'nowrap' } }, bind(t, 'creditsResetShort', { date: formatShortDate(snapshot.resetAtMs) })))
@@ -8291,14 +8395,14 @@ window.__ModuleLoader__.load({
                     ? { background: 'transparent', boxShadow: 'inset 0 0 0 1.5px ' + (warn ? 'var(--dsh-rpc-warn, #9d5c00)' : accent) }
                     : {}),
                 }),
-                h('span', { style: { fontSize: 12, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, row.entry.displayName),
+                h('span', { style: { fontSize: 12, fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, providerNameOf(row.entry)),
                 exhausted ? h('span', { style: microChip('var(--dsh-rpc-warn, #9d5c00)') }, bind(t, qoderFree ? 'creditsFreeQueue' : 'creditsExhausted')) : null,
                 alert === 'low' ? h('span', { style: microChip('var(--dsh-rpc-warn, #9d5c00)') }, bind(t, 'alertLow')) : null,
                 h('span', { style: { flex: 1, minWidth: 4 } }),
                 h(
                   'span',
                   {
-                    title: formatCreditsText(snapshot, t),
+                    title: creditsHoverOf(snapshot, row.entry.provider, t),
                     style: { display: 'inline-flex', alignItems: 'baseline', gap: 4, whiteSpace: 'nowrap', flex: '0 0 auto' },
                   },
                   h('span', { style: { fontSize: 19, lineHeight: '22px', fontWeight: 650, fontVariantNumeric: 'tabular-nums', color: warn ? 'var(--dsh-rpc-warn, #9d5c00)' : 'var(--dsw-alias-label-primary)' } }, parts.big),
