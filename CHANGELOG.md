@@ -1,5 +1,69 @@
 # 更新记录
 
+## 0.7.9 — 2026-11-01
+
+第二十轮前后端打磨。主题是「读视图对齐」与「按家隔离」：另一个进程清空事件
+账本后，本进程的 `/status` 要立刻为空；多账号池里两个账号的同一错误不能被
+去重吞掉；保存按钮与浏览器登录的进行中状态按 provider 分开；高级设置在保存
+期间的新输入不能被成功回调覆盖。后端 5 处、前端 4 处。状态接口仍是 v8，
+设置文件仍是 v2，事件文件仍是 v1，额度缓存仍是 v1（只淘汰旧行，不改字段）。
+测试 **434 后端 + 158 前端**。
+
+### 事件账本
+
+- **清空后本进程的读视图仍显示旧事件**：0.7.8 只在**落盘前**采纳另一个进程的
+  清空时刻，本进程的 `/status` 要等到下一次记录 / 去抖写入 / 退出才对齐。
+  现在 `list()` / `summary()` / `record()` 都先看一次磁盘 mtime + size，
+  变了才解析文件并采纳 `clearedAt` —— 清空立刻生效，没变时不多读一次盘。
+  [lib/events.js](lib/events.js)
+- **去重签名漏了账号**：多账号池里 A、B 两个账号在时间窗内都因为同一个
+  「HTTP 503」失败时，只比 type / provider / level / message 会把 B 的失败
+  当成 A 的重复直接丢掉。现在账号 id 也是签名的一部分；同一账号的同一条失败
+  仍然只留一条。 [lib/events.js](lib/events.js)
+
+### 登录
+
+- **申请登录地址一次失败就要重点一次**：0.7.8 只给扫码后的 token / 账号信息
+  轮询加了瞬时故障重试，`POST /v2/plugin/auth/state` 仍然一次定生死。现在
+  断网 / 408 / 429 / 5xx 按 600ms 起步退避重试（默认 3 次），确定性 4xx 与
+  响应格式错误仍然立刻失败。 [lib/workbuddy/browser-login.js](lib/workbuddy/browser-login.js)
+- **未知 provider 被说成「只有 WorkBuddy 支持浏览器登录」**：`login-start`
+  带着拼错的 provider 会进入 `startLogin()`，返回一句产品限制；`login-cancel`
+  则静默 200。现在两者都要求已知 provider，否则回 400 `invalid-provider`。
+  [lib/index.js](lib/index.js)
+
+### 数据层
+
+- **额度缓存只增不减**：读取时超过 7 天的条目会被丢掉，落盘时却把磁盘上的
+  旧条目原样并回来 —— 文件里堆着一串永远读不到的账号快照。现在写盘按同样的
+  时效规则淘汰，并限制最多 24 条（保留 `fetchedAt` 最新的）。
+  [lib/credits-cache.js](lib/credits-cache.js)
+
+### 前端
+
+- **高级设置保存期间的新输入被回填覆盖**：`/settings` 要等一轮目录 + 额度
+  刷新（最长 90 秒），成功回调却无条件清掉 `advDirty` 并用服务端夹取值覆盖
+  输入框 —— 期间改的内容被悄悄丢掉，之后还会被下一次轮询再盖一次。现在按
+  「编辑代数」判断：期间有过修改就保留输入、不回填、不显示「已保存」。
+  [client/client.js](client/client.js)
+- **一家的保存锁住另一家的按钮**：连接区与新增账号的保存按钮共用一个 `save`
+  busy 键，WorkBuddy 的写入在飞时切到 Qoder，也会看到「保存中…」并禁用。
+  现在按 `save:<provider>` 隔离；模型 / 开关等没有对应按钮的写入仍用 `save`。
+  [client/client.js](client/client.js)
+- **一家的浏览器登录锁住另一家的登录按钮**：同样的问题，登录 busy 键改为
+  `login:<provider>`。 [client/client.js](client/client.js)
+- **stale 额度在卡片与账号行没有标记**：预警已经排除了旧快照，但汇总卡 meta
+  与账号行仍把旧数字当成当前值展示。两处都补上「已缓存」说明（账号行与到期
+  时间并列）。 [client/client.js](client/client.js)
+
+### 验证
+
+- 修前 / 修后双跑：`tests/audit-r20.test.mjs` 的 5 条在 0.7.8 快照
+  （`D:\Questions\_audit-r20\pre`）上全部失败；`client-credits` 的 4 条新断言
+  也全部失败。修后全部通过。
+- `node --test tests/*.test.mjs` → 434 通过；`node tests/client-credits.mjs`
+  → `client-credits: OK`（158 条断言）。
+
 ## 0.7.8 — 2026-10-31
 
 第十九轮前后端打磨。主题是「跨进程账本」与「界面说真话」：事件账本被清空后

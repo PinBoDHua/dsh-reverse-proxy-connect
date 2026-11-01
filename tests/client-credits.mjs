@@ -5156,7 +5156,160 @@ const r19Failures = []
   }
 }
 
-if (r18Failures.length > 0 || r19Failures.length > 0) {
+// ---------- 第二十轮审计（0.7.9）的前端回归 ----------
+const r20Failures = []
+{
+  const providersSnapshot = STATUS.providers
+  const settingsSnapshot = STATUS.settings
+
+  const mountCard = async (t) => {
+    cardTree = await mount(card, { t })
+    return cardTree
+  }
+  const openAccounts = async (tree, t) => {
+    const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    const tab = tabs.find((node) => textOf(node).startsWith(t('navAccounts')))
+    if (tab === undefined) throw new Error('找不到账号页签')
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+  const openProviderById = async (tree, provider, t) => {
+    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+  const patInputOf = (tree, t) => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === t('pat'))
+  const saveButtonsOf = (tree, t) => findAll(tree, (node) => node.type === 'button' && textOf(node) === t('save'))
+  const advancedInputOf = (tree, t) => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === t('advancedIdle'))
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  try {
+    // 1) 高级设置在保存期间的新输入不能被成功回调回填掉。
+    try {
+      let tree = await mountCard(realT)
+      const idle = advancedInputOf(tree, realT)
+      if (idle === undefined) throw new Error('找不到 setTimeout 输入框')
+      idle.props.onChange({ target: { value: '120' } })
+      tree = await render(card, { t: realT })
+      const save = find(tree, (node) => node.type === 'button' && textOf(node) === realT('advancedSave'))
+      if (save === undefined) throw new Error('找不到高级设置保存按钮')
+      fetchDelayFor = (body) => (body.includes('"advanced"') ? 180 : 0)
+      save.props.onClick()
+      tree = await render(card, { t: realT })
+      advancedInputOf(tree, realT).props.onChange({ target: { value: '200' } })
+      tree = await render(card, { t: realT }, true)
+      await sleep(260)
+      // 跳过 effect：迷你 hooks 每轮都会重跑挂载 effect（真实 React 只在依赖变化时）。
+      tree = await render(card, { t: realT }, true)
+      const value = advancedInputOf(tree, realT).props.value
+      if (value !== '200') throw new Error(`保存成功把期间输入的新值覆盖掉了：${JSON.stringify(value)}`)
+      if (textOf(tree).includes(realT('advancedSaved'))) {
+        throw new Error('期间有新修改时仍显示「已保存」')
+      }
+      fetchDelayFor = null
+      console.log('✓ 高级设置保存期间的新输入不会被回填覆盖')
+    } catch (error) {
+      fetchDelayFor = null
+      r20Failures.push('高级设置输入保护: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 高级设置输入保护: ' + String(error && error.message ? error.message : error))
+    } finally {
+      fetchDelayFor = null
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 2) 一家的保存还在飞时，另一家的保存按钮不能被锁成「保存中…」。
+    try {
+      let tree = await mountCard(realT)
+      tree = await openProviderById(tree, 'qoder-global', realT)
+      patInputOf(tree, realT).props.onChange({ target: { value: 'pt-A' } })
+      tree = await render(card, { t: realT })
+      const saves = saveButtonsOf(tree, realT)
+      if (saves.length === 0) throw new Error('找不到 Qoder 的保存按钮')
+      fetchDelayFor = (body) => (body.includes('pt-A') ? 180 : 0)
+      saves[0].props.onClick()
+      tree = await render(card, { t: realT })
+      tree = await openProviderById(tree, 'workbuddy', realT)
+      const wbSave = saveButtonsOf(tree, realT)
+      if (wbSave.length === 0) {
+        throw new Error('另一家的保存按钮被全局 busy 键锁成了「保存中…」')
+      }
+      if (wbSave[0].props.disabled === true) throw new Error('另一家的保存按钮仍是禁用态')
+      await sleep(240)
+      fetchDelayFor = null
+      console.log('✓ 一家的保存不会锁住另一家的保存按钮')
+    } catch (error) {
+      fetchDelayFor = null
+      r20Failures.push('按家保存 busy: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 按家保存 busy: ' + String(error && error.message ? error.message : error))
+    } finally {
+      fetchDelayFor = null
+      STATUS.providers = providersSnapshot
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 3) 一家的浏览器登录还在申请地址时，另一家的「登录」按钮不能被锁。
+    try {
+      let tree = await mountCard(realT)
+      tree = await openAccounts(tree, realT)
+      const add = find(tree, (node) => node.type === 'button' && textOf(node) === realT('loginAdd'))
+      if (add === undefined) throw new Error('找不到浏览器登录按钮')
+      fetchDelayMs = 150
+      add.props.onClick()
+      tree = await render(card, { t: realT })
+      tree = await openProviderById(tree, 'workbuddy-ai', realT)
+      const other = find(tree, (node) => node.type === 'button' && textOf(node) === realT('loginAdd'))
+      if (other === undefined) throw new Error('另一家的登录按钮被全局 busy 键锁成了「正在打开…」')
+      await sleep(220)
+      fetchDelayMs = 0
+      console.log('✓ 一家的浏览器登录不会锁住另一家的登录按钮')
+    } catch (error) {
+      fetchDelayMs = 0
+      r20Failures.push('按家登录 busy: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 按家登录 busy: ' + String(error && error.message ? error.message : error))
+    } finally {
+      fetchDelayMs = 0
+      STATUS.providers = providersSnapshot
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 4) 旧额度快照要有「已缓存」标记：卡片 meta 与账号行两处都不能把旧数字说成当前值。
+    try {
+      const base = providersSnapshot[0]
+      const staleCredits = { state: 'ok', remain: 675, total: 1200, unit: 'credits', stale: true, error: 'HTTP 503' }
+      STATUS.providers = [
+        {
+          ...base,
+          credits: staleCredits,
+          accounts: base.accounts.map((account, index) => (index === 0 ? { ...account, credits: staleCredits } : account)),
+        },
+        ...providersSnapshot.slice(1),
+      ]
+      let tree = await mountCard(realT)
+      if (!textOf(tree).includes(realT('creditsCached'))) throw new Error('汇总卡没有给旧额度加「已缓存」标记')
+      tree = await openAccounts(tree, realT)
+      const rows = findAll(tree, (node) => node.props?.role === 'row' && textOf(node).includes('本机登录'))
+      if (rows.length === 0) throw new Error('找不到账号行')
+      if (!textOf(rows[0]).includes(realT('creditsCached'))) throw new Error('账号行没有给旧额度加「已缓存」标记')
+      console.log('✓ 旧额度在汇总卡与账号行都标为「已缓存」')
+    } catch (error) {
+      r20Failures.push('旧额度标记: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 旧额度标记: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+      cardTree = await mount(card, { t: (key) => key })
+    }
+  } finally {
+    STATUS.providers = providersSnapshot
+    STATUS.settings = settingsSnapshot
+    fetchDelayFor = null
+    fetchDelayMs = 0
+  }
+}
+
+if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0) {
   if (r18Failures.length > 0) {
     console.error(`R18 前端回归 ${String(r18Failures.length)} 条失败：`)
     for (const line of r18Failures) console.error('- ' + line)
@@ -5164,6 +5317,10 @@ if (r18Failures.length > 0 || r19Failures.length > 0) {
   if (r19Failures.length > 0) {
     console.error(`R19 前端回归 ${String(r19Failures.length)} 条失败：`)
     for (const line of r19Failures) console.error('- ' + line)
+  }
+  if (r20Failures.length > 0) {
+    console.error(`R20 前端回归 ${String(r20Failures.length)} 条失败：`)
+    for (const line of r20Failures) console.error('- ' + line)
   }
   process.exitCode = 1
 } else {

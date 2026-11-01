@@ -3078,6 +3078,21 @@ window.__ModuleLoader__.load({
       }
       var isBusy = function (key) { return busy[key] === true }
       var busyNow = function (key) { return busyRef.current[key] === true }
+      /**
+       * 「保存这一家」的 busy 键。
+       *
+       * 连接区 / 新增账号的保存按钮都只对当前 provider 负责：整张卡片共用一个
+       * `save` 键时，WorkBuddy 的写入还在飞，切到 Qoder 也会看到自己的保存按钮
+       * 变成「保存中…」并禁用 —— 用户以为 Qoder 的输入出了问题（0.7.8 的已知
+       * 遗留，只影响交互不影响数据）。
+       */
+      var saveKeyOf = function (provider) {
+        return 'save:' + (typeof provider === 'string' && provider !== '' ? provider : '?')
+      }
+      /** 「打开这一家的浏览器登录」的 busy 键（同一套按 provider 隔离的理由）。 */
+      var loginKeyOf = function (provider) {
+        return 'login:' + (typeof provider === 'string' && provider !== '' ? provider : '?')
+      }
       var tabState = useState(props.initialProvider || 'workbuddy')
       var activeTab = tabState[0]
       var setActiveTab = tabState[1]
@@ -3448,6 +3463,19 @@ window.__ModuleLoader__.load({
        *   而不是停在旧值直到整页刷新。
        */
       var advDirty = useRef(false)
+      /**
+       * 高级设置的「编辑代数」。
+       *
+       * 保存请求要等一轮目录 + 额度刷新（最长 90 秒），期间用户完全可能继续改
+       * 输入框。成功回调不能拿服务端夹取值把这段时间里的新输入覆盖掉，也不能
+       * 把 `advDirty` 清成 false（那会让下一次轮询用旧值整份盖回来）。
+       * 每次输入 / 勾选都 +1；只有点保存时的代数没变，才允许回填与清脏。
+       */
+      var advEditSeq = useRef(0)
+      var advTouch = function () {
+        advEditSeq.current += 1
+        advDirty.current = true
+      }
 
       // 高级设置：只要用户没在编辑，就跟随宿主每次下发的值（含外部修改）。
       useEffect(function () {
@@ -3618,12 +3646,17 @@ window.__ModuleLoader__.load({
        * 时用 `options.onError`。
        *
        * @param patch - 设置补丁。
-       * @param options - `{ seq?, modelKeys?, settle?, onSuccess?, onError? }`。
+       * @param options - `{ seq?, modelKeys?, saveKey?, settle?, onSuccess?, onError? }`。
        * @returns 最新的状态文档（失败时为 undefined）。
        */
       var mutate = function (patch, options) {
         if (status === undefined) return Promise.resolve()
-        beginBusy('save')
+        // 保存按钮的「进行中」状态按 provider 分开；模型 / 开关等没有对应
+        // 按钮的写入继续共用 `save` 键。
+        var saveKey = options !== undefined && typeof options.saveKey === 'string' && options.saveKey !== ''
+          ? options.saveKey
+          : 'save'
+        beginBusy(saveKey)
         // 模型开关会先记意图再调用；其它写入在这里取号。
         var seq = options !== undefined && isFiniteNumber(options.seq) && options.seq > 0
           ? options.seq
@@ -3664,7 +3697,7 @@ window.__ModuleLoader__.load({
             }
             if (seq === writeSeq.current) {
               setError(undefined)
-              endBusy('save')
+              endBusy(saveKey)
               if (options !== undefined && typeof options.onSuccess === 'function') options.onSuccess()
             }
             return document
@@ -3681,7 +3714,7 @@ window.__ModuleLoader__.load({
             // 写入（已经包含用户在它之后做的改动）还在飞；把 onError 交给旧
             // 写入还会误删新写入的意图（provider 开关会卡在服务端旧值上）。
             if (seq !== writeSeq.current) return undefined
-            endBusy('save')
+            endBusy(saveKey)
             setError(String(failure && failure.message ? failure.message : failure))
             if (options !== undefined && typeof options.onError === 'function') {
               try {
@@ -3754,13 +3787,15 @@ window.__ModuleLoader__.load({
         mutate(patchOf(next), { onError: settle, settle: settle })
       }
       var toggleProvider = function (entry) {
-        if (busyNow('save')) return
+        var saveKey = saveKeyOf(entry.provider)
+        if (busyNow(saveKey)) return
         var pending = pendingProviderEnabled.current[entry.provider]
         var next = pending === undefined ? !(entry.enabled !== false) : !pending
         pendingProviderEnabled.current[entry.provider] = next
         var providersPatch = {}
         providersPatch[entry.provider] = { enabled: next }
         mutate({ providers: providersPatch }, {
+          saveKey: saveKey,
           // 保存失败时丢掉本地猜测：否则开关会停在「用户点出来的值」上，
           // 看起来已经生效，实际服务端没变，直到下一轮轮询才翻回去。
           onError: function () { delete pendingProviderEnabled.current[entry.provider] },
@@ -3841,23 +3876,24 @@ window.__ModuleLoader__.load({
        * 就多了一个账号。所以这里只负责「发一次请求 + 轮询状态」。
        */
       var startLogin = function (provider) {
-        if (status === undefined || busyNow('login')) return
+        var loginKey = loginKeyOf(provider)
+        if (status === undefined || busyNow(loginKey)) return
         loginPollToken.current += 1
         var token = loginPollToken.current
         if (loginPollTimer.current !== undefined) {
           clearTimeout(loginPollTimer.current)
           loginPollTimer.current = undefined
         }
-        beginBusy('login')
+        beginBusy(loginKey)
         postJson(ACTION_PATH, { action: 'login-start', provider: provider }, status.key)
           .then(function (document) {
-            endBusy('login')
+            endBusy(loginKey)
             if (document.status !== undefined) applyStatus(document.status)
             setError(undefined)
             pollLogin(provider, 0, token)
           })
           .catch(function (failure) {
-            endBusy('login')
+            endBusy(loginKey)
             setError(String(failure && failure.message ? failure.message : failure))
           })
       }
@@ -4074,6 +4110,8 @@ window.__ModuleLoader__.load({
         // 高级设置也是 /settings 写入：必须和模型 / 账号写入共用写入序号，
         // 否则更早发出、更晚返回的模型响应会把刚保存的高级设置整份盖回旧值。
         var seq = nextWriteSeq()
+        // 点下保存那一刻的编辑代数：请求在飞时用户继续改的输入不能被回填覆盖。
+        var editSeqAtSave = advEditSeq.current
         postJson(SETTINGS_PATH, {
           advanced: {
             idleTimeoutMs: toMs(advIdle, current.idleTimeoutMs || 180000),
@@ -4096,8 +4134,14 @@ window.__ModuleLoader__.load({
           },
         }, status.key)
           .then(function (document) {
-            // 保存成功：草稿已经落到服务端，从此重新跟随宿主下发值。
-            advDirty.current = false
+            // 保存请求在飞时用户又改过：这次响应只代表「点击那一刻的值」已经
+            // 落盘。此时既不能把 advDirty 清掉（下一轮轮询会用服务端旧值盖回
+            // 新输入），也不能用响应里的夹取值回填输入框。
+            var unchangedSinceSave = advEditSeq.current === editSeqAtSave
+            if (unchangedSinceSave) {
+              // 保存成功：草稿已经落到服务端，从此重新跟随宿主下发值。
+              advDirty.current = false
+            }
             // 与 mutate() 同一套规则：只有比已应用的响应更新才接管整份状态。
             // 高级设置自己的字段仍然按本次响应回填（另一家的模型写入不会改它们）。
             if (seq > lastAppliedSeq.current) {
@@ -4106,6 +4150,7 @@ window.__ModuleLoader__.load({
             }
             endBusy('advanced')
             setError(undefined)
+            if (!unchangedSinceSave) return document
             // 只有真的保存成功才显示「已保存」。
             setAdvSaved(true)
             // 用服务端夹取后的值回填草稿：用户输入 9999 秒会被夹到 900 秒，
@@ -4239,12 +4284,12 @@ window.__ModuleLoader__.load({
         // 账号池存在时必须写进「当前账号」，否则写的是被忽略的旧字段，
         // 用户会看到「保存成功但状态没变」。
         if (accountRows.length > 0 && activeRow !== undefined) {
-          mutate(activeAccountPatch({ pat: pat }), { onSuccess: done })
+          mutate(activeAccountPatch({ pat: pat }), { saveKey: saveKeyOf(provider), onSuccess: done })
           return
         }
         var patch = { qoder: {} }
         patch.qoder[provider] = { pat: pat }
-        mutate(patch, { onSuccess: done })
+        mutate(patch, { saveKey: saveKeyOf(provider), onSuccess: done })
       }
 
       var clearPat = function () {
@@ -4257,12 +4302,12 @@ window.__ModuleLoader__.load({
         if (accountRows.length > 0 && activeRow !== undefined) {
           // 清空草稿必须同时丢掉「按 provider 记住的草稿」：只清可见输入框的话，
           // 切走再切回会由草稿恢复 effect 把那串刚被清除的 PAT 重新填回来。
-          mutate(activeAccountPatch({ forget: true }), { onSuccess: done })
+          mutate(activeAccountPatch({ forget: true }), { saveKey: saveKeyOf(provider), onSuccess: done })
           return
         }
         var patch = { qoder: {} }
         patch.qoder[provider] = { pat: '' }
-        mutate(patch, { onSuccess: done })
+        mutate(patch, { saveKey: saveKeyOf(provider), onSuccess: done })
       }
 
       var saveDesktop = function () {
@@ -4275,6 +4320,7 @@ window.__ModuleLoader__.load({
         var patch = { workbuddy: {} }
         patch.workbuddy[provider] = { electronPath: appPath, authFile: authFile }
         mutate(patch, {
+          saveKey: saveKeyOf(provider),
           onSuccess: function () {
             // 不传 setter：输入框展示的是「当前生效的路径」，保存后没变就不该清空。
             completeDraft(provider, 'authFile', authSnapshot)
@@ -4291,7 +4337,10 @@ window.__ModuleLoader__.load({
         var snapshot = draftOf(provider, 'authFile')
         var patch = { trae: {} }
         patch.trae[provider] = { storageFile: authFile }
-        mutate(patch, { onSuccess: function () { completeDraft(provider, 'authFile', snapshot) } })
+        mutate(patch, {
+          saveKey: saveKeyOf(provider),
+          onSuccess: function () { completeDraft(provider, 'authFile', snapshot) },
+        })
       }
 
       var copyDiagnostics = function () {
@@ -4434,6 +4483,9 @@ window.__ModuleLoader__.load({
             : bind(t, credits.state === 'none' ? 'creditsNone' : 'creditsUnreadable')
         var modelCount = isFiniteNumber(entry.modelCount) ? entry.modelCount : safeArray(entry.models).length
         var metaParts = [String(modelCount) + ' ' + bind(t, modelCount === 1 ? 'modelsOne' : 'models')]
+        // 读失败后保留的旧快照要标出来：卡片上的数字与侧栏一样，不能把
+        // 「上次读到的余额」当成当前事实（预警已经排除了 stale，这里补说明）。
+        if (credits.stale === true && credits.state === 'ok') metaParts.push(bind(t, 'creditsCached'))
         if (isFiniteNumber(today.requests) && today.requests > 0) {
           metaParts.push(formatNumber(today.requests) + ' ' + bind(t, today.requests === 1 ? 'usageCallOne' : 'usageCalls'))
         }
@@ -4902,7 +4954,7 @@ window.__ModuleLoader__.load({
       var loginJob = active.login
       var loginWaiting = loginJob !== undefined && (loginJob.phase === 'waiting' || loginJob.phase === 'starting')
       // 登录等待中也要禁用「新增账号」：否则连点几次会起多个登录任务。
-      var loginBusy = isBusy('login') || loginWaiting
+      var loginBusy = isBusy(loginKeyOf(active.provider)) || loginWaiting
       // 删除确认态：只允许一个账号处于「再次点击确认删除」，3 秒后自动复原。
       var clearDeleteConfirm = function () {
         if (deleteConfirmTimer.current !== undefined) {
@@ -4939,6 +4991,12 @@ window.__ModuleLoader__.load({
           creditsExpiry = isFiniteNumber(snapshot.resetAtMs) && snapshot.resetAtMs > 0
             ? bind(t, 'accountCreditsExpiry', { date: formatMonthDayTime(snapshot.resetAtMs) })
             : bind(t, 'accountNoExpiry')
+        }
+        // 旧快照（stale）必须在行内说明：数字虽然还在，但它代表的是「上次
+        // 成功读到」，不是当前余额。只降不透明度不够，读屏与截图都看不出区别。
+        if (snapshot.stale === true && snapshot.state === 'ok') {
+          var cachedHint = bind(t, 'creditsCached')
+          creditsExpiry = creditsExpiry === '' ? cachedHint : creditsExpiry + ' · ' + cachedHint
         }
         var creditsAlert = alertOfCredits(snapshot, alertRatio, active.provider, alertsEnabled)
         var creditsColor = freePlan
@@ -5217,7 +5275,7 @@ window.__ModuleLoader__.load({
       var addAccount = function () {
         // 保存请求在飞时再点一次会创建两个同密钥账号（旧代码的 disabled
         // 依赖一个从未被设置的 'accounts' 键，等于没有保护）。
-        if (busyNow('save')) return
+        if (busyNow(saveKeyOf(active.provider))) return
         var provider = active.provider
         var labelDraft = accLabel.trim()
         var secret = accSecret.trim()
@@ -5239,6 +5297,7 @@ window.__ModuleLoader__.load({
         // 只有保存成功才清空输入；失败时保留用户刚粘贴的 PAT。期间切走或又输入
         // 了新账号时，completeDraft 会保留那份更新内容。
         mutate(patch, {
+          saveKey: saveKeyOf(provider),
           onSuccess: function () {
             completeDraft(provider, 'accLabel', labelSnapshot, setAccLabel)
             completeDraft(provider, 'accSecret', secretSnapshot, setAccSecret)
@@ -5448,7 +5507,7 @@ window.__ModuleLoader__.load({
                   h('button', {
                     type: 'button',
                     className: 'rpc-btn rpc-btn-primary rpc-btn-sm',
-                    disabled: isBusy('save') || accSecret.trim() === '',
+                    disabled: isBusy(saveKeyOf(active.provider)) || accSecret.trim() === '',
                     onClick: addAccount,
                   }, rpcIcon('plus', 13), bind(t, 'addAccount'))),
                 h('input', {
@@ -6507,9 +6566,9 @@ window.__ModuleLoader__.load({
               className: 'rpc-btn-link',
             }, bind(t, 'patOpen'))),
           h('div', { key: 'btns', style: S.row },
-            h('button', { type: 'button', className: 'rpc-btn rpc-btn-primary', style: S.buttonPrimary, onClick: savePat, disabled: isBusy('save') || patDraft.trim() === '' },
-              rpcIcon('check', 14), isBusy('save') ? bind(t, 'saving') : bind(t, 'save')),
-            h('button', { type: 'button', className: 'rpc-btn', style: S.button, onClick: clearPat, disabled: isBusy('save') || !configured },
+            h('button', { type: 'button', className: 'rpc-btn rpc-btn-primary', style: S.buttonPrimary, onClick: savePat, disabled: isBusy(saveKeyOf(active.provider)) || patDraft.trim() === '' },
+              rpcIcon('check', 14), isBusy(saveKeyOf(active.provider)) ? bind(t, 'saving') : bind(t, 'save')),
+            h('button', { type: 'button', className: 'rpc-btn', style: S.button, onClick: clearPat, disabled: isBusy(saveKeyOf(active.provider)) || !configured },
               bind(t, 'clear'))),
         )
       } else if (active.kind === 'desktop-auth') {
@@ -6533,8 +6592,8 @@ window.__ModuleLoader__.load({
             rpcIcon(traeConfigured ? 'check' : 'alert', 13),
             traeConfigured ? bind(t, 'traeSignedIn', { name: credential.name || credential.userId || '—' }) : bind(t, 'traeSignInHint')),
           h('div', { key: 'btns', style: S.row },
-            h('button', { type: 'button', className: 'rpc-btn rpc-btn-primary', style: S.buttonPrimary, onClick: saveTrae, disabled: isBusy('save') },
-              rpcIcon('check', 14), isBusy('save') ? bind(t, 'saving') : bind(t, 'save'))),
+            h('button', { type: 'button', className: 'rpc-btn rpc-btn-primary', style: S.buttonPrimary, onClick: saveTrae, disabled: isBusy(saveKeyOf(active.provider)) },
+              rpcIcon('check', 14), isBusy(saveKeyOf(active.provider)) ? bind(t, 'saving') : bind(t, 'save'))),
         )
       } else {
         connectionBody.push(
@@ -6563,8 +6622,8 @@ window.__ModuleLoader__.load({
             }),
             h('span', { className: 'rpc-inline-note', style: S.hintTiny }, rpcIcon('key', 13), bind(t, 'authFileHint'))),
           h('div', { key: 'btns', style: S.row },
-            h('button', { type: 'button', className: 'rpc-btn rpc-btn-primary', style: S.buttonPrimary, onClick: saveDesktop, disabled: isBusy('save') },
-              rpcIcon('check', 14), isBusy('save') ? bind(t, 'saving') : bind(t, 'save'))),
+            h('button', { type: 'button', className: 'rpc-btn rpc-btn-primary', style: S.buttonPrimary, onClick: saveDesktop, disabled: isBusy(saveKeyOf(active.provider)) },
+              rpcIcon('check', 14), isBusy(saveKeyOf(active.provider)) ? bind(t, 'saving') : bind(t, 'save'))),
         )
       }
 
@@ -6635,7 +6694,7 @@ window.__ModuleLoader__.load({
                 min: 15,
                 max: 900,
                 value: advIdle,
-                onChange: function (event) { advDirty.current = true; setAdvIdle(event.target.value) },
+                onChange: function (event) { advTouch(); setAdvIdle(event.target.value) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedIdleHint')),
               advErrors.idle !== ''
@@ -6652,7 +6711,7 @@ window.__ModuleLoader__.load({
                   min: 120,
                   max: 86400,
                   value: advCatalog,
-                  onChange: function (event) { advDirty.current = true; setAdvCatalog(event.target.value) },
+                  onChange: function (event) { advTouch(); setAdvCatalog(event.target.value) },
                 }),
                 advErrors.catalog !== ''
                   ? h('span', { key: 'catalog-err', role: 'alert', style: S.hintWarn }, advErrorText('catalog'))
@@ -6667,7 +6726,7 @@ window.__ModuleLoader__.load({
                   min: 30,
                   max: 21600,
                   value: advCredits,
-                  onChange: function (event) { advDirty.current = true; setAdvCredits(event.target.value) },
+                  onChange: function (event) { advTouch(); setAdvCredits(event.target.value) },
                 }),
                 advErrors.credits !== ''
                   ? h('span', { key: 'credits-err', role: 'alert', style: S.hintWarn }, advErrorText('credits'))
@@ -6683,7 +6742,7 @@ window.__ModuleLoader__.load({
                   min: 1,
                   max: 95,
                   value: advAlert,
-                  onChange: function (event) { advDirty.current = true; setAdvAlert(event.target.value) },
+                  onChange: function (event) { advTouch(); setAdvAlert(event.target.value) },
                 }),
                 h('span', { style: S.hintTiny }, bind(t, 'advancedAlertHint')),
                 advErrors.alert !== ''
@@ -6699,7 +6758,7 @@ window.__ModuleLoader__.load({
                   min: 0,
                   max: 50,
                   value: advSwitch,
-                  onChange: function (event) { advDirty.current = true; setAdvSwitch(event.target.value) },
+                  onChange: function (event) { advTouch(); setAdvSwitch(event.target.value) },
                 }),
                 h('span', { style: S.hintTiny }, bind(t, 'advancedSwitchHint')),
                 advErrors.switchRatio !== ''
@@ -6715,7 +6774,7 @@ window.__ModuleLoader__.load({
                 min: 15,
                 max: 180,
                 value: advQueue,
-                onChange: function (event) { advDirty.current = true; setAdvQueue(event.target.value) },
+                onChange: function (event) { advTouch(); setAdvQueue(event.target.value) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedQueueHint')),
               advErrors.queue !== ''
@@ -6726,7 +6785,7 @@ window.__ModuleLoader__.load({
                 type: 'checkbox',
                 className: 'rpc-check',
                 checked: advStats !== false,
-                onChange: function () { advDirty.current = true; setAdvStats(!(advStats !== false)) },
+                onChange: function () { advTouch(); setAdvStats(!(advStats !== false)) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedStats'))),
             h('label', { key: 'cache', className: 'rpc-check-label', style: { cursor: 'pointer' } },
@@ -6734,7 +6793,7 @@ window.__ModuleLoader__.load({
                 type: 'checkbox',
                 className: 'rpc-check',
                 checked: advCache !== false,
-                onChange: function () { advDirty.current = true; setAdvCache(!(advCache !== false)) },
+                onChange: function () { advTouch(); setAdvCache(!(advCache !== false)) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedCache'))),
             h('label', { key: 'alerts', className: 'rpc-check-label', style: { cursor: 'pointer' } },
@@ -6742,7 +6801,7 @@ window.__ModuleLoader__.load({
                 type: 'checkbox',
                 className: 'rpc-check',
                 checked: advAlertsEnabled !== false,
-                onChange: function () { advDirty.current = true; setAdvAlertsEnabled(!(advAlertsEnabled !== false)) },
+                onChange: function () { advTouch(); setAdvAlertsEnabled(!(advAlertsEnabled !== false)) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedAlertsEnabled'))),
             h('label', { key: 'probe', className: 'rpc-check-label', style: { cursor: 'pointer' } },
@@ -6750,7 +6809,7 @@ window.__ModuleLoader__.load({
                 type: 'checkbox',
                 className: 'rpc-check',
                 checked: advProbeEnabled !== false,
-                onChange: function () { advDirty.current = true; setAdvProbeEnabled(!(advProbeEnabled !== false)) },
+                onChange: function () { advTouch(); setAdvProbeEnabled(!(advProbeEnabled !== false)) },
               }),
               h('span', { style: S.hintTiny }, bind(t, 'advancedProbe'))),
             h('div', { key: 'btn', style: S.row },
