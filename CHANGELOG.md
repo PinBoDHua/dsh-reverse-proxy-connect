@@ -1,5 +1,83 @@
 # 更新记录
 
+## 0.8.1 — 2026-11-01
+
+第二十二轮前后端打磨。主题是「没发生的事不能当成发生」：原样保存一次凭证会把
+额度历史写成墓碑；Qoder 身份交换的共享任务仍绑在第一个调用方的取消上；能力
+探测全部失败却报告「探测成功」；目录缓存把上游合法的小数 token 数整条丢掉。
+前端：登录轮询撞上一次 20 秒轮询就永久停掉；被后续写入超过的保存成功后草稿
+仍然留着；取消失败静默且动作错误会被下一轮轮询清掉；剪贴板同步抛错没有兜底；
+趋势的 ETA 非有限值没有任何说明、单点画空图表、极值点产出 NaN 坐标；连续两次
+夹取提示被上一次的定时器提前清掉。后端 4 处、前端 7 处。状态接口仍是 v8，设置
+文件仍是 v2，事件文件仍是 v1，额度缓存仍是 v1（无字段增删）。测试 **445 后端 +
+171 前端**。
+
+### 后端
+
+- **原样保存凭证把额度历史清零**：浏览器每次保存连接区 / 账号都会把当前
+  `authFile` / `pat` 原样回传，`credentialTargetsOf()` 只看「字段存在」，于是
+  一次没有任何变化的点击被当成换凭证 —— 这家 provider 的额度历史写成墓碑，
+  卡片上的「今日消耗」当场归零。现在按账号 id 与写入前的设置比对
+  `pat` / `authFile` / `token`（provider 级旧字段也逐项比对），只有值真的变了
+  才作废旧状态；`forget: true` 与新增账号仍然照常作废。
+  [lib/patch.js](lib/patch.js) [lib/index.js](lib/index.js)
+- **Qoder 身份交换的共享任务绑在第一个调用方的 signal 上**：`/status` 探测
+  （无 signal）与聊天请求同时首次解析同一账号时，聊天请求一取消就把共享的
+  fetch 打断，探测拿到 AbortError 并把整家显示成凭证失效。现在共享任务用独立
+  超时跑完，每个调用方各自 `raceAbort()` —— 与 WorkBuddy / Trae 的续期同一
+  条规则。 [lib/runtime.js](lib/runtime.js)
+- **能力探测把所有请求失败算成「探测成功」**：`#probeOne()` 把非档位限制的
+  失败（503、断网、限流、凭证失效）都当作可用，`probeProvider()` 仍返回
+  `probed = 模型数`；上层据此清空旧结论、把 `lastRunAt` 推后 6 小时，CLI 的
+  `probed === 0` 分支永远走不到。现在区分「可用 / 账号不支持 / 无结论」，`probed`
+  只数有结论的模型；一个结论都没有时保留旧结论、不算跑成一家，没结论的模型
+  也不清掉上一次的标记。 [lib/runtime.js](lib/runtime.js)
+  [lib/index.js](lib/index.js) [lib/bin.js](lib/bin.js)
+- **目录缓存丢掉合法的小数 token 数**：`positive()` 要求 `Number.isSafeInteger`，
+  上游目录里的 `max_input_tokens: 128000.5`（实时路径会向下取整并正常服务）
+  会让整条模型行在重启 / 断网后消失。现在与 `lib/adapter.js` 的 `tokenCount()`
+  同一口径：有限正数向下取整。 [lib/catalog-cache.js](lib/catalog-cache.js)
+
+### 前端
+
+- **登录轮询一次碰撞就永久停止**：与 20 秒轮询撞上时 `load()` 返回 `undefined`，
+  `pollLogin()` 当作「没有登录任务」直接 return —— 宿主随后登录成功，界面仍
+  停在「正在打开…」，新账号永远不出现。现在「取不到状态」会继续下一拍，
+  网络失败也不再结束登录监视。 [client/client.js](client/client.js)
+- **保存成功但草稿不清**：`onSuccess` 也被 `seq === writeSeq.current` 挡住，
+  保存还没回来时用户点一下模型开关（写入序号更大），保存成功后 PAT 输入框
+  仍然留着，看起来像「没保存上」。现在成功回调不受写入序号约束（它本来就按
+  provider + 快照双重保护），只有横幅归属仍按序号判断。
+  [client/client.js](client/client.js)
+- **取消失败静默 + 动作错误被轮询清掉**：`login-cancel` 失败时 `.catch` 是空的，
+  轮询停了、按钮还在，用户以为已经取消；而任何一次成功的 `/status` 都会
+  `setError(undefined)`，保存 / 签到失败的红条在下一轮轮询后消失。现在取消失败
+  会给出横幅；动作错误与连接错误分开存，轮询成功只清连接错误。
+  [client/client.js](client/client.js)
+- **剪贴板同步抛错 / 返回非 thenable 没有兜底**：部分宿主 / polyfill 会同步
+  抛 `Illegal invocation` 或返回 `undefined`，旧实现只接了 Promise 的拒绝分支，
+  结果是未处理异常、按钮毫无反应。现在同步异常与不可确认的返回值都走「复制
+  失败」+ 手动复制框。 [client/client.js](client/client.js)
+- **趋势：ETA 非有限值无说明、单点画空图表、极值点产出 NaN**：`etaMs` 为
+  `Infinity / 0 / 负数 / NaN` 时既不显示 ETA chip 也不提示「样本不足」；只有一个
+  有效点时仍渲染空的折线容器；`max - min` 溢出成 Infinity 后 `points` 出现
+  `NaN` 坐标。现在不可用的 ETA 统一提示、少于两个有效点不画折线、坐标非有限
+  时回落平线。 [client/client.js](client/client.js)
+- **连续两次夹取提示被旧定时器提前清掉**：第二次保存刚亮起「已按宿主安全范围
+  保存」，第一次保存的 6 秒定时器到点就把新提示关了。现在提示带代数，只关自己
+  那一次。 [client/client.js](client/client.js)
+
+### 验证
+
+- 修前 / 修后双跑：`tests/audit-r22.test.mjs` 的 6 条在 0.8.0 快照
+  （`D:\Questions\_audit-r22\pre`）上全部失败；`client-credits` 的 6 条新断言
+  也全部失败（登录轮询续跑、保存清草稿、取消失败横幅、剪贴板兜底、趋势展示、
+  夹取提示）。修后全部通过。
+- `node --test tests/*.test.mjs` → 445 通过；`node tests/client-credits.mjs`
+  → `client-credits: OK`（171 个检查点）。
+- 兼容性：`/status` 仍为 8（`probe.results` 无新字段，`probed` 只是数得更准），
+  `settings.json` 仍为 v2，事件文件 / 额度缓存 / 目录缓存均为 v1，无字段增删。
+
 ## 0.8.0 — 2026-11-01
 
 第二十一轮前后端打磨。主题是「瞬时故障不当成登录失效」与「证据按时间说话」：

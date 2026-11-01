@@ -1834,7 +1834,10 @@ window.__ModuleLoader__.load({
       var span = max - min
       var coordinates = valid.map(function (point, index) {
         var x = valid.length === 1 ? 50 : (index / (valid.length - 1)) * 100
-        var y = span <= 0 ? 12 : 22 - ((point.remain - min) / span) * 20
+        // `max - min` 在 1e308 / -1e308 这种两端极值上会溢出成 Infinity，
+        // 归一化后得到 `Infinity / Infinity = NaN`，SVG 的 points 直接坏掉。
+        var y = (!isFiniteNumber(span) || span <= 0) ? 12 : 22 - ((point.remain - min) / span) * 20
+        if (!isFiniteNumber(y)) y = 12
         return String(Math.round(x * 10) / 10) + ',' + String(Math.round(y * 10) / 10)
       })
       return h('svg', {
@@ -3117,9 +3120,18 @@ window.__ModuleLoader__.load({
       var statusState = useState(undefined)
       var status = statusState[0]
       var setStatus = statusState[1]
-      var errorState = useState(undefined)
-      var error = errorState[0]
-      var setError = errorState[1]
+      // 动作失败与「连不上宿主」是两种不同的错误，不能共用一份状态：
+      // 轮询每 20 秒成功一次就把动作失败的横幅清掉，用户会以为失败没发生
+      // （保存 / 签到失败的红条在下一轮 /status 成功后消失）。这里分开存，
+      // 动作错误只由下一次动作成功清除，轮询只负责连接错误。
+      var actionErrorState = useState(undefined)
+      var actionError = actionErrorState[0]
+      var setActionError = actionErrorState[1]
+      var connectionErrorState = useState(undefined)
+      var connectionError = connectionErrorState[0]
+      var setConnectionError = connectionErrorState[1]
+      // 横幅优先显示动作错误（它更贴近用户刚做的操作）。
+      var error = actionError !== undefined ? actionError : connectionError
       // 2.0.0：每类操作一个 busy 键。单字符串会让「额度刷新完成」把还在
       // 保存中的设置按钮重新点亮，也会让一个模型开关把无关按钮显示成「保存中」。
       var busyState = useState({})
@@ -3269,6 +3281,9 @@ window.__ModuleLoader__.load({
       var advNoticeState = useState('')
       var advNotice = advNoticeState[0]
       var setAdvNotice = advNoticeState[1]
+      // 提示的代数：连续两次保存各设一条 6 秒定时器时，第一次的定时器会在
+      // 第二次的提示还没到 6 秒时把它提前清掉（看起来像提示一闪而过）。
+      var advNoticeSeq = useRef(0)
       // 1.1.0：两个比例阈值（预警 / 自动换号），以百分数展示。
       var advAlertState = useState('')
       var advAlert = advAlertState[0]
@@ -3340,16 +3355,17 @@ window.__ModuleLoader__.load({
             .then(function (document) {
               statusLoading.current = false
               lastStatusAt.current = Date.now()
+              // 连通性已恢复：只清「连不上宿主」，不动动作失败的横幅。
+              setConnectionError(undefined)
               if (epoch !== statusEpoch.current) return document
               applyStatus(document)
-              setError(undefined)
               return document
             }, function (failure) {
               statusLoading.current = false
-              setError(String(failure && failure.message ? failure.message : failure))
+              setConnectionError(String(failure && failure.message ? failure.message : failure))
             })
         },
-        [setStatus, setError],
+        [setStatus, setConnectionError],
       )
 
       /** 首屏失败态里的「重试」：复用 load()，用 busy 标记避免连点。 */
@@ -3787,10 +3803,13 @@ window.__ModuleLoader__.load({
             // 里，先点的保存被后面的模型开关超过后，这个 provider 的保存
             // 按钮会永久停在「保存中…」并被禁用，直到重开设置卡片。
             endBusy(saveKey)
-            if (seq === writeSeq.current) {
-              setError(undefined)
-              if (options !== undefined && typeof options.onSuccess === 'function') options.onSuccess()
-            }
+            // 横幅只归最新一次写入；成功回调**不受**序号约束 —— 它对应的
+            // 这次保存确实成功了，清草稿 / 清输入框必须发生。旧实现把
+            // `onSuccess` 也关在 `seq === writeSeq.current` 里：保存还没回来时
+            // 用户点一下模型开关（写入序号更大），保存成功后输入框里的 PAT
+            // 仍然留着，看起来像「没保存上」。
+            if (seq === writeSeq.current) setActionError(undefined)
+            if (options !== undefined && typeof options.onSuccess === 'function') options.onSuccess()
             return document
           })
           .catch(function (failure) {
@@ -3808,7 +3827,7 @@ window.__ModuleLoader__.load({
             // 写入（已经包含用户在它之后做的改动）还在飞；把 onError 交给旧
             // 写入还会误删新写入的意图（provider 开关会卡在服务端旧值上）。
             if (seq !== writeSeq.current) return undefined
-            setError(String(failure && failure.message ? failure.message : failure))
+            setActionError(String(failure && failure.message ? failure.message : failure))
             if (options !== undefined && typeof options.onError === 'function') {
               try {
                 options.onError(failure)
@@ -3827,11 +3846,11 @@ window.__ModuleLoader__.load({
           .then(function (document) {
             applyStatus(document)
             endBusy('refresh')
-            setError(undefined)
+            setActionError(undefined)
           })
           .catch(function (failure) {
             endBusy('refresh')
-            setError(String(failure && failure.message ? failure.message : failure))
+            setActionError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
@@ -3982,12 +4001,12 @@ window.__ModuleLoader__.load({
           .then(function (document) {
             endBusy(loginKey)
             if (document.status !== undefined) applyStatus(document.status)
-            setError(undefined)
+            setActionError(undefined)
             pollLogin(provider, 0, token)
           })
           .catch(function (failure) {
             endBusy(loginKey)
-            setError(String(failure && failure.message ? failure.message : failure))
+            setActionError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
@@ -4011,12 +4030,21 @@ window.__ModuleLoader__.load({
               var latest = document !== undefined && document !== null ? document : status
               var entry = safeArray(latest === undefined ? undefined : latest.providers).find(function (item) { return item.provider === provider })
               var job = entry === undefined ? undefined : entry.login
-              if (job === undefined) return
+              if (job === undefined) {
+                // 「这一拍的状态请求被已有请求合并」不等于登录任务结束：旧实现
+                // 直接 return，一次与 20 秒轮询的碰撞就把登录轮询永久停掉，
+                // 宿主随后登录成功也不会有任何一拍去读到新账号。
+                if (document === undefined || document === null) pollLogin(provider, attempt + 1, token)
+                return
+              }
               if (job.phase === 'waiting' || job.phase === 'starting') {
                 pollLogin(provider, attempt + 1, token)
               }
+            }, function () {
+              // 一次网络抖动也不该结束登录监视：继续下一拍（token 已变就自然停）。
+              if (token !== loginPollToken.current) return
+              pollLogin(provider, attempt + 1, token)
             })
-            .catch(function () {})
         }, 2000)
       }
 
@@ -4028,8 +4056,16 @@ window.__ModuleLoader__.load({
           loginPollTimer.current = undefined
         }
         postJson(ACTION_PATH, { action: 'login-cancel', provider: provider }, status.key)
-          .then(function (document) { applyStatus(document) })
-          .catch(function () {})
+          .then(function (document) {
+            applyStatus(document)
+            // 取消成功同样是一次「动作成功」：之前取消失败留下的横幅要收掉。
+            setActionError(undefined)
+          })
+          .catch(function (failure) {
+            // 取消失败不能静默：界面仍显示「取消」按钮、轮询却已经停了，
+            // 用户会以为登录已经被取消，实际宿主那边的任务还在跑。
+            setActionError(String(failure && failure.message ? failure.message : failure))
+          })
       }
 
       var runCheckin = function (provider) {
@@ -4042,11 +4078,11 @@ window.__ModuleLoader__.load({
           .then(function (document) {
             applyStatus(document)
             endBusy(key)
-            setError(undefined)
+            setActionError(undefined)
           })
           .catch(function (failure) {
             endBusy(key)
-            setError(String(failure && failure.message ? failure.message : failure))
+            setActionError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
@@ -4057,11 +4093,11 @@ window.__ModuleLoader__.load({
           .then(function (document) {
             applyStatus(document)
             endBusy('probe')
-            setError(undefined)
+            setActionError(undefined)
           })
           .catch(function (failure) {
             endBusy('probe')
-            setError(String(failure && failure.message ? failure.message : failure))
+            setActionError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
@@ -4078,11 +4114,11 @@ window.__ModuleLoader__.load({
           .then(function (document) {
             applyStatus(document.status !== undefined ? document.status : document)
             endBusy(key)
-            setError(undefined)
+            setActionError(undefined)
           })
           .catch(function (failure) {
             endBusy(key)
-            setError(String(failure && failure.message ? failure.message : failure))
+            setActionError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
@@ -4104,11 +4140,11 @@ window.__ModuleLoader__.load({
           .then(function (document) {
             applyStatus(document.status !== undefined ? document.status : document)
             endBusy(key)
-            setError(undefined)
+            setActionError(undefined)
           })
           .catch(function (failure) {
             endBusy(key)
-            setError(String(failure && failure.message ? failure.message : failure))
+            setActionError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
@@ -4123,11 +4159,11 @@ window.__ModuleLoader__.load({
           .then(function (document) {
             applyStatus(document)
             endBusy(key)
-            setError(undefined)
+            setActionError(undefined)
           })
           .catch(function (failure) {
             endBusy(key)
-            setError(String(failure && failure.message ? failure.message : failure))
+            setActionError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
@@ -4150,11 +4186,11 @@ window.__ModuleLoader__.load({
           .then(function (document) {
             applyStatus(document)
             endBusy(key)
-            setError(undefined)
+            setActionError(undefined)
           })
           .catch(function (failure) {
             endBusy(key)
-            setError(String(failure && failure.message ? failure.message : failure))
+            setActionError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
@@ -4199,6 +4235,7 @@ window.__ModuleLoader__.load({
         }
         beginBusy('advanced')
         setAdvSaved(false)
+        advNoticeSeq.current += 1
         setAdvNotice('')
         // 高级设置也是 /settings 写入：必须和模型 / 账号写入共用写入序号，
         // 否则更早发出、更晚返回的模型响应会把刚保存的高级设置整份盖回旧值。
@@ -4242,7 +4279,7 @@ window.__ModuleLoader__.load({
               applyStatus(document)
             }
             endBusy('advanced')
-            setError(undefined)
+            setActionError(undefined)
             if (!unchangedSinceSave) return document
             // 只有真的保存成功才显示「已保存」；期间改过的输入由 advTouch()
             // 关掉提示，不会被这次成功回调重新点亮。
@@ -4261,8 +4298,12 @@ window.__ModuleLoader__.load({
             if (savedAlertsForClamp && isFiniteNumber(savedAlertsForClamp.lowRatio) && Math.abs(savedAlertsForClamp.lowRatio - sent.lowRatio) > 1e-9) clampLabels.push(bind(t, 'advancedAlert'))
             if (savedAutoForClamp && isFiniteNumber(savedAutoForClamp.thresholdRatio) && Math.abs(savedAutoForClamp.thresholdRatio - sent.thresholdRatio) > 1e-9) clampLabels.push(bind(t, 'advancedSwitch'))
             if (clampLabels.length > 0) {
+              advNoticeSeq.current += 1
+              var noticeToken = advNoticeSeq.current
               setAdvNotice(bind(t, 'advancedClamped', { fields: clampLabels.join(bind(t, 'listSeparator')) }))
-              later(function () { setAdvNotice('') }, 6000)
+              later(function () {
+                if (advNoticeSeq.current === noticeToken) setAdvNotice('')
+              }, 6000)
             }
             setAdvIdle(secondsInputOf(savedAdvanced.idleTimeoutMs, advIdle))
             setAdvCatalog(secondsInputOf(savedAdvanced.catalogRefreshMs, advCatalog))
@@ -4279,7 +4320,7 @@ window.__ModuleLoader__.load({
           })
           .catch(function (failure) {
             endBusy('advanced')
-            setError(String(failure && failure.message ? failure.message : failure))
+            setActionError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
@@ -4299,11 +4340,11 @@ window.__ModuleLoader__.load({
           .then(function (document) {
             applyStatus(document)
             endBusy('stats')
-            setError(undefined)
+            setActionError(undefined)
           })
           .catch(function (failure) {
             endBusy('stats')
-            setError(String(failure && failure.message ? failure.message : failure))
+            setActionError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
@@ -4320,12 +4361,12 @@ window.__ModuleLoader__.load({
           .then(function (document) {
             applyStatus(document)
             endBusy('events')
-            setError(undefined)
+            setActionError(undefined)
             setEventFallback('')
           })
           .catch(function (failure) {
             endBusy('events')
-            setError(String(failure && failure.message ? failure.message : failure))
+            setActionError(String(failure && failure.message ? failure.message : failure))
           })
       }
 
@@ -4446,7 +4487,23 @@ window.__ModuleLoader__.load({
         }
         var write = function (text) {
           if (typeof navigator !== 'undefined' && navigator !== null && navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-            navigator.clipboard.writeText(text).then(function () {
+            var outcome
+            try {
+              outcome = navigator.clipboard.writeText(text)
+            } catch (_) {
+              // 部分宿主 / polyfill 会**同步**抛错（Illegal invocation），
+              // 旧实现只接了 Promise 的拒绝分支，这里会变成未处理异常，
+              // 按钮既不变化也不给手动复制框。
+              showFallback(text)
+              return
+            }
+            if (outcome === undefined || outcome === null || typeof outcome.then !== 'function') {
+              // 返回值不是 thenable：无法确认是否写入成功。宁可给一次
+              // 「复制失败」的手动兜底，也不要假装复制成功。
+              showFallback(text)
+              return
+            }
+            outcome.then(function () {
               setCopied(true)
               // 之前失败时留下的手动复制框要收掉：自动复制已经成功，继续摆着
               // 一份可能过期的诊断文本既占地方也容易让人复制错。
@@ -4488,13 +4545,13 @@ window.__ModuleLoader__.load({
                 disabled: isBusy('reload'),
               }, rpcIcon('refresh', 15), isBusy('reload') ? bind(t, 'retrying') : bind(t, 'retry')))),
           h('div', { className: 'rpc-page' },
-            error === undefined
+            connectionError === undefined
               ? h('div', { className: 'rpc-empty', role: 'status' },
                   h('span', { className: 'rpc-empty-icon' }, rpcIcon('refresh', 18)),
                   h('span', {}, bind(t, 'loading')))
               : h('div', { key: 'load-fail', className: 'rpc-empty', role: 'status' },
                   h('span', { className: 'rpc-empty-icon' }, rpcIcon('alert', 18)),
-                  h('span', { style: { fontWeight: 600, color: 'var(--rpc-text)' }, title: error }, bind(t, 'statusLoadFailed')),
+                  h('span', { style: { fontWeight: 600, color: 'var(--rpc-text)' }, title: connectionError }, bind(t, 'statusLoadFailed')),
                   h('span', {}, bind(t, 'statusLoadFailedHint')))),
         )
       }
@@ -5905,7 +5962,13 @@ window.__ModuleLoader__.load({
 
         // 额度趋势：今日/7 天花费、消耗速度与耗尽预估。
         var trend = credits.trend
-        if (trend !== null && typeof trend === 'object' && (trend.sampleCount > 0 || safeArray(trend.points).length > 1)) {
+        var trendPoints = (trend === null || typeof trend !== 'object' ? [] : safeArray(trend.points)).filter(function (point) {
+          return point !== null && typeof point === 'object' && isFiniteNumber(point.remain)
+        })
+        // 只有「研究用」的正数才是一个可展示的预估：Infinity / 0 / 负数 /
+        // NaN 都是「算不出来」，界面不能因此显示得跟完全没数据一样。
+        var etaUsable = trend !== null && typeof trend === 'object' && isFiniteNumber(trend.etaMs) && trend.etaMs > 0
+        if (trend !== null && typeof trend === 'object' && (trend.sampleCount > 0 || trendPoints.length > 1)) {
           var trendChips = []
           trendChips.push(h('span', { key: 'td', className: 'rpc-chip' }, bind(t, 'trendToday', { value: formatCreditsNumber(trend.spentToday || 0, credits) })))
           if (isFiniteNumber(trend.spent7d) && trend.spent7d > 0) {
@@ -5917,7 +5980,7 @@ window.__ModuleLoader__.load({
           if (isFiniteNumber(trend.burnPerHour) && trend.burnPerHour > 0) {
             trendChips.push(h('span', { key: 'tr', className: 'rpc-chip' }, bind(t, 'trendRate', { value: formatCreditsNumber(trend.burnPerHour, credits) })))
           }
-          if (isFiniteNumber(trend.etaMs) && trend.etaMs > 0) {
+          if (etaUsable) {
             trendChips.push(h('span', { key: 'te', className: 'rpc-chip rpc-chip-warn' }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) })))
           }
           creditsBody.push(
@@ -5926,9 +5989,13 @@ window.__ModuleLoader__.load({
                 h('span', { className: 'rpc-label' }, bind(t, 'trend')),
                 h('span', { style: S.grow }),
                 ...trendChips),
-              h('div', { className: 'rpc-spark' },
-                sparkline(trend.points, creditsLow ? 'var(--dsh-rpc-warn, #9d5c00)' : (PROVIDER_ACCENT[active.provider] || 'currentColor'))),
-              typeof trend.etaMs !== 'number'
+              // 少于两个有效点不画折线：空 SVG 容器会留下一条空白，用户
+              // 看不出是「没数据」还是「画坏了」。
+              trendPoints.length >= 2
+                ? h('div', { className: 'rpc-spark' },
+                    sparkline(trend.points, creditsLow ? 'var(--dsh-rpc-warn, #9d5c00)' : (PROVIDER_ACCENT[active.provider] || 'currentColor')))
+                : null,
+              !etaUsable
                 ? h('span', { className: 'rpc-tiny' }, bind(t, 'trendEtaUnknown'))
                 : null),
           )

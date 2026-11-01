@@ -342,12 +342,20 @@ let captured
 // 记录注入的 <style>，验证主题 token 只注入一次（幂等）。
 const injectedStyles = []
 const styleById = new Map()
+// 记录 setInterval 的回调：真实环境的 20 秒轮询在测试里不会自动跑，
+// 需要「让一次轮询在登录轮询之前发出」时由用例显式触发。
+const intervalCallbacks = new Map()
+let intervalHandle = 0
 const sandbox = {
   console,
   setTimeout,
   clearTimeout,
-  setInterval: () => 0,
-  clearInterval: () => {},
+  setInterval: (fn) => {
+    intervalHandle += 1
+    intervalCallbacks.set(intervalHandle, fn)
+    return intervalHandle
+  },
+  clearInterval: (handle) => { intervalCallbacks.delete(handle) },
   fetch: fakeFetch,
   navigator: {},
   document: {
@@ -448,6 +456,19 @@ function mount(component, props) {
 refSlots = {}
   lastHookCallCount = null
   return render(component, props)
+}
+
+/**
+ * 触发最近一次挂载的状态轮询。
+ *
+ * 真实环境每 20 秒一次；测试里 setInterval 不会自动跑，用例需要「让一次
+ * /status 恰好落在登录轮询之前」时显式触发它（只触发最新实例，避免打到
+ * 之前已卸载但没清理的旧实例）。
+ */
+function fireStatusPoll() {
+  const callbacks = [...intervalCallbacks.values()]
+  const fn = callbacks[callbacks.length - 1]
+  if (typeof fn === 'function') fn()
 }
 
 /** 把树里的文本收集出来。 */
@@ -5362,7 +5383,10 @@ const r21Failures = []
       tree = await openProviderById(tree, 'qoder-global', realT)
       const after = saveButtonsOf(tree, realT)
       if (after.length === 0) throw new Error('保存结束后按钮仍停在「保存中…」')
-      if (after[0].props.disabled === true) throw new Error('保存结束后按钮仍被禁用')
+      // 0.8.1 起成功回调不再被写入序号挡住：保存成功后草稿被正确清空，
+      // 按钮因此回到「保存」文案并因为输入框为空而禁用 —— 这是预期行为，
+      // 这里要验的是 busy 已释放（文案不再是「保存中…」）。
+      if (textOf(after[0]).includes(realT('saving'))) throw new Error('保存结束后按钮仍停在「保存中…」')
       console.log('✓ 被后续写入超过的保存响应也会释放 busy')
     } catch (error) {
       fetchDelayFor = null
@@ -5563,7 +5587,308 @@ const r21Failures = []
   }
 }
 
-if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0 || r21Failures.length > 0) {
+// ---------- 第二十二轮审计（0.8.1）的前端回归 ----------
+const r22Failures = []
+{
+  const providersSnapshot = STATUS.providers
+  const settingsSnapshot = STATUS.settings
+
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const mountCard = async (t) => {
+    cardTree = await mount(card, { t })
+    return cardTree
+  }
+  const buttonOf = (tree, text) => find(tree, (node) => node.type === 'button' && textOf(node) === text)
+  const openProviderById = async (tree, provider, t) => {
+    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+  const patInputOf = (tree, t) => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === t('pat'))
+  const modelBoxOf = (tree, label) => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === label)
+  const advancedInputOf = (tree, t) => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === t('advancedIdle'))
+  const openPage = async (tree, label, t) => {
+    const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    const tab = tabs.find((node) => textOf(node).startsWith(label))
+    if (tab === undefined) throw new Error(`找不到页签 ${label}`)
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+
+  try {
+    // 1) 登录轮询与一次 20 秒轮询碰撞后不能永久停掉：否则宿主登录成功后
+    //    界面还会一直停在「正在打开…」，新账号永远不出现。
+    try {
+      intervalCallbacks.clear()
+      // 卡片的 status 必须来自「请求发出时的快照」而不是共享 STATUS 对象本身：
+      // 后者是活引用，原地改一下就「不用请求」显示新状态，测不出轮询是否还活着。
+      fetchSnapshotFor = (target) => target.includes('/status')
+      // 先把共享 STATUS 里可能残留的登录任务去掉，等上一轮用例遗留的登录轮询
+      // 看到「没有任务」并自行停止 —— 否则它们会在本用例里把新账号提前刷出来。
+      {
+        const withoutLogin = { ...STATUS.providers[0] }
+        delete withoutLogin.login
+        STATUS.providers = [withoutLogin, ...STATUS.providers.slice(1)]
+      }
+      await sleep(2300)
+      let tree = await mountCard(realT)
+      tree = await openPage(tree, realT('navAccounts'), realT)
+      const login = buttonOf(tree, realT('loginAdd'))
+      if (login === undefined) throw new Error('找不到浏览器登录按钮')
+      login.props.onClick()
+      await sleep(30)
+      // 宿主接受了登录请求，进入等待。
+      STATUS.providers = [
+        { ...STATUS.providers[0], login: { phase: 'waiting', startedAt: Date.now(), authUrl: 'https://x/login' } },
+        ...STATUS.providers.slice(1),
+      ]
+      // 让后台轮询先发出一个慢 /status，登录轮询的第一拍会撞上它。
+      delayNextStatusMs = 2700
+      fireStatusPoll()
+      await sleep(2200)
+      // 宿主在这期间登录完成，并新增了账号。
+      STATUS.providers = [
+        {
+          ...STATUS.providers[0],
+          login: { phase: 'done', startedAt: Date.now(), finishedAt: Date.now(), message: '登录成功' },
+          accounts: [...STATUS.providers[0].accounts, {
+            id: 'acc-r22', label: '新账号', active: false, kind: 'desktop', configured: true, source: 'browser-login', credits: { state: 'ok', remain: 100, total: 100 },
+          }],
+        },
+        ...STATUS.providers.slice(1),
+      ]
+      await sleep(2400)
+      delayNextStatusMs = 0
+      tree = await render(card, { t: realT }, true)
+      if (!textOf(tree).includes('新账号')) throw new Error('登录轮询被一次状态碰撞永久停掉，新账号没有出现')
+      if (buttonOf(tree, realT('loginOpening')) !== undefined) throw new Error('登录完成后按钮仍停在「正在打开…」')
+      console.log('✓ 登录轮询遇到状态碰撞后继续跑')
+    } catch (error) {
+      delayNextStatusMs = 0
+      r22Failures.push('登录轮询续跑: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 登录轮询续跑: ' + String(error && error.message ? error.message : error))
+    } finally {
+      delayNextStatusMs = 0
+      fetchSnapshotFor = null
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      await sleep(80)
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 2) 保存成功后草稿必须清空，即使这次响应被后面的模型开关「超过」。
+    try {
+      let tree = await mountCard(realT)
+      tree = await openProviderById(tree, 'qoder-global', realT)
+      const patInput = patInputOf(tree, realT)
+      if (patInput === undefined) throw new Error('找不到 PAT 输入框')
+      patInput.props.onChange({ target: { value: 'r22-pat' } })
+      tree = await render(card, { t: realT })
+      const save = buttonOf(tree, realT('save'))
+      if (save === undefined) throw new Error('找不到 Qoder 的保存按钮')
+      fetchDelayFor = (body) => (body.includes('r22-pat') ? 320 : 0)
+      save.props.onClick()
+      tree = await render(card, { t: realT }, true)
+      tree = await openProviderById(tree, 'workbuddy', realT)
+      const modelBox = modelBoxOf(tree, 'Auto')
+      if (modelBox === undefined) throw new Error('找不到 WorkBuddy 的模型复选框')
+      modelBox.props.onChange()
+      await sleep(420)
+      fetchDelayFor = null
+      tree = await openProviderById(tree, 'qoder-global', realT)
+      const inputAfter = patInputOf(tree, realT)
+      if (inputAfter === undefined) throw new Error('切回 Qoder 后找不到 PAT 输入框')
+      if (String(inputAfter.props.value) !== '') throw new Error('保存成功后 PAT 草稿没有清空')
+      console.log('✓ 被后续写入超过的保存仍会清空草稿')
+    } catch (error) {
+      fetchDelayFor = null
+      r22Failures.push('保存清草稿: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 保存清草稿: ' + String(error && error.message ? error.message : error))
+    } finally {
+      fetchDelayFor = null
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      await sleep(80)
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 3) 取消失败要给出横幅，并且这条横幅不能被下一轮成功的 /status 清掉。
+    try {
+      intervalCallbacks.clear()
+      let tree = await mountCard(realT)
+      tree = await openPage(tree, realT('navAccounts'), realT)
+      const login = buttonOf(tree, realT('loginAdd'))
+      if (login === undefined) throw new Error('找不到浏览器登录按钮')
+      login.props.onClick()
+      await sleep(30)
+      STATUS.providers = [
+        { ...STATUS.providers[0], login: { phase: 'waiting', startedAt: Date.now(), authUrl: 'https://x/login' } },
+        ...STATUS.providers.slice(1),
+      ]
+      tree = await render(card, { t: realT }, true)
+      const cancel = buttonOf(tree, realT('loginCancel'))
+      if (cancel === undefined) throw new Error('登录中没有出现取消按钮')
+      fetchFailure = 'action'
+      cancel.props.onClick()
+      await sleep(30)
+      tree = await render(card, { t: realT }, true)
+      const banner = find(tree, (node) => node.type === 'div' && node.props?.className === 'rpc-banner rpc-banner-error')
+      if (banner === undefined) throw new Error('取消失败后没有任何错误横幅')
+      fetchFailure = null
+      // 一次成功的状态轮询不该把动作错误清掉。
+      fireStatusPoll()
+      await sleep(40)
+      tree = await render(card, { t: realT }, true)
+      if (find(tree, (node) => node.type === 'div' && node.props?.className === 'rpc-banner rpc-banner-error') === undefined) {
+        throw new Error('轮询成功后动作失败横幅被清掉了')
+      }
+      console.log('✓ 取消失败有横幅，且轮询成功不清动作错误')
+    } catch (error) {
+      fetchFailure = null
+      r22Failures.push('取消失败横幅: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 取消失败横幅: ' + String(error && error.message ? error.message : error))
+    } finally {
+      fetchFailure = null
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      await sleep(80)
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 4) 剪贴板同步抛错 / 返回非 thenable 时必须给手动复制兜底，而不是
+    //    留一个未处理异常、按钮毫无反应。
+    try {
+      let tree = await mountCard(realT)
+      const copy = buttonOf(tree, realT('copyDiagnostics'))
+      if (copy === undefined) throw new Error('找不到「复制诊断」按钮')
+      sandbox.navigator.clipboard = {
+        writeText() { throw new Error('Illegal invocation') },
+      }
+      copy.props.onClick()
+      await sleep(40)
+      tree = await render(card, { t: realT }, true)
+      if (buttonOf(tree, realT('copyFailed')) === undefined) throw new Error('同步抛错后按钮没有变成「复制失败」')
+      const fallback = find(tree, (node) => node.type === 'textarea')
+      if (fallback === undefined) throw new Error('同步抛错后没有手动复制框')
+      if (!String(fallback.props.value).includes('audit')) throw new Error('手动复制框里没有诊断文本')
+
+      sandbox.navigator.clipboard = { writeText: () => undefined }
+      const copy2 = buttonOf(tree, realT('copyFailed')) ?? buttonOf(tree, realT('copyDiagnostics'))
+      if (copy2 === undefined) throw new Error('兜底后找不到「复制诊断」按钮')
+      copy2.props.onClick()
+      await sleep(40)
+      tree = await render(card, { t: realT }, true)
+      if (buttonOf(tree, realT('copyFailed')) === undefined) throw new Error('非 thenable 返回值没有给「复制失败」兜底')
+      delete sandbox.navigator.clipboard
+      console.log('✓ 剪贴板同步异常 / 非 thenable 都有手动兜底')
+    } catch (error) {
+      delete sandbox.navigator.clipboard
+      r22Failures.push('剪贴板兜底: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 剪贴板兜底: ' + String(error && error.message ? error.message : error))
+    } finally {
+      delete sandbox.navigator.clipboard
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 5) 趋势：不可用的 eta（Infinity / 0 / 负数 / NaN）要说明「样本不足」，
+    //    单点不画空图表，极值点不能产出 NaN 坐标。
+    try {
+      const base = providersSnapshot[0]
+      const withTrend = (trend) => {
+        STATUS.providers = [
+          { ...base, credits: { ...base.credits, trend } },
+          ...providersSnapshot.slice(1),
+        ]
+      }
+      for (const etaMs of [Infinity, 0, -1000, NaN]) {
+        withTrend({
+          sampleCount: 3, spentToday: 24, burnPerHour: 6, etaMs,
+          points: [{ at: 1792230000000, remain: 720 }, { at: 1792234000000, remain: 675 }],
+        })
+        const tree = await mountCard(realT)
+        if (!textOf(tree).includes(realT('trendEtaUnknown'))) {
+          throw new Error(`etaMs=${String(etaMs)} 时没有提示「样本不足」`)
+        }
+      }
+      // 单点：有样本数但画不出线，不该留一个空的折线容器。
+      withTrend({ sampleCount: 1, spentToday: 10, etaMs: 3600000, points: [{ at: 1792234000000, remain: 675 }] })
+      let tree = await mountCard(realT)
+      if (find(tree, (node) => node.props?.className === 'rpc-spark') !== undefined) {
+        throw new Error('只有一个有效点时仍渲染了空的趋势图表')
+      }
+      // 极值：max-min 溢出成 Infinity，旧实现会输出 NaN 坐标。
+      withTrend({
+        sampleCount: 2, spentToday: 10, etaMs: 0,
+        points: [{ at: 1792230000000, remain: -1e308 }, { at: 1792234000000, remain: 1e308 }],
+      })
+      tree = await mountCard(realT)
+      const line = find(tree, (node) => node.type === 'polyline')
+      if (line === undefined) throw new Error('两个极值点没有画出折线')
+      if (/NaN|Infinity/.test(String(line.props.points))) throw new Error('折线坐标出现 NaN / Infinity')
+      assertNoBadNumbers(tree, '额度趋势极值')
+      console.log('✓ 趋势的 eta / 单点 / 极值都有正确展示')
+    } catch (error) {
+      r22Failures.push('趋势展示: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 趋势展示: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 6) 连续两次夹取提示：第一次的 6 秒定时器不能把第二次的提示提前清掉。
+    try {
+      const noticeText = realT('advancedClamped', { fields: realT('advancedIdle') })
+      let tree = await mountCard(realT)
+      const idle = advancedInputOf(tree, realT)
+      if (idle === undefined) throw new Error('找不到 setTimeout 输入框')
+      idle.props.onChange({ target: { value: '300' } })
+      tree = await render(card, { t: realT })
+      const save = buttonOf(tree, realT('advancedSave'))
+      if (save === undefined) throw new Error('找不到高级设置保存按钮')
+      save.props.onClick()
+      await sleep(60)
+      tree = await render(card, { t: realT }, true)
+      if (!textOf(tree).includes(noticeText)) throw new Error('第一次夹取没有给出提示')
+      // 4 秒后再保存一次：第一次的 6 秒定时器会早于第二次自己的 6 秒到期。
+      await sleep(4000)
+      tree = await render(card, { t: realT }, true)
+      advancedInputOf(tree, realT).props.onChange({ target: { value: '400' } })
+      tree = await render(card, { t: realT })
+      const save2 = buttonOf(tree, realT('advancedSave'))
+      if (save2 === undefined) throw new Error('第二次找不到保存按钮')
+      save2.props.onClick()
+      await sleep(60)
+      tree = await render(card, { t: realT }, true)
+      if (!textOf(tree).includes(noticeText)) throw new Error('第二次夹取没有给出提示')
+      await sleep(2200)
+      tree = await render(card, { t: realT }, true)
+      if (!textOf(tree).includes(noticeText)) throw new Error('新的夹取提示被上一次的定时器提前清掉了')
+      console.log('✓ 连续夹取提示不会被旧定时器提前清掉')
+    } catch (error) {
+      r22Failures.push('夹取提示: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 夹取提示: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      await sleep(80)
+      cardTree = await mount(card, { t: (key) => key })
+    }
+  } finally {
+    STATUS.providers = providersSnapshot
+    STATUS.settings = settingsSnapshot
+    fetchDelayFor = null
+    fetchDelayMs = 0
+    fetchSnapshotFor = null
+    delayNextStatusMs = 0
+    intervalCallbacks.clear()
+  }
+}
+
+if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0 || r21Failures.length > 0 || r22Failures.length > 0) {
   if (r18Failures.length > 0) {
     console.error(`R18 前端回归 ${String(r18Failures.length)} 条失败：`)
     for (const line of r18Failures) console.error('- ' + line)
@@ -5579,6 +5904,10 @@ if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0 |
   if (r21Failures.length > 0) {
     console.error(`R21 前端回归 ${String(r21Failures.length)} 条失败：`)
     for (const line of r21Failures) console.error('- ' + line)
+  }
+  if (r22Failures.length > 0) {
+    console.error(`R22 前端回归 ${String(r22Failures.length)} 条失败：`)
+    for (const line of r22Failures) console.error('- ' + line)
   }
   process.exitCode = 1
 } else {
