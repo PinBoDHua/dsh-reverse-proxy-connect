@@ -302,6 +302,8 @@ let fetchDelayFor = null
 let fetchSnapshotFor = null
 // 只延迟「下一次」/status：登录轮询与设置写入的竞态需要一个在飞的旧状态响应。
 let delayNextStatusMs = 0
+// 让 /status 回 200 但 body 不是 JSON（网关 HTML 错误页 / SPA 回退）。
+let nonJsonStatus = false
 // /status 请求的到达计数（在延迟之前递增）：用来确认轮询请求已经发出。
 let statusRequestStarted = 0
 async function fakeFetch(url, init) {
@@ -329,6 +331,16 @@ async function fakeFetch(url, init) {
   if (fetchFailure === 'status' && target.includes('/status')) throw new Error('fetch failed: ECONNREFUSED')
   if (fetchFailure === 'action' && target.includes('/action')) throw new Error('HTTP 500 upstream reset')
   if (fetchFailure === 'diagnostics' && target.includes('/diagnostics')) throw new Error('HTTP 500 diagnostics')
+  if (nonJsonStatus && target.includes('/status')) {
+    // 200 + HTML：`response.json()` 会抛 `Unexpected token '<'`，客户端必须把它
+    // 归因成「载荷形状不对」，而不是把解析器原文贴到横幅上（R24 的 C-3）。
+    return {
+      ok: true,
+      status: 200,
+      json: async () => { throw new SyntaxError('Unexpected token \'<\', "<!doctype html>" is not valid JSON') },
+      text: async () => '<!doctype html>',
+    }
+  }
   return {
     ok: true,
     status: 200,
@@ -523,6 +535,18 @@ function findAll(tree, predicate) {
 }
 
 /**
+ * DOM id 断言：R24 的 C-2 之后每个卡片实例都有自己的前缀（同一个组件会挂在
+ * 设置卡片与插件详情页两处），所以一律按**后缀**匹配。
+ *
+ * @param node - 渲染树节点。
+ * @param suffix - id 后缀（如 `dsh-rpc-tab-qoder`）。
+ * @returns 是否命中。
+ */
+function idMatches(node, suffix) {
+  return typeof node.props?.id === 'string' && node.props.id.endsWith(suffix)
+}
+
+/**
  * 扫描整棵树里所有用户可见的数值出口：文本、title、aria-label、input value
  * 与内联样式。任何 NaN / Infinity 都算可视化缺陷（上一轮 NaN% 的同类）。
  */
@@ -581,11 +605,11 @@ console.log('✓ 卡片分组、总览与模型列表都渲染出来了')
 //     都不成立。第 1a-1 段专门守这条契约。
 {
   const panels = findAll(cardTree, (node) => typeof node.props?.id === 'string'
-    && node.props.id.startsWith('dsh-rpc-page-'))
+    && node.props.id.includes('dsh-rpc-page-'))
   if (panels.length !== 6) throw new Error(`应有 6 个详情分区，实际 ${panels.length}`)
   const visible = panels.filter((node) => node.props.style?.display !== 'none')
   if (visible.length !== 1) throw new Error(`同一时间应只有 1 个分区可见，实际 ${visible.length}`)
-  if (visible[0].props.id !== 'dsh-rpc-page-overview') throw new Error('默认分区不是概览')
+  if (!idMatches(visible[0], 'dsh-rpc-page-overview')) throw new Error('默认分区不是概览')
   const overviewText = textOf(visible[0])
   for (const needle of ['credits', 'secStatus', 'secAccounts']) {
     if (!overviewText.includes(needle)) throw new Error(`概览分区缺少 ${needle}`)
@@ -623,14 +647,14 @@ console.log('✓ 卡片分组、总览与模型列表都渲染出来了')
   if (accountsTab === undefined) throw new Error('找不到「账号」分区按钮')
   accountsTab.props.onClick()
   cardTree = await render(card, { t: (key) => key })
-  const accountsPanel = find(cardTree, (node) => node.props?.id === 'dsh-rpc-page-accounts')
+  const accountsPanel = find(cardTree, (node) => idMatches(node, 'dsh-rpc-page-accounts'))
   if (accountsPanel.props.style?.display !== 'flex') throw new Error('点「账号」后账号分区仍不可见')
   // 切换服务商应回到概览，避免停在上一家的设置页。
   const nextProvider = find(cardTree, (node) => node.props?.role === 'tab' && node.type === 'button'
     && textOf(node).startsWith('WorkBuddy AI'))
   nextProvider.props.onClick()
   cardTree = await render(card, { t: (key) => key })
-  const resetPanel = find(cardTree, (node) => node.props?.id === 'dsh-rpc-page-overview')
+  const resetPanel = find(cardTree, (node) => idMatches(node, 'dsh-rpc-page-overview'))
   if (resetPanel.props.style?.display !== 'flex') throw new Error('切换服务商后没有回到概览')
   console.log('✓ 六个详情分区按页切换，切换服务商回到概览')
   cardTree = await mount(card, { t: (key) => key })
@@ -2752,7 +2776,6 @@ function extractFn(header) {
 {
   const formatNumber = extractFn('function formatNumber(value, decimals) {')
   const formatWindow = extractFn('function formatWindow(tokens) {')
-  const ratioPercent = extractFn('function ratioPercent(ratio) {')
   if (formatNumber(2388) !== '2,388') throw new Error('formatNumber 正常千分位被改坏：' + formatNumber(2388))
   if (formatNumber(Number.NaN) !== '—' || formatNumber(Number.POSITIVE_INFINITY) !== '—') throw new Error('formatNumber 非有限值应回 —')
   for (const huge of [1e308, Number.MAX_VALUE, -1e308]) {
@@ -2783,10 +2806,6 @@ function extractFn(header) {
   if (isMoneyCredits({ unit: 'credits' }) !== false || isMoneyCredits({ unit: 'usd' }) !== true) throw new Error('isMoneyCredits 判定被改坏')
   if (formatWindow(Number.NaN) !== '—' || formatWindow(Number.POSITIVE_INFINITY) !== '—' || formatWindow(0) !== '—') {
     throw new Error('formatWindow 非有限/非正值应回 —')
-  }
-  if (ratioPercent(0.25) !== '25%') throw new Error('ratioPercent 正常值被改坏')
-  if (ratioPercent(1e308) !== '—' || ratioPercent(Number.NaN) !== '—' || ratioPercent(2) !== '—') {
-    throw new Error('ratioPercent 越界/非有限应回 —')
   }
   console.log('✓ 格式化函数：1e308 等有限大数不再溢出成 Infinity，非有限值统一回 —')
 }
@@ -4128,7 +4147,7 @@ function extractFn(header) {
       if (heroAfter.props['aria-controls'] !== undefined) throw new Error('离开动态页后 aria-controls 仍指向不可见节点')
       heroAfter.props.onClick()
       tree = await render(card, { t: realT })
-      const activity = find(tree, (node) => node.props?.id === 'dsh-rpc-page-activity')
+      const activity = find(tree, (node) => idMatches(node, 'dsh-rpc-page-activity'))
       if (activity === undefined || activity.props.style?.display !== 'flex') throw new Error('从其他页点诊断没有跳到动态页')
       if (find(tree, (node) => node.type === 'pre') === undefined) throw new Error('从其他页点诊断把面板关掉了')
       const heroOpen = find(tree, (node) => node.type === 'button'
@@ -4279,7 +4298,7 @@ function extractFn(header) {
     return await render(card, { t })
   }
   const openProvider = async (tree, provider, t) => {
-    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    const tab = find(tree, (node) => node.type === 'button' && idMatches(node, 'dsh-rpc-tab-' + provider))
     if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
     tab.props.onClick()
     return await render(card, { t })
@@ -4313,7 +4332,7 @@ function extractFn(header) {
         ...providersSnapshot.slice(2),
       ]
       let tree = await mount(card, { t: realT })
-      const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-workbuddy-ai')
+      const tab = find(tree, (node) => node.type === 'button' && idMatches(node, 'dsh-rpc-tab-workbuddy-ai'))
       if (!textOf(tab).includes(realT('signedOut'))) throw new Error('未登录的页签没有写「未登录」')
       if (textOf(tab).includes(realT('healthDegraded'))) throw new Error('未登录的页签仍在写健康状态')
       tree = await openProvider(tree, 'workbuddy-ai', realT)
@@ -4438,7 +4457,7 @@ function extractFn(header) {
     return await render(card, { t })
   }
   const openProvider = async (tree, provider, t) => {
-    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    const tab = find(tree, (node) => node.type === 'button' && idMatches(node, 'dsh-rpc-tab-' + provider))
     if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
     tab.props.onClick()
     return await render(card, { t })
@@ -4786,7 +4805,7 @@ const r19Failures = []
     return await render(card, { t })
   }
   const openProviderById = async (tree, provider, t) => {
-    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    const tab = find(tree, (node) => node.type === 'button' && idMatches(node, 'dsh-rpc-tab-' + provider))
     if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
     tab.props.onClick()
     return await render(card, { t })
@@ -5200,7 +5219,7 @@ const r20Failures = []
     return await render(card, { t })
   }
   const openProviderById = async (tree, provider, t) => {
-    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    const tab = find(tree, (node) => node.type === 'button' && idMatches(node, 'dsh-rpc-tab-' + provider))
     if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
     tab.props.onClick()
     return await render(card, { t })
@@ -5347,7 +5366,7 @@ const r21Failures = []
     return cardTree
   }
   const openProviderById = async (tree, provider, t) => {
-    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    const tab = find(tree, (node) => node.type === 'button' && idMatches(node, 'dsh-rpc-tab-' + provider))
     if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
     tab.props.onClick()
     return await render(card, { t })
@@ -5357,7 +5376,7 @@ const r21Failures = []
   const switchInputOf = (tree) => find(tree, (node) => node.type === 'input' && node.props?.className === 'rpc-switch-input')
   const modelBoxOf = (tree, label) => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === label)
   const advancedInputOf = (tree, t) => find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === t('advancedIdle'))
-  const pageOf = (tree, id) => find(tree, (node) => node.props?.id === 'dsh-rpc-page-' + id)
+  const pageOf = (tree, id) => find(tree, (node) => idMatches(node, 'dsh-rpc-page-' + id))
 
   try {
     // 1) 被后续写入超过的保存响应也必须释放 busy：否则该家的按钮永久「保存中…」。
@@ -5471,7 +5490,7 @@ const r21Failures = []
         ...providersSnapshot.slice(1),
       ]
       const tree = await mountCard(realT)
-      const tab = find(tree, (node) => node.props?.id === 'dsh-rpc-tab-workbuddy')
+      const tab = find(tree, (node) => idMatches(node, 'dsh-rpc-tab-workbuddy'))
       if (tab === undefined) throw new Error('找不到 WorkBuddy 的卡片')
       const tabText = textOf(tab)
       if (tabText.includes(realT('testedAvailableShort'))) {
@@ -5529,7 +5548,7 @@ const r21Failures = []
       usageTab.props.onClick()
       tree = await render(card, { t: realT })
       if (pageOf(tree, 'usage')?.props?.style?.display !== 'flex') throw new Error('用量页没有打开')
-      const current = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-workbuddy')
+      const current = find(tree, (node) => node.type === 'button' && idMatches(node, 'dsh-rpc-tab-workbuddy'))
       if (current === undefined) throw new Error('找不到当前服务商的卡片')
       current.props.onClick()
       tree = await render(card, { t: realT })
@@ -5600,7 +5619,7 @@ const r22Failures = []
   }
   const buttonOf = (tree, text) => find(tree, (node) => node.type === 'button' && textOf(node) === text)
   const openProviderById = async (tree, provider, t) => {
-    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    const tab = find(tree, (node) => node.type === 'button' && idMatches(node, 'dsh-rpc-tab-' + provider))
     if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
     tab.props.onClick()
     return await render(card, { t })
@@ -5888,6 +5907,123 @@ const r22Failures = []
   }
 }
 
+// ---------- 第二十四轮审计（0.8.3）的前端回归 ----------
+const r24Failures = []
+{
+  const providersSnapshot = STATUS.providers
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const tabsOf = (tree) => findAll(tree, (node) => node.type === 'button'
+    && typeof node.props?.id === 'string' && node.props.id.includes('dsh-rpc-tab-'))
+  const rpcIdsOf = (tree) => findAll(tree, (node) => typeof node.props?.id === 'string' && node.props.id.includes('dsh-rpc-'))
+    .map((node) => node.props.id)
+  /** 打开某个页内页签（概览 / 账号 / 用量 / …）。 */
+  const openPage = async (tree, label) => {
+    const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    const tab = tabs.find((node) => textOf(node).startsWith(label))
+    if (tab === undefined) throw new Error('找不到页签 ' + label)
+    tab.props.onClick()
+    return await render(card, { t: realT })
+  }
+
+  // 1) C-2：同一个组件挂两处（设置卡片 + 插件详情页）时 DOM id 必须唯一，
+  //    且 aria-labelledby 只能指向**本实例**的 tab。
+  try {
+    const first = await mount(card, { t: (key) => key })
+    await sleep(20)
+    const second = await mount(card, { t: (key) => key })
+    await sleep(20)
+    const firstIds = new Set(rpcIdsOf(first))
+    const secondIds = rpcIdsOf(second)
+    if (secondIds.length === 0) throw new Error('第二张卡片没有任何 rpc id')
+    const overlap = secondIds.filter((id) => firstIds.has(id))
+    if (overlap.length > 0) throw new Error('两个实例的 id 重复：' + overlap.slice(0, 3).join(', '))
+    const labelled = find(second, (node) => typeof node.props?.['aria-labelledby'] === 'string'
+      && node.props['aria-labelledby'].includes('dsh-rpc-tab-'))
+    if (labelled === undefined) throw new Error('详情区没有 aria-labelledby')
+    const labelId = labelled.props['aria-labelledby']
+    if (!secondIds.includes(labelId)) throw new Error('aria-labelledby 指向了别的实例：' + labelId)
+    if (firstIds.has(labelId)) throw new Error('aria-labelledby 与第一张卡片撞了 id')
+    if (tabsOf(second).length !== STATUS.providers.length) throw new Error('第二张卡片的 tab 数量不对')
+    console.log('✓ 同一组件挂两处时 DOM id 唯一，aria 引用指向本实例')
+  } catch (error) {
+    r24Failures.push('实例化 DOM id: ' + String(error && error.message ? error.message : error))
+    console.log('✗ 实例化 DOM id: ' + String(error && error.message ? error.message : error))
+  }
+
+  // 2) C-3：/status 回 200 但 body 不是 JSON 时，横幅必须是本地化文案。
+  try {
+    nonJsonStatus = true
+    fetchFailure = null
+    let tree = await mount(card, { t: realT })
+    await sleep(40)
+    tree = await render(card, { t: realT }, true)
+    const text = textOf(tree)
+    // 首屏失败态用的是更具体的 statusLoadFailed 文案；只要不是原始解析器
+    // 错误、且是本地化文案，就说明 C-3 的归因生效了。
+    if (text.includes('Unexpected token')) throw new Error('横幅里出现了原始 JS 解析器错误')
+    if (!text.includes(realT('statusLoadFailed')) && !text.includes(realT('errorPayload'))) {
+      throw new Error('没有给出本地化的状态读取失败文案：' + text.slice(0, 200))
+    }
+    console.log('✓ /status 非 JSON 时显示本地化文案，而不是解析器原文')
+  } catch (error) {
+    r24Failures.push('非 JSON 状态: ' + String(error && error.message ? error.message : error))
+    console.log('✗ 非 JSON 状态: ' + String(error && error.message ? error.message : error))
+  } finally {
+    nonJsonStatus = false
+  }
+
+  // 3) C-4：窄侧栏排序要把「不可排名」（Free 的 0/0、不限量）排到最后，
+  //    不能因为它们占着原位置而把唯一有余额的那家折进 +N。
+  try {
+    STATUS.providers = [
+      // 故意把「不可排名」的放在最前面：旧比较器用 Infinity 做减法，恒返回 0，
+      // 于是它会被当成第一名画出来，有余额的那家反被折叠。
+      STATUS.providers.find((provider) => provider.provider === 'qoder-global'),
+      STATUS.providers.find((provider) => provider.provider === 'workbuddy'),
+      STATUS.providers.find((provider) => provider.provider === 'workbuddy-ai'),
+    ]
+    const props = { t: (key) => key, wide: false }
+    await mount(pill, props)
+    await sleep(60)
+    const tree = await render(pill, props, true)
+    const visible = findAll(tree, (node) => node.props?.style?.justifyContent === 'flex-start'
+      && typeof node.props?.title === 'string')
+    if (visible.length !== 1) throw new Error(`窄胶囊应只画一格，实际 ${visible.length}`)
+    const shown = textOf(visible[0]) + ' ' + String(visible[0].props.title)
+    if (shown.includes('QDG')) throw new Error('不可排名的 Free 账号仍被画在第一格：' + shown)
+    if (!shown.includes('WB')) throw new Error('有余额的 provider 没有被画出来：' + shown)
+    if (!textOf(tree).includes('+2')) throw new Error('折叠的两家没有 +N 提示')
+    console.log('✓ 窄侧栏排序把「读不到/不限量」排到最后')
+  } catch (error) {
+    r24Failures.push('窄侧栏排序: ' + String(error && error.message ? error.message : error))
+    console.log('✗ 窄侧栏排序: ' + String(error && error.message ? error.message : error))
+  } finally {
+    STATUS.providers = providersSnapshot
+  }
+  // 4) C-5：卡片轮询用 view=core 瘦身档；只有「用量 / 最近事件」页才拉完整档。
+  try {
+    calls.length = 0
+    let tree = await mount(card, { t: realT })
+    await sleep(40)
+    const firstStatus = calls.filter((call) => String(call.url).includes('/status'))
+    if (firstStatus.length === 0) throw new Error('首屏没有请求 /status')
+    if (!String(firstStatus[0].url).includes('view=core')) throw new Error('首屏没有使用 view=core：' + firstStatus[0].url)
+    calls.length = 0
+    tree = await openPage(tree, realT('navUsage'), realT)
+    await sleep(40)
+    const usageStatus = calls.filter((call) => String(call.url).includes('/status'))
+    if (usageStatus.length === 0) throw new Error('切到用量页没有补拉完整状态')
+    if (String(usageStatus[0].url).includes('view=core')) throw new Error('用量页仍只拿到 core 档：' + usageStatus[0].url)
+    console.log('✓ 卡片轮询用 view=core，用量页按需拉完整状态')
+  } catch (error) {
+    r24Failures.push('状态档位: ' + String(error && error.message ? error.message : error))
+    console.log('✗ 状态档位: ' + String(error && error.message ? error.message : error))
+  } finally {
+    STATUS.providers = providersSnapshot
+  }
+
+}
+
 // ---------- 第二十三轮审计（0.8.2）的前端回归 ----------
 const r23Failures = []
 {
@@ -5903,7 +6039,7 @@ const r23Failures = []
     return await render(card, { t })
   }
   const openProviderById = async (tree, provider, t) => {
-    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    const tab = find(tree, (node) => node.type === 'button' && idMatches(node, 'dsh-rpc-tab-' + provider))
     if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
     tab.props.onClick()
     return await render(card, { t })
@@ -5952,8 +6088,11 @@ const r23Failures = []
       calls.length = 0
       button.props.onClick()
       await sleep(40)
-      const refreshed = calls.some((call) => String(call.url).includes('/action') && String(call.body).includes('"credits"'))
-      if (!refreshed) throw new Error('点击重试没有真的发一次额度刷新')
+      // R24 的 C-12：这条重试应重读 /status，而不是打一轮六家的额度刷新。
+      const reread = calls.some((call) => String(call.url).includes('/status'))
+      if (!reread) throw new Error('点击重试没有重读 /status')
+      const creditBurst = calls.some((call) => String(call.url).includes('/action') && String(call.body).includes('"credits"'))
+      if (creditBurst) throw new Error('一次诊断性重试打出了上游额度请求')
       console.log('✓ providers 为空数组时给出明确状态与可用的重试')
     } catch (error) {
       r23Failures.push('空 provider 列表: ' + String(error && error.message ? error.message : error))
@@ -6027,7 +6166,7 @@ const r23Failures = []
   }
 }
 
-if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0 || r21Failures.length > 0 || r22Failures.length > 0 || r23Failures.length > 0) {
+if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0 || r21Failures.length > 0 || r22Failures.length > 0 || r23Failures.length > 0 || r24Failures.length > 0) {
   if (r18Failures.length > 0) {
     console.error(`R18 前端回归 ${String(r18Failures.length)} 条失败：`)
     for (const line of r18Failures) console.error('- ' + line)
@@ -6051,6 +6190,10 @@ if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0 |
   if (r23Failures.length > 0) {
     console.error(`R23 前端回归 ${String(r23Failures.length)} 条失败：`)
     for (const line of r23Failures) console.error('- ' + line)
+  }
+  if (r24Failures.length > 0) {
+    console.error(`R24 前端回归 ${String(r24Failures.length)} 条失败：`)
+    for (const line of r24Failures) console.error('- ' + line)
   }
   process.exitCode = 1
 } else {

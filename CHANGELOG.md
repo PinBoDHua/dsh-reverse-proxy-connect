@@ -1,5 +1,107 @@
 # 更新记录
 
+## 0.9.0 — 2026-11-02
+
+第二十四轮前后端打磨（R24 审计落地）。主题是「补丁只改它说到的东西，失败不能冒名
+成功」：增量账号 upsert 会把未提交的 `label` / `enabled` 一起归一化成默认值，用户
+起的名字被覆盖、**显式停用的账号被重新启用**；保存一家的凭证会强制刷新六家的目录
+与所有账号额度，客户端 90 秒超时后显示「保存失败」而设置其实已落盘，用户重试就多出
+一个同密钥的重复账号；流在没有终态帧时被报成成功，半截工具参数还被记成 `tool-calls`
+交给宿主执行；Qoder 的 401 被 `kind` 抢先归成 SERVER，令牌失效既不换号也不冷却。
+后端 9 处、上游传输层 15 处、前端 9 处。状态接口仍是 v8（**新增可选** `?view=core`
+瘦身档，默认响应逐字不变），设置文件 v2、事件 / 额度 / 目录 / 历史缓存均为 v1，
+无字段增删。测试 **468 后端 + 178 前端**。
+
+### 后端
+
+- **增量账号 upsert 不再改写未提交的字段**：`sanitizePatch()` 改用新的
+  `normalizeAccountPatch()`，只复制显式提交的字段；`label` / `enabled` 缺失时由
+  合并与落盘归一化用旧值补齐（新行才补默认名）。以前一个 `{id, pat}` 的补丁会把
+  账号名改成「账号 N」并把停用账号重新启用，自动换号会重新往它花钱。
+  [lib/patch.js](lib/patch.js) [lib/accounts.js](lib/accounts.js)
+- **卸载回调不再命中 TDZ**：`probeAbort` / `loginJobs` / `timer` / `checkinAbort`
+  的声明上移到 `ctx.effect()` 之前，释放流程拆成逐步 try/catch；`apply()` 返回前
+  就被销毁时不再抛 `ReferenceError`，也不会漏掉 adapter 释放。定时器改为只在
+  运行时仍存活时启动。 [lib/index.js](lib/index.js)
+- **保存只刷新受影响的 provider，且先回响应**：新增 `refreshTargetsOf()`，凭证变化
+  只刷那一家（目录 + 额度），切号只刷目录，开关跟着 `enabled` 走；刷新改为响应之后
+  的后台任务。落盘成功后即使状态文档构建失败也回 200，不再出现「HTTP 说失败、磁盘
+  上其实已保存」。 [lib/index.js](lib/index.js)
+- **`/status?view=core`**：卡片 20 秒轮询使用的瘦身档，去掉只有用量/活动页才读的
+  `stats.providerSessions` / `stats.recent` / `stats.accountModels` 与事件时间线，
+  趋势点裁到 20；默认档不变。 [lib/index.js](lib/index.js)
+- **删掉 `failureCodeOf()` 里永远不可达的第二段 `switch`**，兜底改为只认
+  `error.cause.code`。 [lib/runtime.js](lib/runtime.js)
+- **UTF-16BE 奇数字节**：改用零填充缓冲并显式丢弃无法配对的尾字节，不再把未初始化
+  内存解进字符串。 [lib/atomic.js](lib/atomic.js)
+- **`probe.results` / `checkin.results` 逐字段白名单**：这两份对象会进 `/status` 并
+  被卡片渲染，不再整体透传手改内容。 [lib/settings.js](lib/settings.js)
+- **宿主没给 `maxTokens` 时用目录声明的 `defaultMaxTokens`**，避免长回答被上游默认
+  输出上限截断。 [lib/adapter.js](lib/adapter.js)
+- **CLI logger 分流**：运行时 `info` 走 stderr，`bin.js models` 的 TSV 不再被换号
+  日志插行。 [lib/bin.js](lib/bin.js)
+
+### 上游传输层
+
+- **终态不再说谎**：三个解析器在工具块参数残缺（非空但不是合法 JSON）时把 `finish`
+  降级为 `error` + `MALFORMED_RESPONSE`，不再报成 `tool-calls` 让宿主拿半截参数执行
+  工具。 [lib/runtime.js](lib/runtime.js) [lib/qoder/transport.js](lib/qoder/transport.js)
+  [lib/trae/transport.js](lib/trae/transport.js)
+- **工具分片**：缺 `index` 时沿用上一个已知 index（不再新开 0 号槽）；`arguments`
+  以对象形式到达时 `JSON.stringify` 而不是丢掉。 [同上三处]
+- **Qoder 错误分类**：200 流里无法识别的错误归 SERVER（可重试），不再落到
+  `MALFORMED_RESPONSE`；`/userinfo` 与目录端点的 401/403/402/429 映射到
+  AUTH/QUOTA/RATE_LIMIT；job token 的 `expires_at` 接受数字（秒/毫秒）。
+  [lib/qoder/transport.js](lib/qoder/transport.js)
+- **401 会强制续期并重试一次**：聊天在正文之前收到 AUTH 时，对有 `refreshToken`
+  的账号清缓存、强制续期、原地重试一次；AUTH 失败会同时作废 Qoder 身份缓存
+  （避免冷却结束后继续用同一枚死令牌）。 [lib/runtime.js](lib/runtime.js)
+- **Trae**：abort 走 `abortReasonOf()`（超时不再被报成用户取消）；`event:` 名在空行
+  分帧处复位；流内 1001/401/403 归 AUTH；续期 429 带上 `Retry-After`。
+  [lib/trae/transport.js](lib/trae/transport.js) [lib/trae/credential.js](lib/trae/credential.js)
+- **浏览器登录**：两个阶段共用一个 5 分钟绝对死线；refresh 令牌的过期时间不再回落到
+  access token 的 JWT exp。 [lib/workbuddy/browser-login.js](lib/workbuddy/browser-login.js)
+- **WorkBuddy 登录文件发现**：Windows 候选目录优先用 `LOCALAPPDATA` / `APPDATA`，
+  文件夹重定向的机器不再「明明登录了却说未登录」；`readAppVersion` 不再永久缓存兜底
+  版本（UA 决定上游给哪份花名册）。 [lib/workbuddy/credentials.js](lib/workbuddy/credentials.js)
+- **资源**：200 非流式响应在抛错前 `cancel()` body（三个入口）；三个解析器的单行
+  缓冲加 4 MB 上限，避免无换行的超大响应打爆堆；Qoder 流内排队/限流的错误现在会
+  带上该响应的 `Retry-After`（首包与重开两次都穿进解析器）。 [qoder/trae/workbuddy]
+
+### 前端
+
+- **同一组件挂两处时 DOM id 唯一**：卡片实例首次渲染分配前缀，`dsh-rpc-tab-*` /
+  `dsh-rpc-detail` / `dsh-rpc-page-*` / 诊断面板 id 与 `aria-*` 引用全部带前缀，
+  方向键不再把焦点移到另一张卡片。 [client/client.js](client/client.js)
+- **写失败后对账**：`mutate()` 失败时立刻重读状态，提示「可能已生效」，避免用户再点
+  一次「添加账号」造成重复账号。 [client/client.js](client/client.js)
+- **`/status` 非 JSON**：`response.json()` 失败归因成「载荷形状不对」，横幅不再显示
+  原始 `Unexpected token '<'`。 [client/client.js](client/client.js)
+- **窄侧栏排序**：去掉 `Infinity` 哨兵，读不到/不限量的 provider 真的排到最后，
+  唯一显示的那一格不再可能是没有数据的那家。 [client/client.js](client/client.js)
+- **轮询与生命周期**：卡片轮询改用 `view=core`，切到用量/事件页才拉完整档；`load()`
+  同步抛错时释放 in-flight 标记；卸载时 abort 在途读请求；`requestSignal()` 在没有
+  `AbortSignal.timeout` 的环境用 `AbortController` 兜底。 [client/client.js](client/client.js)
+- **文案与清理**：补 `invalid-provider` 映射；空名字新增账号不再把界面语言写死成
+  账号名；侧栏「重试」改重读 `/status` 而不是打六家额度；删除未使用的
+  `ratioPercent`、同分支三元与不可达的 `next.authFile` 分支。
+  [client/client.js](client/client.js)
+
+### 记录在案（本轮未做）
+
+- **多行 `data:` 字段**（合法 SSE 变体）：需要按空行分帧，而部分上游根本不发空行，
+  改成帧式解析会让现有正常流停摆；保持逐行解析并在诊断里可见，留待有真实样本后再做。
+- **`withIdleTimeout` 强制要求 `onIdle`**：现有调用方全部传入，改成硬性要求会破坏
+  第三方/测试调用，保留文档说明。
+
+### 验证
+
+- `node --test tests/*.test.mjs` → **468 通过**（新增 `tests/audit-r24.test.mjs` 20 条）
+- `node tests/client-credits.mjs` → `client-credits: OK`（新增 3 条：实例化 DOM id、
+  非 JSON 状态、`view=core` 档位）
+- 兼容性：`/status` 默认响应不变（仍是 v8）；`?view=core` 是新增可选项；设置 v2、
+  事件 v1、额度/目录/额度历史缓存 v1 均无字段增删。
+
 ## 0.8.2 — 2026-11-02
 
 第二十三轮前后端打磨。主题是「删除与领取都不能凭空发生」：删掉一个早已不存在的

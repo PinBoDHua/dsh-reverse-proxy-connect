@@ -34,6 +34,16 @@ window.__ModuleLoader__.load({
     var POLL_MS = 20000
 
     /**
+     * 卡片实例序号：给每个挂载点分配独立的 DOM id 前缀（R24 的 C-2）。
+     *
+     * 同一个 `ConnectorCard` 会被注册两次（设置卡片与插件详情页）。写死
+     * `dsh-rpc-tab-<provider>` / `dsh-rpc-detail` 会让两个实例输出完全相同的
+     * id，而 `document.getElementById` 只返回文档顺序里的第一个 —— 方向键会把
+     * 焦点移到另一张卡片，`aria-labelledby` 也会指到别人的 tab。
+     */
+    var instanceSeq = 0
+
+    /**
      * 「账号测试」是**当时**的快照，不是持续状态：一个 2 小时前的 429 早就
      * 可能恢复了，继续把「被限流」当当前可用性会误导。超过这个时长只保留
      * 「上次测试失败」的时间线，不再决定状态列的颜色与标签。
@@ -541,6 +551,7 @@ window.__ModuleLoader__.load({
       errorServerMethod: '不支持这种请求方式',
       errorServerUnknownAction: '插件不认识这个操作',
       errorServerInvalidAccount: '账号不存在或已被删除',
+      errorServerInvalidProvider: '插件不认识这个服务商，请刷新页面后重试',
       errorServerInvalidModelTest: '测试参数不正确',
       errorServerEventsClearFailed: '事件账本清空失败（可能只读或被占用）',
       errorServerStatsResetFailed: '重置统计失败（文件来自更新版本，只读）',
@@ -1011,6 +1022,7 @@ window.__ModuleLoader__.load({
       errorServerMethod: 'This request method is not supported',
       errorServerUnknownAction: 'The plugin does not recognize this action',
       errorServerInvalidAccount: 'The account does not exist or was deleted',
+      errorServerInvalidProvider: 'The plugin does not recognize this provider; refresh the page and retry',
       errorServerInvalidModelTest: 'The test parameters are invalid',
       errorServerEventsClearFailed: 'Could not clear the event journal (it may be read-only or locked)',
       errorServerStatsResetFailed: 'Could not reset usage statistics (the file is from a newer version and is read-only)',
@@ -1419,8 +1431,12 @@ window.__ModuleLoader__.load({
 
     function bind(t, key, vars) {
       var text = t(key)
+      // `t()` 对未知 key 的契约是"原样回显"。万一宿主某天返回 undefined/null
+      // （旧 bundle 遇到新宿主的新文案键），`String()` 会渲染出字面量
+      // "undefined"，比显示 key 更糟（R24 的 C-14）。
+      if (typeof text !== 'string') return key
       if (vars === undefined) return text
-      return String(text).replace(/\{(\w+)\}/g, function (_, name) {
+      return text.replace(/\{(\w+)\}/g, function (_, name) {
         return vars[name] === undefined ? '' : String(vars[name])
       })
     }
@@ -1459,6 +1475,7 @@ window.__ModuleLoader__.load({
       'body-too-large': 'errorServerBodyTooLarge',
       'unknown-action': 'errorServerUnknownAction',
       'invalid-account': 'errorServerInvalidAccount',
+      'invalid-provider': 'errorServerInvalidProvider',
       'invalid-model-test': 'errorServerInvalidModelTest',
       'events-clear-failed': 'errorServerEventsClearFailed',
       'stats-reset-failed': 'errorServerStatsResetFailed',
@@ -1809,12 +1826,6 @@ window.__ModuleLoader__.load({
       var days = Math.floor(hours / 24)
       var restHours = hours % 24
       return String(days) + 'd' + (restHours > 0 ? ' ' + String(restHours) + 'h' : '')
-    }
-
-    /** 百分比整数。 */
-    function ratioPercent(ratio) {
-      if (typeof ratio !== 'number' || !Number.isFinite(ratio) || ratio < 0 || ratio > 1) return '—'
-      return String(Math.round(ratio * 100)) + '%'
     }
 
     /**
@@ -2664,20 +2675,46 @@ window.__ModuleLoader__.load({
      *
      * 没有超时的 fetch 会让 busy 永远停在「保存中…」。
      */
-    function requestSignal(ms) {
+    function requestSignal(ms, extra) {
+      var base
       try {
-        if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms)
+        if (typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function') base = AbortSignal.timeout(ms)
       } catch (_) {
         /* 老浏览器没有 AbortSignal.timeout */
       }
-      return undefined
+      if (base === undefined) {
+        // 没有 AbortSignal.timeout 的环境里，旧实现直接返回 undefined：注释承诺
+        // 的"没有超时的 fetch 会让 busy 永远停在保存中"于是变成现实（R24 的 C-9）。
+        try {
+          if (typeof AbortController === 'function') {
+            var controller = new AbortController()
+            setTimeout(function () { controller.abort() }, ms)
+            base = controller.signal
+          }
+        } catch (_) {
+          /* 连 AbortController 都没有：只能退化成无超时 */
+        }
+      }
+      if (extra === undefined || extra === null) return base
+      try {
+        if (base === undefined) return extra
+        if (typeof AbortSignal.any === 'function') return AbortSignal.any([base, extra])
+        return base
+      } catch (_) {
+        return base ?? extra
+      }
     }
 
-    function fetchStatus(light) {
+    function fetchStatus(light, signal, view) {
       var url = light === true ? STATUS_PATH + '?light=1' : STATUS_PATH
-      return fetch(url, { headers: { Accept: 'application/json' }, signal: requestSignal(STATUS_TIMEOUT_MS) }).then(function (response) {
+      if (light !== true && view === 'core') url += '?view=core'
+      return fetch(url, { headers: { Accept: 'application/json' }, signal: requestSignal(STATUS_TIMEOUT_MS, signal) }).then(function (response) {
         if (!response.ok) throw new Error('status ' + response.status)
-        return response.json()
+        // 200 但 body 不是 JSON（网关 HTML 错误页 / SPA 回退）时，不能让
+        // `response.json()` 的解析器文案直接进横幅 —— 那是一句无法翻译的英文
+        // `Unexpected token '<'`（R24 的 C-3）。按「载荷形状不对」归因，走
+        // errorPayload 的本地化文案。
+        return response.json().catch(function () { return undefined })
       }).then(function (document) {
         // 200 但 body 是 `null` / 数组 / 字符串：宿主出错或中间的代理返回了别的东西。
         // 旧代码只拦 `undefined`，`null` 会一路走到 `status.settings` 抛 TypeError，
@@ -2689,12 +2726,12 @@ window.__ModuleLoader__.load({
       })
     }
 
-    function postJson(path, body, key, timeoutMs) {
+    function postJson(path, body, key, timeoutMs, signal) {
       return fetch(path, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-RPC-Key': key === undefined ? '' : key },
         body: JSON.stringify(body === undefined ? {} : body),
-        signal: requestSignal(timeoutMs === undefined ? SETTINGS_TIMEOUT_MS : timeoutMs),
+        signal: requestSignal(timeoutMs === undefined ? SETTINGS_TIMEOUT_MS : timeoutMs, signal),
       }).then(function (response) {
         // 解析失败不能把 `Unexpected token '<'` 这种解析器文案直接塞给用户：
         // 网关/代理返回 HTML 错误页时按 HTTP 状态码收尾（errorTextOf 会再本地化）。
@@ -3121,6 +3158,20 @@ window.__ModuleLoader__.load({
       var useCallback = React.useCallback
       var useRef = React.useRef
 
+      /**
+       * 本实例的 DOM id 前缀（R24 的 C-2）。首次渲染分配，之后保持不变。
+       *
+       * 必须在所有提前 return 之前调用：hook 数量一旦变化，React 会抛
+       * "Rendered more hooks than during the previous render"，整张卡片会被
+       * 宿主的错误边界替换成空白。
+       */
+      var domPrefixRef = useRef(undefined)
+      if (domPrefixRef.current === undefined) {
+        instanceSeq += 1
+        domPrefixRef.current = 'rpc' + String(instanceSeq) + '-'
+      }
+      var domId = function (name) { return domPrefixRef.current + name }
+
       var statusState = useState(undefined)
       var status = statusState[0]
       var setStatus = statusState[1]
@@ -3198,6 +3249,16 @@ window.__ModuleLoader__.load({
       var pageState = useState('overview')
       var activePage = pageState[0]
       var setActivePage = pageState[1]
+      /**
+       * 当前页签（给轮询读，不进 `load` 的依赖，避免切页就重建定时器）。
+       * 决定拉哪一档状态：只有「用量」与「最近事件」需要完整文档（R24 的 C-5）。
+       */
+      var activePageRef = useRef(activePage)
+      activePageRef.current = activePage
+      var viewForPolling = function () {
+        var page = activePageRef.current
+        return page === 'usage' || page === 'activity' ? undefined : 'core'
+      }
       var patState = useState('')
       var patDraft = patState[0]
       var setPatDraft = patState[1]
@@ -3361,6 +3422,18 @@ window.__ModuleLoader__.load({
         }
       }, [])
 
+      /**
+       * 组件生命周期内的读请求取消句柄（R24 的 C-10）。
+       *
+       * 旧实现只在卸载时清掉定时器与监听器，在途的 `fetchStatus()` 仍会跑完，
+       * 然后把结果写进一个已卸载的组件；打开/关闭设置弹窗多次就会积累这类回调，
+       * 还会让宿主的凭据探测白跑。这里在卸载时 abort 读请求。
+       */
+      var readAbortRef = useRef(undefined)
+      if (readAbortRef.current === undefined) {
+        readAbortRef.current = typeof AbortController === 'function' ? new AbortController() : null
+      }
+
       var load = useCallback(
         function () {
           // 卡片打开时定时器与「窗口重新可见」可能同时触发；重复请求既浪费
@@ -3368,7 +3441,22 @@ window.__ModuleLoader__.load({
           if (statusLoading.current === true) return Promise.resolve()
           statusLoading.current = true
           var epoch = statusEpoch.current
-          return fetchStatus()
+          var pending
+          try {
+            pending = fetchStatus(
+              false,
+              readAbortRef.current === null ? undefined : readAbortRef.current.signal,
+              viewForPolling(),
+            )
+          } catch (failure) {
+            // `fetchStatus()` 同步抛错（环境没有 fetch / AbortSignal 构造失败）：
+            // 不释放标记的话，此后每一拍轮询都会在第一行 return，界面永久停在
+            // 旧快照且没有任何提示（R24 的 C-6）。
+            statusLoading.current = false
+            setConnectionError(String(failure && failure.message ? failure.message : failure))
+            return Promise.resolve()
+          }
+          return pending
             .then(function (document) {
               statusLoading.current = false
               lastStatusAt.current = Date.now()
@@ -3379,6 +3467,8 @@ window.__ModuleLoader__.load({
               return document
             }, function (failure) {
               statusLoading.current = false
+              // 卸载时的主动取消不是「连不上宿主」，不要写错误横幅。
+              if (failure !== undefined && failure !== null && failure.name === 'AbortError') return
               setConnectionError(String(failure && failure.message ? failure.message : failure))
             })
         },
@@ -3423,8 +3513,35 @@ window.__ModuleLoader__.load({
             clearTimeout(loginPollTimer.current)
             loginPollTimer.current = undefined
           }
+          // 在途的 /status 读请求也要取消（R24 的 C-10）。
+          if (readAbortRef.current !== null && readAbortRef.current !== undefined) {
+            try {
+              readAbortRef.current.abort()
+            } catch (_) {
+              /* 已经中止过 */
+            }
+          }
         }
       }, [load])
+
+      // 切到需要完整文档的页签时立刻补一次（R24 的 C-5）：轮询可能刚拉过
+      // core 档，等下一个 20 秒会让「用量 / 最近事件」两页短暂空白。
+      useEffect(function () {
+        if (activePage !== 'usage' && activePage !== 'activity') return undefined
+        var cancelled = false
+        // 可能正好有一份 core 档请求在飞：`load()` 会直接返回，而那份响应会把
+        // 页面需要的字段清空。等它结束后再补一次完整档。
+        var attempt = function () {
+          if (cancelled) return
+          if (statusLoading.current === true) {
+            setTimeout(attempt, 20)
+            return
+          }
+          void load()
+        }
+        attempt()
+        return function () { cancelled = true }
+      }, [activePage, load])
 
       var providers = safeArray(status && status.providers)
       var active = providers.filter(function (entry) {
@@ -3842,6 +3959,11 @@ window.__ModuleLoader__.load({
             // 与成功分支同一理由：这一次请求结束了，busy 必须释放；
             // 只有「显示谁的失败」受序号约束。
             endBusy(saveKey)
+            // 失败**不等于**没生效：宿主可能已经落盘、只是响应没回来（超时 /
+            // 状态构建失败，见 R24 的 B-4/C-1）。立刻对账一次，让界面收敛到
+            // 磁盘上的真实状态 —— 否则用户看到"失败"会再点一次「添加账号」，
+            // 于是同一个 PAT 被写成两个账号。
+            load()
             // 只有**最新一次**写入失败才显示横幅。更早的写入失败时，更新的
             // 写入（已经包含用户在它之后做的改动）还在飞；把 onError 交给旧
             // 写入还会误删新写入的意图（provider 开关会卡在服务端旧值上）。
@@ -4054,6 +4176,12 @@ window.__ModuleLoader__.load({
                 // 直接 return，一次与 20 秒轮询的碰撞就把登录轮询永久停掉，
                 // 宿主随后登录成功也不会有任何一拍去读到新账号。
                 if (document === undefined || document === null) pollLogin(provider, attempt + 1, token)
+                // 文档有效而任务已消失 = 宿主侧任务已被 TTL 清理 / 取消：这是
+                // 终态，不该继续每 2 秒打一次 /status（R24 的 C-7）。
+                else {
+                  loginPollTimer.current = undefined
+                  return
+                }
                 return
               }
               if (job.phase === 'waiting' || job.phase === 'starting') {
@@ -4674,7 +4802,7 @@ window.__ModuleLoader__.load({
           'button',
           {
             key: entry.provider,
-            id: 'dsh-rpc-tab-' + entry.provider,
+            id: domId('dsh-rpc-tab-' + entry.provider),
             type: 'button',
             role: 'tab',
             'aria-selected': selected,
@@ -4684,7 +4812,7 @@ window.__ModuleLoader__.load({
             // 「tab 指向的 id 没有 role、有 role 的 id 没有 tab 指向」两头都错；
             // 现在 role/aria-labelledby 落在 detail 容器上，tab 指向它，
             // 六个页分区退回普通 section。
-            'aria-controls': 'dsh-rpc-detail',
+            'aria-controls': domId('dsh-rpc-detail'),
             // 标准 tabs 模式：只有当前 tab 进 Tab 键序列，方向键在 tab 间移动。
             tabIndex: selected ? 0 : -1,
             className: 'rpc-provider',
@@ -4833,7 +4961,7 @@ window.__ModuleLoader__.load({
             // 是「跳到动态页并打开」，而不是对全局 showDiag 取反 —— 否则
             // 第一次点击会跳到动态页却把面板关掉，用户只看到一张空页。
             'aria-expanded': showDiag && activePage === 'activity',
-            'aria-controls': showDiag && activePage === 'activity' ? 'dsh-reverse-proxy-diagnostics' : undefined,
+            'aria-controls': showDiag && activePage === 'activity' ? domId('dsh-reverse-proxy-diagnostics') : undefined,
             onClick: function () {
               if (activePage !== 'activity') {
                 setActivePage('activity')
@@ -4866,7 +4994,7 @@ window.__ModuleLoader__.load({
               // WAI-ARIA tabs 要求方向键移动后**焦点跟着走**：只改 aria-selected
               // 会把焦点留在旧 tab 上，而旧 tab 的 tabIndex 已变成 -1，键盘/读屏
               // 用户再也回不来。等 React 提交 DOM 后再聚焦新 tab。
-              var targetId = 'dsh-rpc-tab-' + providers[next].provider
+              var targetId = domId('dsh-rpc-tab-' + providers[next].provider)
               var focusNext = function () {
                 if (typeof document === 'undefined' || typeof document.getElementById !== 'function') return
                 var element = document.getElementById(targetId)
@@ -5049,7 +5177,7 @@ window.__ModuleLoader__.load({
       sections.push(
         h('div', {
           key: 'status',
-          id: 'dsh-rpc-status-panel',
+          id: domId('dsh-rpc-status-panel'),
           style: S.section,
         },
           h('div', { key: 'h', style: S.sectionHead },
@@ -5456,13 +5584,14 @@ window.__ModuleLoader__.load({
         var secret = accSecret.trim()
         var labelSnapshot = draftOf(provider, 'accLabel')
         var secretSnapshot = draftOf(provider, 'accSecret')
-        var label = labelDraft === '' ? bind(t, 'accountDefaultLabel') : labelDraft
-        var next = { id: newAccountId(), label: label, enabled: true }
+        // 空名字时**不传** label：宿主归一化会用「账号 N」兜底。旧实现把当前
+        // 界面语言写死成账号名，英文界面加的账号切回中文后仍叫 "New account"
+        // （R24 的 C-11）。
+        var next = { id: newAccountId(), enabled: true }
+        if (labelDraft !== '') next.label = labelDraft
         if (isPatProvider) {
           if (secret === '') return
           next.pat = secret
-        } else if (secret !== '') {
-          next.authFile = secret
         }
         var patch = { accounts: {}, activeAccount: {} }
         // 增量 upsert：服务端会把这一条并进现有账号池，不会覆盖别的账号。
@@ -7437,7 +7566,7 @@ window.__ModuleLoader__.load({
               className: 'rpc-btn rpc-btn-sm',
               'aria-expanded': eventsExpanded === true,
               onClick: function () { setEventsExpanded(!eventsExpanded) },
-            }, rpcIcon(eventsExpanded === true ? 'chevron' : 'chevron', 13), eventsExpanded === true
+            }, rpcIcon('chevron', 13), eventsExpanded === true
               ? bind(t, 'eventLess')
               : bind(t, 'eventMore', { count: groupedEvents.length }))
           : null
@@ -7561,7 +7690,7 @@ window.__ModuleLoader__.load({
           h('div', { key: 'h', style: S.sectionHead },
             h('span', { style: S.sectionTitle }, rpcIcon('pulse', 14), bind(t, 'diagnostics')),
             h('span', { style: S.grow }),
-            h('button', { type: 'button', className: 'rpc-btn rpc-btn-sm', 'aria-expanded': showDiag, 'aria-controls': showDiag ? 'dsh-reverse-proxy-diagnostics' : undefined, onClick: function () { setShowDiag(!showDiag) } },
+            h('button', { type: 'button', className: 'rpc-btn rpc-btn-sm', 'aria-expanded': showDiag, 'aria-controls': showDiag ? domId('dsh-reverse-proxy-diagnostics') : undefined, onClick: function () { setShowDiag(!showDiag) } },
               showDiag ? bind(t, 'hide') : bind(t, 'show')),
             h('button', {
               type: 'button',
@@ -7584,7 +7713,7 @@ window.__ModuleLoader__.load({
                   },
                 }))
             : null,
-          showDiag ? h('pre', { key: 'pre', id: 'dsh-reverse-proxy-diagnostics', className: 'rpc-pre', style: S.pre }, diagnosticsJson) : null),
+          showDiag ? h('pre', { key: 'pre', id: domId('dsh-reverse-proxy-diagnostics'), className: 'rpc-pre', style: S.pre }, diagnosticsJson) : null),
       )
 
       // React 会把 `key` 从 props 里摘掉，挂到 element.key 上；测试/预览的
@@ -7640,7 +7769,7 @@ window.__ModuleLoader__.load({
         var content = pages[page.id]
         return h('div', {
           key: page.id,
-          id: 'dsh-rpc-page-' + page.id,
+          id: domId('dsh-rpc-page-' + page.id),
           // 这里**不能**是 `role="tabpanel"`：这六个分区是「页内导航」，同一个
           // provider 的六页同时存在（用 display 切换），并不是服务商 tablist 的
           // panel。服务商 tablist 唯一的 panel 是外层的 `dsh-rpc-detail`。
@@ -7675,10 +7804,10 @@ window.__ModuleLoader__.load({
       providerRail,
       banners,
       h('div', {
-        id: 'dsh-rpc-detail',
+        id: domId('dsh-rpc-detail'),
         // 服务商 tablist 的唯一受控区域（每个 tab 的 `aria-controls` 都指向这里）。
         role: 'tabpanel',
-        'aria-labelledby': 'dsh-rpc-tab-' + active.provider,
+        'aria-labelledby': domId('dsh-rpc-tab-' + active.provider),
         className: 'rpc-detail',
       },
         detailHeader,
@@ -8026,7 +8155,9 @@ window.__ModuleLoader__.load({
                 {
                   type: 'button',
                   disabled: actionable !== true,
-                  onClick: asError ? retryLoad : received ? refresh : undefined,
+                  // 「读到了状态但没有服务商」不是额度问题，重试应当重读 /status
+                  // 而不是打一轮六家的额度刷新（R24 的 C-12）。
+                  onClick: asError ? retryLoad : received ? retryLoad : undefined,
                   title: asError ? bind(t, 'statusLoadFailedHint') : received ? bind(t, 'providersEmptyHint') : undefined,
                   style: {
                     font: 'inherit',
@@ -8158,24 +8289,28 @@ window.__ModuleLoader__.load({
         // - 无论几列，所有格都**左对齐**（左列 `flex-start`、右列 `flex-end`
         //   会让右列像浮在半空，两列起点对不齐）。
         /**
-         * 剩余比例（仅用于窄胶囊的排序）：读不到 / 不限量排到最后。
+         * 剩余比例（仅用于窄胶囊的排序）。
          *
          * @param snapshot - 额度快照。
-         * @returns 0–1 的比例，或 Infinity。
+         * @returns 0–1 的比例；**读不到 / 不限量返回 undefined**（不可排名）。
          */
         var narrowRatioOf = function (snapshot) {
-          if (snapshot === null || typeof snapshot !== 'object' || snapshot.state !== 'ok') return Number.POSITIVE_INFINITY
-          if (snapshot.unlimited === true) return Number.POSITIVE_INFINITY
-          if (!isFiniteNumber(snapshot.total) || !(snapshot.total > 0) || !isFiniteNumber(snapshot.remain)) return Number.POSITIVE_INFINITY
+          if (snapshot === null || typeof snapshot !== 'object' || snapshot.state !== 'ok') return undefined
+          if (snapshot.unlimited === true) return undefined
+          if (!isFiniteNumber(snapshot.total) || !(snapshot.total > 0) || !isFiniteNumber(snapshot.remain)) return undefined
           return Math.max(0, Math.min(1, snapshot.remain / snapshot.total))
         }
         /**
          * 窄侧栏只画得下一家：先按「最需要看」排序 —— 预警/用尽优先，其次余额
-         * 比例低的，最后保持 provider 顺序。
+         * 比例低的，读不到/不限量的排最后。
          *
          * 旧实现固定取第一行，静默截断：用户只看到 WorkBuddy 的余额，以为另外
          * 五家没有数字（而读屏的 aria-label 却列出了全部六家，两边结论不同）。
          * 现在额外画一个 `+N`，悬停列出被折叠的 provider 与各自的余额。
+         *
+         * **不能**再用 Infinity 当"不可排名"的哨兵：`Infinity - 有限值` 还是
+         * Infinity、`Infinity - Infinity` 是 NaN，两者都过不了 `Number.isFinite`，
+         * 旧比较器于是恒返回 0，"排到最后"完全没生效（R24 的 C-4）。
          */
         var visibleRows = rows
         var hiddenRows = []
@@ -8184,9 +8319,12 @@ window.__ModuleLoader__.load({
             var warn = (creditsWarning(a.credits, a.entry.provider, sidebarAlertRatio, sidebarAlertsEnabled) ? 0 : 1)
               - (creditsWarning(b.credits, b.entry.provider, sidebarAlertRatio, sidebarAlertsEnabled) ? 0 : 1)
             if (warn !== 0) return warn
-            var ratio = narrowRatioOf(a.credits) - narrowRatioOf(b.credits)
-            if (Number.isFinite(ratio) && ratio !== 0) return ratio
-            return 0
+            var left = narrowRatioOf(a.credits)
+            var right = narrowRatioOf(b.credits)
+            if (left === undefined && right === undefined) return 0
+            if (left === undefined) return 1
+            if (right === undefined) return -1
+            return left - right
           })
           visibleRows = narrowRank.slice(0, 1)
           hiddenRows = narrowRank.slice(1)
