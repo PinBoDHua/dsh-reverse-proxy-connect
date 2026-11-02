@@ -5888,7 +5888,146 @@ const r22Failures = []
   }
 }
 
-if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0 || r21Failures.length > 0 || r22Failures.length > 0) {
+// ---------- 第二十三轮审计（0.8.2）的前端回归 ----------
+const r23Failures = []
+{
+  const providersSnapshot = STATUS.providers
+  const settingsSnapshot = STATUS.settings
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+  const buttonOf = (tree, text) => find(tree, (node) => node.type === 'button' && textOf(node) === text)
+  const openPage = async (tree, label, t) => {
+    const tabs = findAll(tree, (node) => node.type === 'button' && node.props?.className === 'rpc-pagetab')
+    const tab = tabs.find((node) => textOf(node).startsWith(label))
+    if (tab === undefined) throw new Error(`找不到页签 ${label}`)
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+  const openProviderById = async (tree, provider, t) => {
+    const tab = find(tree, (node) => node.type === 'button' && node.props?.id === 'dsh-rpc-tab-' + provider)
+    if (tab === undefined) throw new Error(`找不到服务商 ${provider} 的页签`)
+    tab.props.onClick()
+    return await render(card, { t })
+  }
+
+  try {
+    // 1) 窄侧栏只画得下一家：必须优先画预警项，并用 +N 说明还有几家被折叠。
+    try {
+      STATUS.providers = STATUS.providers.map((provider) => provider.provider === 'workbuddy-ai'
+        ? { ...provider, credits: { ...provider.credits, remain: 5, total: 100 } }
+        : provider)
+      const props = { t: (key) => key, wide: false }
+      await mount(pill, props)
+      await sleep(80)
+      let tree = await render(pill, props, true)
+      if (!textOf(tree).includes('WBAI')) throw new Error('窄胶囊没有优先显示低额度的那一家')
+      if (!textOf(tree).includes('+2')) throw new Error('窄胶囊静默折叠了另外两家（没有 +N）')
+      const more = find(tree, (node) => typeof node.props?.title === 'string' && textOf(node) === '+2')
+      if (more === undefined) throw new Error('+N 节点没有悬停说明')
+      if (!String(more.props.title).includes('WorkBuddy')) throw new Error('+N 的悬停没有列出被折叠的 provider')
+      tree = await render(pill, props, true)
+      const visibleSegments = findAll(tree, (node) => node.props?.style?.justifyContent === 'flex-start'
+        && typeof node.props?.title === 'string')
+      if (visibleSegments.length !== 1) throw new Error(`窄胶囊应只画一格，实际 ${visibleSegments.length}`)
+      console.log('✓ 窄侧栏胶囊优先显示预警项，并用 +N 标注折叠数量')
+    } catch (error) {
+      r23Failures.push('窄胶囊折叠: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 窄胶囊折叠: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+    }
+
+    // 2) 宿主返回 providers: [] 时不能永远停在「读取中」。
+    try {
+      STATUS.providers = []
+      // 侧栏小卡用的是 ctx.locale.bind 的 `t`（不是 props.t），测试里是 key-only。
+      const props = { t: (key) => key, wide: true }
+      await mount(pill, props)
+      await sleep(80)
+      const tree = await render(pill, props, true)
+      if (!textOf(tree).includes('providersEmpty')) throw new Error('空 provider 列表没有给出明确状态：' + textOf(tree).slice(0, 160))
+      if (textOf(tree).includes('loading')) throw new Error('已经拿到状态却仍显示「读取中」')
+      const button = find(tree, (node) => node.type === 'button')
+      if (button === undefined) throw new Error('空 provider 列表没有可点的重试入口')
+      if (button.props.disabled === true) throw new Error('重试按钮是禁用的')
+      calls.length = 0
+      button.props.onClick()
+      await sleep(40)
+      const refreshed = calls.some((call) => String(call.url).includes('/action') && String(call.body).includes('"credits"'))
+      if (!refreshed) throw new Error('点击重试没有真的发一次额度刷新')
+      console.log('✓ providers 为空数组时给出明确状态与可用的重试')
+    } catch (error) {
+      r23Failures.push('空 provider 列表: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 空 provider 列表: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+    }
+
+    // 3) 页头「N 家额度可读」不能把已关闭的 provider 算进去。
+    try {
+      STATUS.providers = STATUS.providers.map((provider) => provider.provider === 'workbuddy-ai'
+        ? { ...provider, enabled: false }
+        : provider)
+      const tree = await mount(card, { t: realT })
+      if (!textOf(tree).includes(realT('providersCredits', { count: 2 }))) {
+        throw new Error('已关闭的 provider 仍被算进「额度可读」')
+      }
+      if (textOf(tree).includes(realT('providersCredits', { count: 3 }))) {
+        throw new Error('关闭一家后仍显示 3 家额度可读')
+      }
+      console.log('✓ 页头「额度可读」只数启用中的 provider')
+    } catch (error) {
+      r23Failures.push('额度可读计数: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 额度可读计数: ' + String(error && error.message ? error.message : error))
+    } finally {
+      STATUS.providers = providersSnapshot
+      cardTree = await mount(card, { t: (key) => key })
+    }
+
+    // 4) 一家的模型写入不能锁住别家的模型按钮，也不能锁住本家的账号操作。
+    try {
+      let tree = await mount(card, { t: realT })
+      tree = await openPage(tree, realT('navModels'), realT)
+      const modelBox = find(tree, (node) => node.type === 'input' && node.props?.['aria-label'] === 'Auto')
+      if (modelBox === undefined) throw new Error('找不到 WorkBuddy 的模型复选框')
+      fetchDelayFor = (body) => body.includes('disabledModels') ? 600 : 0
+      modelBox.props.onChange()
+      tree = await render(card, { t: realT }, true)
+      // 本家的「使用账号」属于另一类操作，不该被模型写入锁住。
+      tree = await openPage(tree, realT('navAccounts'), realT)
+      const useButton = buttonOf(tree, realT('useAccount'))
+      if (useButton === undefined) throw new Error('账号页找不到「使用」按钮')
+      if (useButton.props.disabled === true) throw new Error('模型开关在飞时「使用账号」被一起禁用了')
+      // 另一家的模型按钮更不能被这一家的写入锁住。
+      tree = await openProviderById(tree, 'qoder-global', realT)
+      tree = await openPage(tree, realT('navModels'), realT)
+      const hideAll = buttonOf(tree, realT('hideAll'))
+      if (hideAll === undefined) throw new Error('Qoder 的模型页找不到「全部关闭」')
+      if (hideAll.props.disabled === true) throw new Error('WorkBuddy 的模型写入把 Qoder 的「全部关闭」锁住了')
+      console.log('✓ 模型 / 账号操作的 busy 按 provider 与操作类别隔离')
+      await sleep(700)
+      fetchDelayFor = null
+    } catch (error) {
+      fetchDelayFor = null
+      r23Failures.push('按家 busy 隔离: ' + String(error && error.message ? error.message : error))
+      console.log('✗ 按家 busy 隔离: ' + String(error && error.message ? error.message : error))
+    } finally {
+      fetchDelayFor = null
+      STATUS.providers = providersSnapshot
+      STATUS.settings = settingsSnapshot
+      await sleep(80)
+      cardTree = await mount(card, { t: (key) => key })
+    }
+  } finally {
+    STATUS.providers = providersSnapshot
+    STATUS.settings = settingsSnapshot
+    fetchDelayFor = null
+    fetchDelayMs = 0
+    fetchSnapshotFor = null
+    delayNextStatusMs = 0
+  }
+}
+
+if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0 || r21Failures.length > 0 || r22Failures.length > 0 || r23Failures.length > 0) {
   if (r18Failures.length > 0) {
     console.error(`R18 前端回归 ${String(r18Failures.length)} 条失败：`)
     for (const line of r18Failures) console.error('- ' + line)
@@ -5908,6 +6047,10 @@ if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0 |
   if (r22Failures.length > 0) {
     console.error(`R22 前端回归 ${String(r22Failures.length)} 条失败：`)
     for (const line of r22Failures) console.error('- ' + line)
+  }
+  if (r23Failures.length > 0) {
+    console.error(`R23 前端回归 ${String(r23Failures.length)} 条失败：`)
+    for (const line of r23Failures) console.error('- ' + line)
   }
   process.exitCode = 1
 } else {

@@ -940,6 +940,8 @@ window.__ModuleLoader__.load({
       imagesShortOff: '无图',
       statusLoadFailed: '读取状态失败',
       statusLoadFailedHint: '插件没有拿到 /status。宿主可能还没就绪，也可能后台进程刚重启；可以稍等或手动重试。',
+      providersEmpty: '没有服务商数据',
+      providersEmptyHint: '宿主返回了状态，但服务商列表是空的。可点右侧重试读取一次，或检查插件是否已在设置里启用。',
       retry: '重试',
       retrying: '重试中…',
       checkinNeedLogin: '先登录再签到',
@@ -1405,6 +1407,8 @@ window.__ModuleLoader__.load({
       imagesShortOff: 'no img',
       statusLoadFailed: 'Failed to load status',
       statusLoadFailedHint: 'The plugin could not read /status. The host may not be ready yet, or the backend just restarted; wait a moment or retry.',
+      providersEmpty: 'No provider data',
+      providersEmptyHint: 'The host returned a status document with an empty provider list. Retry to read it again, or check that the plugin is enabled in settings.',
       retry: 'Retry',
       retrying: 'Retrying…',
       checkinNeedLogin: 'Sign in before checking in',
@@ -3169,6 +3173,19 @@ window.__ModuleLoader__.load({
       var loginKeyOf = function (provider) {
         return 'login:' + (typeof provider === 'string' && provider !== '' ? provider : '?')
       }
+      /**
+       * 「这一家的模型开关」与「这一家的账号行操作」各自的 busy 键。
+       *
+       * 它们以前共用全局 `save`：WorkBuddy 点一个模型开关，Qoder 的「使用 /
+       * 启用 / 删除」按钮同时变灰；反过来也一样。与 0.7.8 / 2.0.0 的「按家
+       * 隔离」是同一条规则 —— 一次写入只该锁住它自己那一家、那一类控件。
+       */
+      var modelActionKeyOf = function (provider) {
+        return 'model:' + (typeof provider === 'string' && provider !== '' ? provider : '?')
+      }
+      var accountActionKeyOf = function (provider) {
+        return 'account:' + (typeof provider === 'string' && provider !== '' ? provider : '?')
+      }
       var tabState = useState(props.initialProvider || 'workbuddy')
       var activeTab = tabState[0]
       var setActiveTab = tabState[1]
@@ -3455,8 +3472,10 @@ window.__ModuleLoader__.load({
 
       // 页头摘要：接入数量 / 可读额度数量 / 最近更新时间。
       var enabledCount = providers.filter(function (entry) { return entry.enabled !== false }).length
+      // 只数**启用中**的：关掉的 provider 保留的是上次读到的旧快照，把它算进
+      // 「N 家额度可读」会与同一行的「已接入 M/total」自相矛盾（M < N）。
       var readableCount = providers.filter(function (entry) {
-        return entry.credits !== undefined && entry.credits !== null && entry.credits.state === 'ok'
+        return entry.enabled !== false && entry.credits !== undefined && entry.credits !== null && entry.credits.state === 'ok'
       }).length
       var latestUpdate = 0
       providers.forEach(function (entry) {
@@ -3945,7 +3964,7 @@ window.__ModuleLoader__.load({
           markPending(entry.provider, 'forced', model.id, nextForced, forceSeq)
           var forcePatch = { forcedModels: {} }
           forcePatch.forcedModels[entry.provider] = forced
-          mutate(forcePatch, { seq: forceSeq, modelKeys: [entry.provider + '::forced'] })
+          mutate(forcePatch, { seq: forceSeq, modelKeys: [entry.provider + '::forced'], saveKey: modelActionKeyOf(entry.provider) })
           return
         }
         var disabledNow = pendingOf('disabled')
@@ -3956,7 +3975,7 @@ window.__ModuleLoader__.load({
         markPending(entry.provider, 'disabled', model.id, nextDisabled, toggleSeqNow)
         var providersPatch = {}
         providersPatch[entry.provider] = { disabledModels: disabled }
-        mutate({ providers: providersPatch }, { seq: toggleSeqNow, modelKeys: [entry.provider + '::disabled'] })
+        mutate({ providers: providersPatch }, { seq: toggleSeqNow, modelKeys: [entry.provider + '::disabled'], saveKey: modelActionKeyOf(entry.provider) })
       }
 
       var setAllModels = function (entry, hidden) {
@@ -3978,7 +3997,7 @@ window.__ModuleLoader__.load({
           bucket[row.id] = { on: hidden === true, seq: batchSeq }
         })
         pendingModelToggles.current[key] = bucket
-        mutate({ providers: providersPatch }, { seq: batchSeq, modelKeys: [key] })
+        mutate({ providers: providersPatch }, { seq: batchSeq, modelKeys: [key], saveKey: modelActionKeyOf(entry.provider) })
       }
 
       /**
@@ -5333,14 +5352,14 @@ window.__ModuleLoader__.load({
             }, account.configured === false ? { opacity: 0.55 } : {}),
             // 停用的账号不能被「使用」：宿主选当前账号时会跳过它，点下去
             // 界面一动不动、也没有报错，像是按钮坏了。这里直接禁用并说明原因。
-            disabled: isBusy('save') || account.configured === false || account.enabled === false,
+            disabled: isBusy(accountActionKeyOf(active.provider)) || account.configured === false || account.enabled === false,
             title: account.enabled === false
               ? bind(t, 'useAccountDisabled')
               : account.configured === false ? bind(t, 'creditsNeedLogin') : undefined,
             onClick: function () {
               var patch = { activeAccount: {} }
               patch.activeAccount[active.provider] = account.id
-              mutate(patch)
+              mutate(patch, { saveKey: accountActionKeyOf(active.provider) })
             },
           }, bind(t, 'useAccount')))
           // 停用状态只能来自设置文件；不给入口的话，「请先启用」是一句死胡同。
@@ -5350,7 +5369,7 @@ window.__ModuleLoader__.load({
               key: 'enable',
               type: 'button',
               style: S.buttonGhost,
-              disabled: isBusy('save'),
+              disabled: isBusy(accountActionKeyOf(active.provider)),
               title: bind(t, 'enableAccountHint'),
               onClick: function () {
                 // label 必须一起回传：服务端归一会给缺失 label 的行补「账号 N」，
@@ -5358,7 +5377,7 @@ window.__ModuleLoader__.load({
                 var row = { id: account.id, label: account.label, enabled: true }
                 var patch = { accounts: {} }
                 patch.accounts[active.provider] = [row]
-                mutate(patch)
+                mutate(patch, { saveKey: accountActionKeyOf(active.provider) })
               },
             }, bind(t, 'enableAccount')))
           }
@@ -5378,7 +5397,7 @@ window.__ModuleLoader__.load({
             style: Object.assign({}, S.buttonGhost, deleteConfirm === deleteConfirmKey
               ? { color: 'var(--dsw-alias-state-error-primary, #b3261e)', borderColor: 'var(--dsw-alias-state-error-primary, #b3261e)' }
               : {}),
-            disabled: isBusy('save'),
+            disabled: isBusy(accountActionKeyOf(active.provider)),
             // 多账号时多个按钮都叫「删除」，用 aria-label/title 带上账号名，读屏与悬停都不混淆。
             'aria-label': bind(t, 'removeAccountAria', { name: accountLabel }),
             title: bind(t, 'removeAccountAria', { name: accountLabel }),
@@ -5397,7 +5416,7 @@ window.__ModuleLoader__.load({
                 patch.activeAccount = {}
                 patch.activeAccount[active.provider] = remaining[0].id
               }
-              mutate(patch)
+              mutate(patch, { saveKey: accountActionKeyOf(active.provider) })
             },
           }, deleteConfirm === deleteConfirmKey ? bind(t, 'removeConfirm') : bind(t, 'removeAccount')))
         }
@@ -7043,10 +7062,10 @@ window.__ModuleLoader__.load({
             h('span', { style: S.grow }),
             models.length === 0
               ? null
-              : h('button', { type: 'button', className: 'rpc-btn rpc-btn-sm', onClick: function () { setAllModels(active, false) }, disabled: isBusy('save') }, rpcIcon('check', 13), bind(t, 'showAll')),
+              : h('button', { type: 'button', className: 'rpc-btn rpc-btn-sm', onClick: function () { setAllModels(active, false) }, disabled: isBusy(modelActionKeyOf(active.provider)) }, rpcIcon('check', 13), bind(t, 'showAll')),
             models.length === 0
               ? null
-              : h('button', { type: 'button', className: 'rpc-btn rpc-btn-sm', onClick: function () { setAllModels(active, true) }, disabled: isBusy('save') }, bind(t, 'hideAll'))),
+              : h('button', { type: 'button', className: 'rpc-btn rpc-btn-sm', onClick: function () { setAllModels(active, true) }, disabled: isBusy(modelActionKeyOf(active.provider)) }, bind(t, 'hideAll'))),
           models.length > 6
             ? h('input', {
                 className: 'rpc-input',
@@ -7987,12 +8006,18 @@ window.__ModuleLoader__.load({
             // 旧实现直接 return null，侧栏底部整块空白，和卡片的「读取中…」
             // 行为不一致，用户分不清「插件没装」还是「还没加载完」。
             //
-            // 但「一直读不到」不能永远显示读取中：宿主重启或后端没就绪时，
-            // 旧实现会一直转圈且按钮 disabled，用户既看不到原因也无法重试。
+            // 但「已经拿到状态、里面却没有 providers」不能继续显示读取中：
+            // 旧实现只认 `providers.length === 0`，于是宿主返回一份空列表时
+            // 侧栏会永远转圈、按钮 disabled，用户既看不到原因也无法重试
+            // （0.8.1 报告里的已知遗留）。这里用「有没有成功落地过一份状态」
+            // 区分「还没读到」与「读到了但没有服务商」。
             var retryLoad = function () {
               setLoadFailed(false)
               if (typeof retryRef.current === 'function') retryRef.current()
             }
+            var received = hasStatusRef.current === true
+            var asError = loadFailed === true
+            var actionable = asError || received
             return h(
               'div',
               { style: { display: 'flex', width: '100%', minWidth: 0, boxSizing: 'border-box', margin: '0 0 4px' } },
@@ -8000,9 +8025,9 @@ window.__ModuleLoader__.load({
                 'button',
                 {
                   type: 'button',
-                  disabled: loadFailed !== true,
-                  onClick: loadFailed === true ? retryLoad : undefined,
-                  title: loadFailed === true ? bind(t, 'statusLoadFailedHint') : undefined,
+                  disabled: actionable !== true,
+                  onClick: asError ? retryLoad : received ? refresh : undefined,
+                  title: asError ? bind(t, 'statusLoadFailedHint') : received ? bind(t, 'providersEmptyHint') : undefined,
                   style: {
                     font: 'inherit',
                     display: 'inline-flex',
@@ -8013,7 +8038,7 @@ window.__ModuleLoader__.load({
                     boxSizing: 'border-box',
                     padding: '4px 11px',
                     lineHeight: '18px',
-                    cursor: loadFailed === true ? 'pointer' : 'default',
+                    cursor: actionable === true ? 'pointer' : 'default',
                     borderRadius: 999,
                     border: '0.5px solid var(--dsw-alias-border-l2)',
                     background: 'transparent',
@@ -8022,10 +8047,10 @@ window.__ModuleLoader__.load({
                   },
                 },
                 h('span', { role: 'status' }, bind(t, 'summary') + ' —'),
-                loadFailed === true
+                asError
                   ? h('span', { style: { color: 'var(--dsw-alias-state-error-primary, #b3261e)' } }, bind(t, 'statusLoadFailed'))
-                  : h('span', {}, bind(t, 'loading')),
-                loadFailed === true ? h('span', {}, bind(t, 'retry')) : null,
+                  : received ? h('span', {}, bind(t, 'providersEmpty')) : h('span', {}, bind(t, 'loading')),
+                actionable === true ? h('span', {}, bind(t, 'retry')) : null,
               ),
             )
           }
@@ -8132,7 +8157,40 @@ window.__ModuleLoader__.load({
         // - 不够宽 → 自动降成一列，每个 provider 独占一行、完整显示；
         // - 无论几列，所有格都**左对齐**（左列 `flex-start`、右列 `flex-end`
         //   会让右列像浮在半空，两列起点对不齐）。
-        var visibleRows = wide ? rows : rows.slice(0, 1)
+        /**
+         * 剩余比例（仅用于窄胶囊的排序）：读不到 / 不限量排到最后。
+         *
+         * @param snapshot - 额度快照。
+         * @returns 0–1 的比例，或 Infinity。
+         */
+        var narrowRatioOf = function (snapshot) {
+          if (snapshot === null || typeof snapshot !== 'object' || snapshot.state !== 'ok') return Number.POSITIVE_INFINITY
+          if (snapshot.unlimited === true) return Number.POSITIVE_INFINITY
+          if (!isFiniteNumber(snapshot.total) || !(snapshot.total > 0) || !isFiniteNumber(snapshot.remain)) return Number.POSITIVE_INFINITY
+          return Math.max(0, Math.min(1, snapshot.remain / snapshot.total))
+        }
+        /**
+         * 窄侧栏只画得下一家：先按「最需要看」排序 —— 预警/用尽优先，其次余额
+         * 比例低的，最后保持 provider 顺序。
+         *
+         * 旧实现固定取第一行，静默截断：用户只看到 WorkBuddy 的余额，以为另外
+         * 五家没有数字（而读屏的 aria-label 却列出了全部六家，两边结论不同）。
+         * 现在额外画一个 `+N`，悬停列出被折叠的 provider 与各自的余额。
+         */
+        var visibleRows = rows
+        var hiddenRows = []
+        if (!wide) {
+          var narrowRank = rows.slice().sort(function (a, b) {
+            var warn = (creditsWarning(a.credits, a.entry.provider, sidebarAlertRatio, sidebarAlertsEnabled) ? 0 : 1)
+              - (creditsWarning(b.credits, b.entry.provider, sidebarAlertRatio, sidebarAlertsEnabled) ? 0 : 1)
+            if (warn !== 0) return warn
+            var ratio = narrowRatioOf(a.credits) - narrowRatioOf(b.credits)
+            if (Number.isFinite(ratio) && ratio !== 0) return ratio
+            return 0
+          })
+          visibleRows = narrowRank.slice(0, 1)
+          hiddenRows = narrowRank.slice(1)
+        }
         var segmentNodes = visibleRows.map(function (row, position) {
           var snapshot = row.credits
           var accent = PROVIDER_ACCENT[row.entry.provider] || 'currentColor'
@@ -8336,6 +8394,23 @@ window.__ModuleLoader__.load({
               },
             },
             segmentNodes,
+            // 窄侧栏折叠了其余 provider：显式说出还有几家，悬停给出名字与余额。
+            // 静默截断会让用户以为「只有这一家有数字」。
+            hiddenRows.length === 0
+              ? null
+              : h('span', {
+                  key: 'more',
+                  title: hiddenRows.map(function (row) {
+                    return providerNameOf(row.entry) + ' ' + creditsHoverOf(row.credits, row.entry.provider, t)
+                  }).join('\n'),
+                  style: {
+                    fontSize: 10,
+                    lineHeight: '14px',
+                    color: 'var(--dsw-alias-label-secondary)',
+                    textAlign: 'center',
+                    whiteSpace: 'nowrap',
+                  },
+                }, '+' + String(hiddenRows.length)),
           ),
           caret,
         )
