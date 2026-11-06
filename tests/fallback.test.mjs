@@ -27,6 +27,15 @@ test('兜底清单里没有重复 id', () => {
   }
 })
 
+test('Trae 兜底清单里的 DeepSeek-V4-Flash 按 1M 窗口计算', () => {
+  for (const provider of ['trae', 'trae-global']) {
+    const flash = fallbackModelsFor(provider).find((model) => model.id === 'DeepSeek-V4-Flash-Official')
+    assert.ok(flash, `${provider} 缺少 DeepSeek-V4-Flash-Official`)
+    assert.equal(flash.contextWindow, 1_000_000)
+    assert.equal(flash.maxTokens, 64_000)
+  }
+})
+
 test('未知 provider 返回空数组而不是抛错', () => {
   assert.deepEqual(fallbackModelsFor('nope'), [])
 })

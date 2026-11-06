@@ -1,5 +1,17 @@
 # 更新记录
 
+## 0.9.1 — 2026-11-06
+
+Trae 目录的上下文窗口修正：`DeepSeek-V4-Flash` 与 `DeepSeek-V4-Flash-Official`
+实际已支持 1M，但上游 `context_window_tokens.dev` 仍写 200000。实时目录与离线
+兜底清单都按 1M 记（输出上限仍是 64K），宿主不会再按 200K 提前压缩上下文。
+其它 Trae 模型仍照上游值。测试 **471 后端**（新增 2 条）。
+
+- **实时目录**：`parseCatalog()` 对这两个 id 用覆盖表，不再取上游的 200000。
+  [lib/trae/transport.js](lib/trae/transport.js)
+- **离线兜底**：`trae` 与 `trae-global` 都补上 `DeepSeek-V4-Flash-Official`
+  （1M 上下文 / 64K 输出）。 [lib/fallback-models.js](lib/fallback-models.js)
+
 ## 0.9.0 — 2026-11-02
 
 第二十四轮前后端打磨（R24 审计落地）。主题是「补丁只改它说到的东西，失败不能冒名

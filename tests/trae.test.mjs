@@ -427,6 +427,24 @@ test('Trae：多模态模型声明图片能力，max 窗口作为兜底', () => 
   assert.equal(models[0].credits, undefined)
 })
 
+test('Trae：DeepSeek-V4-Flash 两个 id 按 1M 窗口计算', () => {
+  const models = parseCatalog({
+    config_info_list: [
+      { config_name: 'DeepSeek-V4-Flash', config_switch: true, context_window_tokens: { dev: 200_000 }, display_config: { display_name: 'DeepSeek-V4-Flash' } },
+      { config_name: 'DeepSeek-V4-Flash-Official', config_switch: true, context_window_tokens: { dev: 200_000 }, display_config: { display_name: 'DeepSeek-V4-Flash' } },
+      { config_name: 'DeepSeek-V4-Pro-Official', config_switch: true, context_window_tokens: { dev: 200_000 }, display_config: { display_name: 'DeepSeek-V4-Pro' } },
+    ],
+  })
+  const flash = models.filter((model) => model.id.includes('DeepSeek-V4-Flash'))
+  assert.equal(flash.length, 2)
+  for (const model of flash) {
+    assert.equal(model.contextWindow, 1_000_000)
+    assert.equal(model.maxTokens, 64_000)
+  }
+  // 覆盖只针对 Flash，Pro 仍按上游的 200k。
+  assert.equal(models.find((model) => model.id === 'DeepSeek-V4-Pro-Official').contextWindow, 200_000)
+})
+
 test('Trae：support_thinking 为真时才列档位，且不列 none', () => {
   const models = parseCatalog({
     config_info_list: [{
