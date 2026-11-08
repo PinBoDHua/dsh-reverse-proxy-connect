@@ -4,6 +4,16 @@
 **Trae**（国内版 / 国际版）账号里的模型接进 **DeepSeek Harness**。
 一个插件、六个 provider、一张设置卡片、一套账号池。
 
+> **0.9.3 Qoder 国际版签到：补上 umid 机器身份**：国际版的每日 `CLAIM_BENEFIT`
+> 轮次按桌面客户端的 umid 机器身份下发——缺 `Cosy-MachineToken/Code/Type` 时
+> 网关只回常驻的 `VIEW_DETAILS` 横幅，插件把它当成「没有签到活动」，还会写死
+> 当天 `completedOn` 不再重试，而用户打开 Qoder 客户端明明能看到 100 Credits。
+> 现在插件从 `resources\umid\runtime-info.exe`（桌面端 `Qoder` / `Qoder CN` /
+> `QoderCN` 或 CLI 的 `.qoder\.bin\umid-*`）读出三件套并随国际版活动/领取请求
+> 发送；读不到时如实记 `pending` 并提示缺机器身份，不再冒充「没有活动」。
+> 领取请求同时补上官方客户端的 `origin`。国内版不需要 umid，也不启动本机
+> 二进制。测试 **496 后端 + 178 前端**。
+>
 > **0.8.2 第二十三轮前后端打磨（删除与领取都不能凭空发生）**：删除一个早已
 > 不存在的账号不再把隐式默认账号物化成显式行 —— 空池保持为空，CLI 之后更新的
 > provider 级 PAT / 登录路径永远生效；Qoder 的活动领取不再把 HTTP 200 + 业务

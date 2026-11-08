@@ -1,5 +1,33 @@
 # 更新记录
 
+## 0.9.3 — 2026-11-08
+
+修复 Qoder 国际版「客户端里明明有每日 100 Credits、插件却显示没有签到活动」的最后一处
+身份缺口。国际版的 `GET /sash/api/v1/me/campaigns` 不只认桌面身份（`cosy-clienttype:10`），
+还把每日 `CLAIM_BENEFIT` 轮次按 **umid 机器身份**下发：请求缺 `Cosy-MachineToken` /
+`Cosy-MachineCode` / `Cosy-MachineType` 时，网关只回常驻的 `VIEW_DETAILS` 横幅，签到行被
+整条裁掉。插件把「列表被裁」当成「账号没有活动」，写进当天 `completedOn` 后一整天都不再
+重试；用户打开 Qoder 客户端才看到那 100 Credits。现在插件从本机桌面端/CLI 的
+`resources\umid\runtime-info.exe` 读出同一枚机器身份并随请求发送；读不到时如实报「缺机器
+身份、稍后重试」，不再冒充「没有活动」。测试 **496 后端 + 178 前端**。
+
+- **新增 umid 机器身份读取**：按 `%LOCALAPPDATA%\Programs\Qoder`、`Qoder CN`（实际安装
+  目录带空格）、`QoderCN` 的版本目录与 CLI 的 `.qoder\.bin\umid-*` 查找
+  `runtime-info.exe`，无参运行并校验 `{machineToken, machineType, machineCode}` 三件套；
+  缺一个字段就整组不发，绝不把半份/伪造身份递上去。结果按进程缓存，读不到只缓存 1 分钟，
+  装好客户端后点「立即签到」就能恢复。 [lib/qoder/umid.js](lib/qoder/umid.js)
+- **Qoder 活动/领取请求头**：国际版附带 umid 三件套；领取按官方客户端补
+  `origin: <openApiUrl>`。国内版不需要 umid，也不启动本机二进制。
+  [lib/checkin.js](lib/checkin.js)
+- **被裁列表不再报「没有活动」**：国际版缺 umid 且列表里只有 `VIEW_DETAILS` 时记
+  `pending`（`gated:true`），保留 10 分钟重试；`showCampaign:true` + 空数组同样按瞬时态
+  重试，只有 `showCampaign:false` + 空数组才落到真正的 `inactive`。签到结果保留
+  `machineIdentity` / `gated` 两个诊断字段。 [lib/checkin.js](lib/checkin.js)
+  [lib/settings.js](lib/settings.js)
+- **界面**：签到汇总从「今日活动 10:00 刷新，将自动领取」改为「今日活动暂未就绪（每日
+  10:00 UTC+8 刷新），稍后自动重试」，账号行由「未开放」改为「待就绪」；具体原因（缺机器
+  身份 / 只是还没刷新）在悬停文案里。 [client/client.js](client/client.js)
+
 ## 0.9.2 — 2026-11-08
 
 修复两处「明明有奖励、插件却签不了到」的上游协议漂移。Trae 国内版的签到端点不接受

@@ -676,7 +676,7 @@ window.__ModuleLoader__.load({
       accountCheckinFailed: '失败',
       accountCheckinSkipped: '未登录',
       accountCheckinNoActivity: '无活动',
-      accountCheckinPending: '未开放',
+      accountCheckinPending: '待就绪',
       accountCheckinDone: '已签到',
       accountCheckinCredit: '+{credit}',
       accountCheckinStreak: '连续 {days} 天',
@@ -698,7 +698,7 @@ window.__ModuleLoader__.load({
       checkinClaimed: '本次签到成功：{count} 个账号，+{credit} 积分',
       checkinAlready: '今天已签到',
       checkinInactive: '当前账号没有签到活动',
-      checkinPending: '今日活动 10:00（UTC+8）刷新，将自动领取',
+      checkinPending: '今日活动暂未就绪（每日 10:00 UTC+8 刷新），稍后自动重试',
       checkinFailed: '签到失败：{reason}',
       checkinUnconfigured: '有账号未登录，已跳过自动签到',
       checkinLastAt: '上次尝试 {time}',
@@ -1148,7 +1148,7 @@ window.__ModuleLoader__.load({
       accountCheckinFailed: 'Failed',
       accountCheckinSkipped: 'Signed out',
       accountCheckinNoActivity: 'No activity',
-      accountCheckinPending: 'Not open yet',
+      accountCheckinPending: 'Not ready',
       accountCheckinDone: 'Checked in',
       accountCheckinCredit: '+{credit}',
       accountCheckinStreak: '{days}-day streak',
@@ -1170,7 +1170,7 @@ window.__ModuleLoader__.load({
       checkinClaimed: 'Checked in: {count} account(s), +{credit} credits',
       checkinAlready: 'Already checked in today',
       checkinInactive: 'No check-in activity for this account',
-      checkinPending: "Today's campaign opens at 10:00 (UTC+8) and will be claimed automatically",
+      checkinPending: "Today's campaign is not ready yet (daily reset 10:00 UTC+8); retrying automatically",
       checkinFailed: 'Check-in failed: {reason}',
       checkinUnconfigured: 'Some accounts are not signed in, so check-in was skipped',
       checkinLastAt: 'Last attempt {time}',
@@ -5654,7 +5654,9 @@ window.__ModuleLoader__.load({
         } else if (kinds.indexOf('already') !== -1) {
           checkinLabel = bind(t, 'checkinAlready')
         } else if (kinds.indexOf('pending') !== -1) {
-          // Qoder 的活动 10:00（UTC+8）才刷新；这不是失败，也不是「没有活动」。
+          // Qoder 的活动可能还没刷新，也可能因为国际版缺桌面端机器身份被
+          // 上游裁掉；两种都不是失败，更不是「没有活动」。具体原因在账号行
+          // 的悬停文案里，汇总只给一句不冒充结论的「稍后重试」。
           checkinLabel = bind(t, 'checkinPending')
         } else if (kinds.indexOf('inactive') !== -1) {
           checkinLabel = bind(t, 'checkinInactive')

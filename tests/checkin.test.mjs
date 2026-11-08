@@ -2,13 +2,27 @@ import assert from 'node:assert/strict'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import test from 'node:test'
+import test, { afterEach, beforeEach } from 'node:test'
 
 import { interpretCampaignClaim, interpretCheckinStatus, interpretClaim, interpretQoderCampaigns, qoderCampaigns, qoderClaimCampaigns } from '../lib/checkin.js'
 import { checkinDue, checkinTerminal } from '../lib/checkin-schedule.js'
 import { EventLog } from '../lib/events.js'
+import { __resetUmidCache } from '../lib/qoder/umid.js'
 import { Runtime } from '../lib/runtime.js'
-import { defaults } from '../lib/settings.js'
+import { defaults, normalize } from '../lib/settings.js'
+
+/** 单测里替掉真实的 umid 二进制：固定三件套，保证任何机器上结果一致。 */
+const UMID_PROBE = '__dshReverseProxyQoderUmidProbe'
+
+beforeEach(() => {
+  globalThis[UMID_PROBE] = () => ({ machineToken: 'machine-token', machineType: 'machine-type', machineCode: 'machine-code' })
+  __resetUmidCache()
+})
+
+afterEach(() => {
+  delete globalThis[UMID_PROBE]
+  __resetUmidCache()
+})
 
 test('签到状态：活动进行中且今天已签', () => {
   const value = interpretCheckinStatus({
@@ -180,6 +194,146 @@ test('Qoder 活动列表：没有每日领取活动 → inactive', () => {
   assert.match(value.message, /没有每日领取活动/)
 })
 
+test('Qoder 国际版：列表被裁成 VIEW_DETAILS → pending，绝不报「没有签到活动」', () => {
+  // 上游实测：不给 umid 机器身份时，国际版只回常驻的 VIEW_DETAILS 横幅，
+  // 每日 CLAIM_BENEFIT 轮次被整条裁掉；这正是用户看到的「无签到活动」。
+  const value = interpretQoderCampaigns({
+    showCampaign: true,
+    campaigns: [{
+      campaignId: 'banner',
+      actionType: 'VIEW_DETAILS',
+      claimStatus: 'CLAIMED',
+      startAt: utc8Seconds(2026, 10, 1, 10),
+    }],
+  }, utc8(2026, 11, 8, 12, 30), { region: 'global', machineIdentity: false })
+  assert.equal(value.kind, 'pending', '被裁的列表不是「没有活动」，而是「这次没拿到活动」')
+  assert.equal(value.gated, true)
+  assert.equal(value.machineIdentity, false)
+  assert.match(value.message, /机器身份|umid|桌面端/)
+  assert.doesNotMatch(value.message, /没有每日领取活动/)
+})
+
+test('Qoder 国际版：身份齐全但只有常驻活动 → pending 等新一轮', () => {
+  const value = interpretQoderCampaigns({
+    showCampaign: true,
+    campaigns: [{
+      campaignId: 'banner',
+      actionType: 'VIEW_DETAILS',
+      claimStatus: 'CLAIMED',
+      startAt: utc8Seconds(2026, 10, 1, 10),
+    }],
+  }, utc8(2026, 11, 8, 12, 30), { region: 'global', machineIdentity: true })
+  assert.equal(value.kind, 'pending')
+  assert.match(value.message, /稍后自动重试/)
+})
+
+test('Qoder 国际版：showCampaign:true + 空数组是瞬时态，不能钉死成一整天无活动', () => {
+  const value = interpretQoderCampaigns(
+    { showCampaign: true, campaigns: [] },
+    utc8(2026, 11, 8, 12, 30),
+    { region: 'global', machineIdentity: true },
+  )
+  assert.equal(value.kind, 'pending')
+  assert.match(value.message, /稍后自动重试/)
+})
+
+test('Qoder 请求头：国际版带 umid 三件套；领取请求带 origin', async () => {
+  const original = globalThis.fetch
+  const realNow = Date.now
+  Date.now = () => utc8(2026, 11, 8, 10, 5)
+  const captured = []
+  globalThis.fetch = async (url, init) => {
+    captured.push({ url: String(url), headers: init?.headers })
+    if (String(url).includes('/claim')) {
+      return { ok: true, status: 200, json: async () => ({ status: 'CLAIMED', replayed: false, benefit: { amount: 100 } }) }
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        showCampaign: true,
+        campaigns: [{
+          campaignId: 'c1',
+          actionType: 'CLAIM_BENEFIT',
+          claimStatus: 'CLAIMABLE',
+          startAt: utc8Seconds(2026, 11, 8, 10),
+        }],
+      }),
+    }
+  }
+  try {
+    const value = await qoderClaimCampaigns({ authToken: 'job-token' }, 'global')
+    assert.equal(value.kind, 'claimed')
+    assert.equal(captured.length, 2)
+    assert.equal(captured[0].headers['Cosy-MachineToken'], 'machine-token')
+    assert.equal(captured[0].headers['Cosy-MachineCode'], 'machine-code')
+    assert.equal(captured[0].headers['Cosy-MachineType'], 'machine-type')
+    assert.equal(captured[0].headers['cosy-clienttype'], '10')
+    assert.equal(captured[1].headers.origin, 'https://openapi.qoder.sh')
+    assert.equal(captured[1].headers['Cosy-MachineToken'], 'machine-token')
+  } finally {
+    globalThis.fetch = original
+    Date.now = realNow
+  }
+})
+
+test('Qoder 国际版：读不到 umid 时请求退回裸身份，并把被裁列表报成 pending', async () => {
+  const original = globalThis.fetch
+  const realNow = Date.now
+  globalThis[UMID_PROBE] = () => null
+  __resetUmidCache()
+  Date.now = () => utc8(2026, 11, 8, 12, 30)
+  let captured
+  globalThis.fetch = async (url, init) => {
+    captured = { url: String(url), headers: init?.headers }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        showCampaign: true,
+        campaigns: [{
+          campaignId: 'banner',
+          actionType: 'VIEW_DETAILS',
+          claimStatus: 'CLAIMED',
+          startAt: utc8Seconds(2026, 10, 1, 10),
+        }],
+      }),
+    }
+  }
+  try {
+    const value = await qoderCampaigns({ authToken: 'job-token' }, 'global')
+    assert.equal(captured.headers['Cosy-MachineToken'], undefined, '读不到时不能发半份/伪造身份')
+    assert.equal(value.kind, 'pending')
+    assert.equal(value.machineIdentity, false)
+    assert.match(value.message, /机器身份/)
+  } finally {
+    globalThis.fetch = original
+    Date.now = realNow
+  }
+})
+
+test('Qoder 签到诊断字段能持久化：machineIdentity / gated 不被设置白名单丢掉', () => {
+  const normalized = normalize({
+    checkin: {
+      results: {
+        'qoder-global': {
+          provider: 'qoder-global',
+          outcomes: [{
+            accountId: 'a',
+            kind: 'pending',
+            message: '缺少桌面端机器身份',
+            machineIdentity: false,
+            gated: true,
+          }],
+        },
+      },
+    },
+  })
+  const outcome = normalized.checkin.results['qoder-global'].outcomes[0]
+  assert.equal(outcome.machineIdentity, false)
+  assert.equal(outcome.gated, true)
+})
+
 test('Qoder 领取结果：replayed/status/benefit.amount 按当前协议解释', () => {
   const replayed = interpretCampaignClaim({ status: 'CLAIMED', replayed: true, benefit: { amount: 100 } })
   assert.equal(replayed.kind, 'already', '重复领取不能报成新领到 100 分')
@@ -204,6 +358,7 @@ test('Qoder 请求头：活动接口必须用桌面客户端身份（cosy-client
     await qoderCampaigns({ authToken: 'job-token' }, 'china')
     assert.equal(captured.headers['cosy-clienttype'], '10')
     assert.equal(captured.headers['user-agent'], 'Qoder')
+    assert.equal(captured.headers['Cosy-MachineToken'], undefined, '国内版不需要 umid，也不该启动本机二进制')
     assert.match(captured.url, /openapi\.qoder\.com\.cn\/sash\/api\/v1\/me\/campaigns/)
   } finally {
     globalThis.fetch = original
