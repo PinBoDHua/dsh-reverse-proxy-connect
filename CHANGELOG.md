@@ -1,5 +1,32 @@
 # 更新记录
 
+## 0.9.2 — 2026-11-08
+
+修复两处「明明有奖励、插件却签不了到」的上游协议漂移。Trae 国内版的签到端点不接受
+聊天用的随机设备头：同一账号用聊天头发领取会稳定返回
+`{"code":9074,"message":"当前参与用户太多，请稍后再试"}`，换用官方市场/签到设备身份后
+立即 `code:0`。Qoder 的活动接口则按 `Cosy-ClientType` 区分身份：插件原来用 CLI 身份
+（`5`），网关返回 `showCampaign:false` + 空数组，两个变体因此一直显示「没有可领取的
+活动」；桌面身份（`10`）才能拿到每日活动。同时 Qoder 的每日活动 10:00（UTC+8）才刷新，
+10 点前看到的是昨天那一轮，旧代码把它记成「今天已完成」，10 点之后的 100 Credits 整天
+都不会再重试。测试 **486 后端 + 178 前端**。
+
+- **Trae 国内版签到改用官方签到头**：`X-Market-Client-Id` / `X-Market-User-Id` /
+  `X-Device-Id` / `Vscode-Sessionid` 等由 user id 确定性派生，不再把聊天的
+  `X-Machine-Id`（每次随机）带进签到；命中 9074 会换一代设备身份重试一次，仍繁忙则
+  交给调度器 10 分钟后重试。 [lib/trae/transport.js](lib/trae/transport.js)
+- **Qoder 活动接口改用桌面客户端身份**：`cosy-clienttype: 10`（CLI 的 `5` 会拿到空
+  活动列表），并按当前协议解析 `status` / `replayed` / `benefit.amount`，重复领取不再
+  误报成新领到 100 分。 [lib/checkin.js](lib/checkin.js)
+- **Qoder 10:00 刷新语义**：活动列表按 `startAt` 判断「这一轮是不是今天的」；10 点前
+  只记 `pending` 并保留 10 分钟重试，不写 `completedOn`。旧设置里早上写下的「今天已
+  完成」会在 10 点后自动作废重跑。 [lib/checkin-schedule.js](lib/checkin-schedule.js)
+  [lib/index.js](lib/index.js)
+- **界面**：Qoder 刷新前显示「今日活动 10:00（UTC+8）刷新，将自动领取」，账号行显示
+  「未开放」，不再误报「没有签到活动」。 [client/client.js](client/client.js)
+- **Trae 领取上报积分**：上游成功体只有 `{code:0}` 时不写 `credit:0`，由状态端点的
+  100/200 分兜底，卡片不再显示「签到成功 +0」。
+
 ## 0.9.1 — 2026-11-06
 
 Trae 目录的上下文窗口修正：`DeepSeek-V4-Flash` 与 `DeepSeek-V4-Flash-Official`

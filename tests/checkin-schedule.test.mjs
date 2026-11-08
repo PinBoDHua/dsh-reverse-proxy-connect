@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { CHECKIN_RETRY_MS, checkinCompleted, checkinDue, checkinReopenPatch, checkinTerminal } from '../lib/checkin-schedule.js'
+import { CHECKIN_RETRY_MS, checkinCompleted, checkinDue, checkinReopenPatch, checkinTerminal, qoderCampaignRefreshAt, qoderCampaignsReady } from '../lib/checkin-schedule.js'
 
 /** 某个本地日期的中午。 */
 function at(year, month, day, hour = 12, minute = 0) {
@@ -76,4 +76,53 @@ test('签到终态：所有账号都到终态才算今天结束', () => {
   assert.equal(checkinTerminal({ outcomes: [{ kind: 'failed' }] }), false)
   assert.equal(checkinTerminal({ outcomes: [{ kind: 'claimed' }, { kind: 'failed' }] }), false, '一个失败仍要重试')
   assert.equal(checkinTerminal(undefined), false)
+  assert.equal(checkinTerminal({ outcomes: [{ kind: 'pending' }] }), false, '活动未刷新不是终态')
+  assert.equal(
+    checkinTerminal({ outcomes: [{ kind: 'claimed', coversToday: false }] }),
+    false,
+    '10:00 前领到的是上一轮，今天这一轮还没结束',
+  )
+})
+
+test('Qoder：每日活动按 UTC+8 的 10:00 判定是否已刷新', () => {
+  // 2026-11-08 09:59 / 10:00（UTC+8）= 01:59 / 02:00 UTC。
+  const before = Date.UTC(2026, 10, 8, 1, 59)
+  const ready = Date.UTC(2026, 10, 8, 2, 0)
+  assert.equal(qoderCampaignRefreshAt(before), ready)
+  assert.equal(qoderCampaignRefreshAt(ready), ready)
+  assert.equal(qoderCampaignsReady(before), false)
+  assert.equal(qoderCampaignsReady(ready), true)
+  // 本机时区不参与：UTC 00:30 是北京 08:30，仍然没刷新。
+  assert.equal(qoderCampaignsReady(Date.UTC(2026, 10, 8, 0, 30)), false)
+})
+
+test('Qoder：刷新前写下的「今天已完成」作废，10:00 后必须重新跑', () => {
+  const now = at(2026, 11, 8, 9, 0)
+  const preRefreshAt = at(2026, 11, 8, 8, 14)
+  const checkin = {
+    completedOn: { qoder: '2026-11-08' },
+    accountIds: { qoder: ['a'] },
+    results: { qoder: { at: preRefreshAt, outcomes: [{ kind: 'pending' }] } },
+    lastAttemptAt: { qoder: preRefreshAt },
+  }
+  assert.equal(checkinCompleted(checkin, 'qoder', now, ['a']), false, '08:14 的结果不能算今天已完成')
+  assert.equal(checkinDue(checkin, 'qoder', now, ['a']), true, '升级后第一次检查应重开当天签到')
+  // 10:05 真正签完的新结果才是完成。
+  const doneAt = at(2026, 11, 8, 10, 5)
+  const done = {
+    ...checkin,
+    results: { qoder: { at: doneAt, outcomes: [{ kind: 'claimed', coversToday: true }] } },
+    lastAttemptAt: { qoder: doneAt },
+  }
+  assert.equal(checkinCompleted(done, 'qoder', at(2026, 11, 8, 11, 0), ['a']), true)
+  // 其它 provider 不受这条规则影响。
+  assert.equal(
+    checkinCompleted(
+      { ...checkin, completedOn: { workbuddy: '2026-11-08' }, accountIds: { workbuddy: ['a'] } },
+      'workbuddy',
+      now,
+      ['a'],
+    ),
+    true,
+  )
 })

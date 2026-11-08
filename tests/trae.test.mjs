@@ -48,6 +48,7 @@ import {
   parseStream,
   toTraeMessages,
   toTraeTools,
+  traeCheckinHeaders,
   traeHeaders,
 } from '../lib/trae/transport.js'
 
@@ -845,11 +846,63 @@ test('Trae：签到状态与领取结果的码都覆盖到', () => {
   assert.equal(interpretCheckinStatus({ checked_in: false, credits: 100, extra_credits: 50 }).kind, 'active')
   assert.equal(interpretCheckinStatus({ checked_in: false, enable: false }).kind, 'inactive')
   assert.equal(interpretCheckinStatus(null).kind, 'failed')
+  assert.equal(interpretCheckinStatus({ code: 500, message: 'boom' }).kind, 'failed', '非 0 业务码不是「可以签到」')
 
   assert.equal(interpretClaim({ code: 0, message: 'success' }).kind, 'claimed')
+  assert.equal(interpretClaim({ code: 0, message: 'success' }).credit, undefined, '没有积分数时不能编造 0')
+  assert.equal(interpretClaim({ code: 0, credits: 50 }).credit, 50)
   assert.equal(interpretClaim({ code: 10001 }).kind, 'already')
   assert.equal(interpretClaim({ code: 500, message: 'boom' }).kind, 'failed')
   assert.equal(interpretClaim({ code: 500, message: 'boom' }).message, 'boom')
+})
+
+test('Trae：9074 是设备级风控（可重试），不是「今天已签」也不是「无资格」', () => {
+  const value = interpretClaim({ code: 9074, message: '当前参与用户太多，请稍后再试' })
+  assert.equal(value.kind, 'failed')
+  assert.equal(value.busy, true, '调度器要能按可重试失败处理')
+  assert.match(value.message, /自动重试/)
+})
+
+test('Trae：签到头是官方市场设备身份，不是聊天的随机机器头', () => {
+  const headers = traeCheckinHeaders('trae', { jwt: 'jwt-1', userId: 'uid-1' })
+  assert.equal(headers.Authorization, 'Cloud-IDE-JWT jwt-1')
+  assert.equal(headers['X-User-Region'], 'CN')
+  assert.equal(headers['Package-Type'], 'stable_cn')
+  assert.equal(headers['User-Agent'], 'VSCode 1.107.1 (TRAE SOLO CN)')
+  assert.match(headers['X-Market-User-Id'], /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
+  assert.match(headers['X-Device-Id'], /^\d{15}$/)
+  assert.match(headers['Vscode-Sessionid'], /^[0-9a-f]{64}$/)
+  assert.equal(headers['X-Machine-Id'], undefined, '不能把聊天的随机机器 id 带进签到')
+
+  const again = traeCheckinHeaders('trae', { jwt: 'jwt-1', userId: 'uid-1' })
+  assert.equal(again['X-Device-Id'], headers['X-Device-Id'], '同一账号的设备身份必须稳定')
+  assert.equal(again['X-Market-User-Id'], headers['X-Market-User-Id'])
+  const rotated = traeCheckinHeaders('trae', { jwt: 'jwt-1', userId: 'uid-1' }, 1)
+  assert.notEqual(rotated['X-Device-Id'], headers['X-Device-Id'], '9074 后要能换代次')
+
+  const global = traeCheckinHeaders('trae-global', { jwt: 'jwt-1', userId: 'uid-1' })
+  assert.equal(global['X-User-Region'], 'SG')
+  assert.equal(global['Package-Type'], 'stable')
+})
+
+test('Trae：9074 后用新一代设备身份重试一次，成功即算领取', async () => {
+  const original = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), headers: init?.headers })
+    const body = calls.length === 1
+      ? { code: 9074, message: '当前参与用户太多，请稍后再试' }
+      : { code: 0, message: 'success' }
+    return new Response(JSON.stringify(body), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  try {
+    const verdict = await claimCheckin('trae', { jwt: 'jwt-1', userId: 'uid-1' })
+    assert.equal(verdict.kind, 'claimed')
+    assert.equal(calls.length, 2, '只重试一次')
+    assert.notEqual(calls[0].headers['X-Device-Id'], calls[1].headers['X-Device-Id'], '重试必须换设备身份')
+  } finally {
+    globalThis.fetch = original
+  }
 })
 
 test('Trae：HTTP 状态到失败类别的映射与换号判据一致', () => {

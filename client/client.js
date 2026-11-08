@@ -676,6 +676,7 @@ window.__ModuleLoader__.load({
       accountCheckinFailed: '失败',
       accountCheckinSkipped: '未登录',
       accountCheckinNoActivity: '无活动',
+      accountCheckinPending: '未开放',
       accountCheckinDone: '已签到',
       accountCheckinCredit: '+{credit}',
       accountCheckinStreak: '连续 {days} 天',
@@ -697,6 +698,7 @@ window.__ModuleLoader__.load({
       checkinClaimed: '本次签到成功：{count} 个账号，+{credit} 积分',
       checkinAlready: '今天已签到',
       checkinInactive: '当前账号没有签到活动',
+      checkinPending: '今日活动 10:00（UTC+8）刷新，将自动领取',
       checkinFailed: '签到失败：{reason}',
       checkinUnconfigured: '有账号未登录，已跳过自动签到',
       checkinLastAt: '上次尝试 {time}',
@@ -1146,6 +1148,7 @@ window.__ModuleLoader__.load({
       accountCheckinFailed: 'Failed',
       accountCheckinSkipped: 'Signed out',
       accountCheckinNoActivity: 'No activity',
+      accountCheckinPending: 'Not open yet',
       accountCheckinDone: 'Checked in',
       accountCheckinCredit: '+{credit}',
       accountCheckinStreak: '{days}-day streak',
@@ -1167,6 +1170,7 @@ window.__ModuleLoader__.load({
       checkinClaimed: 'Checked in: {count} account(s), +{credit} credits',
       checkinAlready: 'Already checked in today',
       checkinInactive: 'No check-in activity for this account',
+      checkinPending: "Today's campaign opens at 10:00 (UTC+8) and will be claimed automatically",
       checkinFailed: 'Check-in failed: {reason}',
       checkinUnconfigured: 'Some accounts are not signed in, so check-in was skipped',
       checkinLastAt: 'Last attempt {time}',
@@ -3028,6 +3032,7 @@ window.__ModuleLoader__.load({
         }
       }
       if (outcome.kind === 'inactive') return { label: bind(t, 'accountCheckinNoActivity'), tone: 'muted', title: title }
+      if (outcome.kind === 'pending') return { label: bind(t, 'accountCheckinPending'), tone: 'muted', title: title }
       if (outcome.kind === 'failed') return { label: bind(t, 'accountCheckinFailed'), tone: 'error', title: title }
       if (outcome.kind === 'unconfigured') return { label: bind(t, 'accountCheckinSkipped'), tone: 'muted', title: title }
       return { label: bind(t, 'accountCheckinNone'), tone: 'muted', title: title }
@@ -5648,6 +5653,9 @@ window.__ModuleLoader__.load({
           checkinLabel = bind(t, 'checkinClaimed', { count: claimedCount, credit: claimedCredit })
         } else if (kinds.indexOf('already') !== -1) {
           checkinLabel = bind(t, 'checkinAlready')
+        } else if (kinds.indexOf('pending') !== -1) {
+          // Qoder 的活动 10:00（UTC+8）才刷新；这不是失败，也不是「没有活动」。
+          checkinLabel = bind(t, 'checkinPending')
         } else if (kinds.indexOf('inactive') !== -1) {
           checkinLabel = bind(t, 'checkinInactive')
         } else if (kinds.indexOf('unconfigured') !== -1) {

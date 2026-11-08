@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
 
-import { interpretCheckinStatus, interpretClaim } from '../lib/checkin.js'
+import { interpretCampaignClaim, interpretCheckinStatus, interpretClaim, interpretQoderCampaigns, qoderCampaigns, qoderClaimCampaigns } from '../lib/checkin.js'
 import { checkinDue, checkinTerminal } from '../lib/checkin-schedule.js'
 import { EventLog } from '../lib/events.js'
 import { Runtime } from '../lib/runtime.js'
@@ -81,6 +81,205 @@ test('领取：响应里没给积分数时不编造', () => {
   const value = interpretClaim({ code: 0, data: {} })
   assert.equal(value.kind, 'claimed')
   assert.equal(value.credit, 0)
+})
+
+/** 构造一个 UTC+8 时刻。 */
+function utc8(year, month, day, hour, minute = 0) {
+  return Date.UTC(year, month - 1, day, hour - 8, minute, 0)
+}
+
+/** 某个 UTC+8 时刻的秒级时间戳（活动 startAt 用的单位）。 */
+function utc8Seconds(year, month, day, hour, minute = 0) {
+  return Math.floor(utc8(year, month, day, hour, minute) / 1000)
+}
+
+test('Qoder 活动列表：10:00 前看到的是昨天那一轮，不能算今天已完成', () => {
+  const now = utc8(2026, 11, 8, 9, 0)
+  const value = interpretQoderCampaigns({
+    showCampaign: true,
+    claimable: false,
+    campaigns: [{
+      campaignId: 'c1',
+      actionType: 'CLAIM_BENEFIT',
+      claimStatus: 'CLAIMED',
+      startAt: utc8Seconds(2026, 11, 7, 10),
+      benefit: { amount: 100 },
+    }],
+  }, now)
+  assert.equal(value.kind, 'pending')
+  assert.equal(value.coversToday, false)
+  assert.match(value.message, /10:00/)
+})
+
+test('Qoder 活动列表：刷新后出现可领活动 → active', () => {
+  const now = utc8(2026, 11, 8, 10, 5)
+  const value = interpretQoderCampaigns({
+    showCampaign: true,
+    claimable: true,
+    campaigns: [{
+      campaignId: 'c2',
+      actionType: 'CLAIM_BENEFIT',
+      claimStatus: 'CLAIMABLE',
+      startAt: utc8Seconds(2026, 11, 8, 10),
+      placements: [{ content: { zh: { title: '每天领 100 Credits' } } }],
+      benefit: { amount: 100 },
+    }],
+  }, now)
+  assert.equal(value.kind, 'active')
+  assert.equal(value.claimable, 1)
+  assert.equal(value.coversToday, true)
+  assert.deepEqual(value.campaigns.map((item) => item.id), ['c2'])
+  assert.equal(value.campaigns[0].title, '每天领 100 Credits')
+})
+
+test('Qoder 活动列表：10:00 后旧活动仍可领时，不能算今天已完成', () => {
+  const now = utc8(2026, 11, 8, 10, 5)
+  const value = interpretQoderCampaigns({
+    campaigns: [{
+      campaignId: 'c1',
+      actionType: 'CLAIM_BENEFIT',
+      claimStatus: 'CLAIMABLE',
+      startAt: utc8Seconds(2026, 11, 7, 10),
+    }],
+  }, now)
+  assert.equal(value.kind, 'active', '旧活动还可以领')
+  assert.equal(value.coversToday, false, '但今天这一轮还没开始，不能写 completedOn')
+})
+
+test('Qoder 活动列表：几点刷新后仍只有昨天那一轮 → pending，不是 already', () => {
+  const now = utc8(2026, 11, 8, 10, 5)
+  const value = interpretQoderCampaigns({
+    campaigns: [{
+      campaignId: 'c1',
+      actionType: 'CLAIM_BENEFIT',
+      claimStatus: 'CLAIMED',
+      startAt: utc8Seconds(2026, 11, 7, 10),
+    }],
+  }, now)
+  assert.equal(value.kind, 'pending', '旧活动延迟下架时不能把今天判成已领')
+  assert.match(value.message, /新一轮/)
+})
+
+test('Qoder 活动列表：今天这一轮已领 → already', () => {
+  const now = utc8(2026, 11, 8, 11, 0)
+  const value = interpretQoderCampaigns({
+    campaigns: [{
+      campaignId: 'c2',
+      actionType: 'CLAIM_BENEFIT',
+      claimStatus: 'CLAIMED',
+      startAt: utc8Seconds(2026, 11, 8, 10),
+    }],
+  }, now)
+  assert.equal(value.kind, 'already')
+  assert.equal(value.coversToday, true)
+})
+
+test('Qoder 活动列表：没有每日领取活动 → inactive', () => {
+  const value = interpretQoderCampaigns({ showCampaign: false, campaigns: [] }, utc8(2026, 11, 8, 11, 0))
+  assert.equal(value.kind, 'inactive')
+  assert.match(value.message, /没有每日领取活动/)
+})
+
+test('Qoder 领取结果：replayed/status/benefit.amount 按当前协议解释', () => {
+  const replayed = interpretCampaignClaim({ status: 'CLAIMED', replayed: true, benefit: { amount: 100 } })
+  assert.equal(replayed.kind, 'already', '重复领取不能报成新领到 100 分')
+  const fresh = interpretCampaignClaim({ status: 'CLAIMED', replayed: false, benefit: { amount: 100 } })
+  assert.equal(fresh.kind, 'claimed')
+  assert.equal(fresh.credit, 100)
+  const failed = interpretCampaignClaim({ status: 'FAILED' })
+  assert.equal(failed.kind, 'failed')
+  assert.match(failed.message, /status=FAILED/)
+})
+
+test('Qoder 请求头：活动接口必须用桌面客户端身份（cosy-clienttype=10）', async () => {
+  // 实测同一枚 job token：clienttype 5 → showCampaign:false + 空数组；
+  // 10 → 正常返回每日活动。少了这个头，卡片永远显示「没有可领取的活动」。
+  const original = globalThis.fetch
+  let captured
+  globalThis.fetch = async (url, init) => {
+    captured = { url: String(url), headers: init?.headers }
+    return { ok: true, status: 200, json: async () => ({ campaigns: [] }) }
+  }
+  try {
+    await qoderCampaigns({ authToken: 'job-token' }, 'china')
+    assert.equal(captured.headers['cosy-clienttype'], '10')
+    assert.equal(captured.headers['user-agent'], 'Qoder')
+    assert.match(captured.url, /openapi\.qoder\.com\.cn\/sash\/api\/v1\/me\/campaigns/)
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('Qoder 领取：10:00 前只查列表，不打领取接口', async () => {
+  const originalFetch = globalThis.fetch
+  const realNow = Date.now
+  Date.now = () => utc8(2026, 11, 8, 9, 0)
+  const calls = []
+  globalThis.fetch = async (url) => {
+    calls.push(String(url))
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        campaigns: [{
+          campaignId: 'c1',
+          actionType: 'CLAIM_BENEFIT',
+          claimStatus: 'CLAIMED',
+          startAt: utc8Seconds(2026, 11, 7, 10),
+        }],
+      }),
+    }
+  }
+  try {
+    const outcome = await qoderClaimCampaigns({ authToken: 'job-token' }, 'global')
+    assert.equal(outcome.kind, 'pending')
+    assert.equal(calls.length, 1, '刷新前不应该尝试领取昨天那一轮')
+    assert.ok(!calls[0].includes('/claim'))
+  } finally {
+    globalThis.fetch = originalFetch
+    Date.now = realNow
+  }
+})
+
+test('Qoder 领取：当前 status/replayed 协议能区分真领取与重复领取', async () => {
+  const originalFetch = globalThis.fetch
+  const realNow = Date.now
+  Date.now = () => utc8(2026, 11, 8, 10, 5)
+  let claimCalls = 0
+  globalThis.fetch = async (url) => {
+    if (!String(url).includes('/claim')) {
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          campaigns: [{
+            campaignId: 'c1',
+            actionType: 'CLAIM_BENEFIT',
+            claimStatus: 'CLAIMABLE',
+            startAt: utc8Seconds(2026, 11, 8, 10),
+            benefit: { amount: 100 },
+          }],
+        }),
+      }
+    }
+    claimCalls += 1
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ status: 'CLAIMED', replayed: false, benefit: { amount: 100 } }),
+    }
+  }
+  try {
+    const outcome = await qoderClaimCampaigns({ authToken: 'job-token' }, 'global')
+    assert.equal(outcome.kind, 'claimed')
+    assert.equal(outcome.claimed, 1)
+    assert.equal(outcome.credit, 100)
+    assert.equal(outcome.coversToday, true)
+    assert.equal(claimCalls, 1)
+  } finally {
+    globalThis.fetch = originalFetch
+    Date.now = realNow
+  }
 })
 
 test('签到降噪：未配置登录的账号记 unconfigured（info、不算失败、不请求上游、不触发重试）', async () => {
