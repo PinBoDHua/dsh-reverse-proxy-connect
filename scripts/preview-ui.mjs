@@ -131,7 +131,9 @@ const ctx = {
   },
   locale: {
     register: (namespace, value) => { locale = value; return () => {} },
-    bind: () => (key) => key,
+    // 胶囊用的是 apply() 闭包里的 bind（不是 props.t）：这里必须给真实插值，
+    // 否则预览里面板全是文案键。
+    bind: () => (key, params) => t(key, params),
   },
   effect: (fn) => { const dispose = fn(); return () => { if (typeof dispose === 'function') dispose() } },
   inject: (names, cb) => cb(ctx),
@@ -150,11 +152,11 @@ const card = registered.find((entry) => entry.options.name === 'plugin-settings.
 if (card === undefined) throw new Error('没有注册 plugin-settings.item')
 
 // ── 渲染 ───────────────────────────────────────────────────────────────
-async function render(props) {
+async function render(props, component = card) {
   let tree
   for (let pass = 0; pass < 8; pass++) {
     beginRender()
-    tree = card(props)
+    tree = component(props)
     for (const effect of effects) effect()
     await sleep(2)
     if (!dirty) break
@@ -309,7 +311,7 @@ button{font-family:inherit}
 ${dark ? ':root{--dsw-alias-bg-base:#17181c;--dsw-alias-bg-layer-1:#1e1f24;--dsw-alias-bg-l2:#24262c;--dsw-alias-label-primary:#ebeef2;--dsw-alias-label-secondary:#cfd3d6;--dsw-alias-label-tertiary:#adb2b8;--dsw-alias-label-caption:#adb2b8;--dsw-alias-border-l2:rgba(255,255,255,.12);--dsw-alias-border-l3:rgba(255,255,255,.18);}' : ''}
 </style>
 <style>${capturedStyles.join('\n')}</style>
-</head><body><div id="stage">${bodyHtml}</div></body></html>`
+</head><body${dark ? ' data-ds-dark-theme' : ''}><div id="stage">${bodyHtml}</div></body></html>`
 }
 
 // ── 假 /status：贴近截图里的真实数据 ───────────────────────────────────
@@ -520,6 +522,36 @@ for (const variant of variants) {
   writeFileSync(join(OUT, 'error.html'), page(serialize(failed), { title: 'error' }))
   sandbox.fetch = originalFetch
   console.log('写好了 error.html')
+}
+
+// ── 侧栏胶囊变体（R25：此前预览只覆盖卡片，胶囊的暗色/窄栏看不到） ─────
+const pill = registered.find((entry) => entry.options.name === 'sidebar.footer.action')?.component
+if (pill === undefined) throw new Error('没有注册 sidebar.footer.action')
+
+const pillVariants = [
+  { name: 'pill-wide', wide: true, width: 268 },
+  { name: 'pill-wide-dark', wide: true, width: 268, dark: true },
+  { name: 'pill-expanded', wide: true, width: 268, expand: true },
+  { name: 'pill-expanded-dark', wide: true, width: 268, expand: true, dark: true },
+  { name: 'pill-narrow', wide: false, width: 132 },
+  { name: 'pill-narrow-dark', wide: false, width: 132, dark: true },
+]
+for (const variant of pillVariants) {
+  hookStates = []
+  refSlots = {}
+  const pillProps = { t, wide: variant.wide }
+  let tree = await render(pillProps, pill)
+  if (variant.expand) {
+    const button = findButton(tree, '', 'dsh-rpc-pill')
+    if (button === undefined) throw new Error('找不到胶囊按钮')
+    button.props.onClick({ preventDefault() {} })
+    tree = await render(pillProps, pill)
+  }
+  writeFileSync(join(OUT, variant.name + '.html'), page(
+    `<div style="width:${variant.width}px;margin:0 auto">${serialize(tree)}</div>`,
+    { title: variant.name, width: variant.width + 48, dark: variant.dark === true },
+  ))
+  console.log('写好了', variant.name + '.html')
 }
 
 console.log('全部写到', OUT)

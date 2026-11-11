@@ -1,5 +1,125 @@
 # 更新记录
 
+## 0.10.0 — 2026-11-11
+
+第二十五轮前后端打磨（R25 审计落地）。主题是「修过的地方再修一遍，说过的话
+要算数」：0.9.0 的 checkin 白名单把自家运行时写的 `credit/streakDays/activityName`
+削掉了，账号行的「+100 积分 / 连续 N 天」自那以后永久不显示；Trae 的 401 强制
+续期标志只写不读，T-5 在 Trae 上停留在「日志说修了」；无终态帧的截断流仍被记成
+完整成功；保存兜底把改名/停用账号放大成六家全量刷新；CLI 独立进程的续期写回能
+复活已删除的默认账号。另有一批归一化/调度/资源边界，以及一轮小规模 UI/UX 美化
+（折叠分区、胶囊焦点环与入场动效、主题自适应阴影）。状态接口仍是 v8（只增可选
+字段），设置文件 v2 增加可选 `removedAccountAt` 墓碑。测试 **521 后端 + 182 前端**。
+
+### 后端
+
+- **checkin 白名单补回渲染字段**：`credit` / `streakDays` / `activityName` /
+  `coversToday` 逐字段白名单保留（有限数/字符串/布尔），落盘往返不再丢；
+  `coversToday` 同时是 `checkinTerminal` 的跨进程判据。
+  [lib/settings.js](lib/settings.js)
+- **账号删除墓碑**：新增可选 `removedAccountAt`（`provider::id` → 删除时间，
+  上限 200）。删除写墓碑、显式重建/重新配置旧凭证清墓碑；`accountVisible`
+  据此拒绝独立进程（CLI）的续期写回复活已删默认账号。
+  [lib/accounts.js](lib/accounts.js) [lib/settings.js](lib/settings.js)
+- **保存兜底刷新收敛**：`refreshTargetsOf` 没认出目标时只刷「补丁里出现的
+  provider」且只刷目录不刷额度（新增 `refreshFallbackTargets`）；改名/停用/
+  改 App 路径不再放大成六家目录+全账号额度风暴。
+  [lib/index.js](lib/index.js)
+- **截断流不再记成功**：三家解析器跟踪终态帧（`[DONE]` / `finish_reason` /
+  `event:done`），EOF 无终态帧时 finish 保持 `stop` 兼容宿主、附
+  `incomplete:true`，统计记「中断」。
+  [lib/runtime.js](lib/runtime.js) [lib/qoder/transport.js](lib/qoder/transport.js) [lib/trae/transport.js](lib/trae/transport.js)
+- **卸载后不再写盘**：Stats / CreditHistory 增加 `stopped` 守卫（与 EventLog
+  同一不变式），`stop()` 清定时器，在途请求回来不再挂定时器写孤儿文件。
+  [lib/stats.js](lib/stats.js) [lib/credit-history.js](lib/credit-history.js)
+- **读请求体错误归因**：半截 body 读超时回 408、流错误回 400，不再一律
+  413「body-too-large」；超限仍 413 且不掐 socket。
+  [lib/index.js](lib/index.js)
+- **B-9 兜底文档补形状**：落盘成功但状态构建失败时的兜底响应带
+  `version` 与最小 `providers`，罕见路径不再弹「版本不匹配」横幅。
+  [lib/index.js](lib/index.js)
+- **签到按家刷额度**：`/action checkin` 指定 provider 时只刷该家额度；
+  刷新前探路门不再把「全 unconfigured」当探路结论（补凭证后立刻能跑）。
+  [lib/index.js](lib/index.js)
+- **排队自愈收口**：容量恢复立即重开分支补 `Retry-After` 刷新；预算耗尽直接
+  收口，不再给 500ms 最小窗口超预算。
+  [lib/runtime.js](lib/runtime.js)
+- **关得掉**：全部账号停用时 `activeAccountFor` 返回 undefined，聊天按
+  NO_ACCOUNT 报错，不再拿停用账号的凭证继续发请求。
+  [lib/accounts.js](lib/accounts.js) [lib/runtime.js](lib/runtime.js)
+- **归一化边界**：账号 id 上限 64（与钉选/事件截断口径对齐）；normalize 的
+  账号池/模型列表套上与补丁相同的上限（100/2000）；对不存在账号的 forget 是
+  no-op（不物化 default、不生成空行）；同补丁批量新增 id 互不相同；停用账号
+  重新登录即启用；stats/history/catalog 三份墓碑统一截断 200。
+  [lib/accounts.js](lib/accounts.js) [lib/settings.js](lib/settings.js) [lib/patch.js](lib/patch.js) [lib/stats.js](lib/stats.js) [lib/credit-history.js](lib/credit-history.js) [lib/catalog-cache.js](lib/catalog-cache.js)
+- **qoder 旧字段同步**：`syncLegacyCredentialPaths` 补上 `qoder.pat`（此前只
+  同步路径类 provider），窗口 B 拿旧状态写 PAT 不再落进被忽略的旧字段。
+  [lib/accounts.js](lib/accounts.js)
+- **CLI stdout 干净**：`models` 的「已在设置里关闭」提示改走 stderr（B-6 漏网
+  一行）；安装备份时间戳精确到毫秒，同秒两次安装不覆盖前一份备份。
+  [lib/bin.js](lib/bin.js) [scripts/install.mjs](scripts/install.mjs)
+
+### 上游传输层
+
+- **Trae 强制续期真正生效**：`traeCredentialFor` 消费 `forcedCredentialRefresh`
+  标志并传 `force` 给 `resolveTraeCredential`，绕过本地时钟续期一次；强制续期
+  不复用还在飞的旧共享任务。服务端吊销 JWT 而本地 exp 仍在未来时不再白撞 401。
+  [lib/runtime.js](lib/runtime.js) [lib/trae/credential.js](lib/trae/credential.js)
+- **Trae 令牌新旧判据**：登录文件过期时间未知（0）时不再无条件覆盖账号里已知
+  更新的令牌；目录请求超时让原始 TimeoutError 穿透（统计口径与 Qoder 一致）。
+  [lib/trae/credential.js](lib/trae/credential.js) [lib/trae/transport.js](lib/trae/transport.js)
+- **Trae 签到设备身份按账号稳定**：缺 userId 时回落邮箱/名字/登录文件路径派生，
+  不再所有缺 userId 的安装共用一枚全局常量「设备」。
+  [lib/trae/transport.js](lib/trae/transport.js)
+- **Qoder 机器标识加固**：候选链补 `.qoder-cn`；读值校验 UUID 形态；空种子文件
+  覆盖写（旧 `wx` 失败导致每进程一枚新 UUID）。
+  [lib/qoder/transport.js](lib/qoder/transport.js)
+- **umid 三件套加固**：字段含控制字符整组丢弃（坏头不再把整轮签到打成 failed）；
+  成功缓存 6 小时 TTL（旧为永久）；国际版结论仍 gated/pending 时作废缓存重读；
+  `LOCALAPPDATA` 缺失回落 home 兜底；CLI 候选目录只认 `umid-<平台>-<hash>` 形态。
+  [lib/qoder/umid.js](lib/qoder/umid.js) [lib/checkin.js](lib/checkin.js)
+- **签到 startAt 健壮性**：数字字符串也认；缺 startAt 的可领活动领取照常但
+  `coversToday:false`（不冒充今天已完成）；国际版缺机器身份时空列表也按
+  gated/pending；pending 复查事件去重 1 小时，不再刷满账本；时钟回拨时未来的
+  `lastAttempt` 不堵当天重试。
+  [lib/checkin.js](lib/checkin.js) [lib/checkin-schedule.js](lib/checkin-schedule.js) [lib/runtime.js](lib/runtime.js)
+
+### 前端
+
+- **胶囊生命周期对齐卡片**：卸载 abort 在途轻量 GET 与刷新 POST；`load()`
+  同步抛错释放 loading 并给重试入口（R24 C-6/C-10 同类，胶囊此前漏修）；
+  卸载后刷新回调不再 setState。
+  [client/client.js](client/client.js)
+- **小规模美化**：折叠分区（高级/账号不支持/套餐包/最近请求）统一
+  `.rpc-details` 样式——去浏览器默认三角、随开合旋转的 chevron、hover/focus
+  态；复选框/链接按钮/筛选胶囊补品牌色焦点环；主按钮按压态；选中文本着色；
+  胶囊焦点环、面板入场动效与主题自适应阴影（暗色不再用亮色阴影值）；
+  reduced-motion 覆盖胶囊与面板。
+  [client/client.js](client/client.js)
+
+### 工具与验证
+
+- **预览脚手架保真**：暗色变体补 `body[data-ds-dark-theme]`（此前插件暗色变量
+  不生效，暗色截图不是真暗色）；新增胶囊宽/窄/展开 × 亮/暗六个变体；预览
+  locale.bind 给真实插值（胶囊用闭包 t，此前全是文案键）。
+  [scripts/preview-ui.mjs](scripts/preview-ui.mjs)
+- **测试沙箱保真**：注入 `AbortController`/`AbortSignal`（真实浏览器有，沙箱
+  此前漏注入，卸载 abort 一类保护测不出）；新增卸载模拟与 R25 前端回归 3 条、
+  后端回归 24 条、HTTP 408 归因 1 条。
+  [tests/client-credits.mjs](tests/client-credits.mjs) [tests/audit-r25.test.mjs](tests/audit-r25.test.mjs) [tests/http.test.mjs](tests/http.test.mjs)
+
+### 记录在案（本轮未做）
+
+- **stats 跨进程 max 合并丢失不相交增量**：触发面仅 CLI `ask` 记账，影响诊断
+  计数；改合并式需记录读盘基线，留待专项。
+- **qoderClaimCampaigns 部分失败即终态**：通常只有一个每日活动；改终态判据有
+  引入全天重试的风险，留待真实样本。
+- **`onFsyncFailure` 死钩子**：无功能影响；接线需动多处落盘 logger 链。
+- **CLI checkin 不落盘**：上游幂等返 already，行为无害；对齐需给 CLI 引写路径。
+- **冷却绝对时间比较 / 登录任务绝对上限 / status 缓存构建期过期**：时钟回拨与
+  慢探测下的性能/显示细节，改持久化形状会影响客户端，留待专项。
+- **T-8 多行 `data:` / T-18 `withIdleTimeout` 强制 onIdle**：沿用 R24 的记录在案。
+
 ## 0.9.3 — 2026-11-08
 
 修复 Qoder 国际版「客户端里明明有每日 100 Credits、插件却显示没有签到活动」的最后一处

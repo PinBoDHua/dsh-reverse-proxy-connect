@@ -32,6 +32,7 @@ if (process.env.BUG === '1') {
 let hookStates = []
 let hookIndex = 0
 let effects = []
+let effectCleanups = []
 let dirty = false
 let ownerSeq = 0
 let activeOwner = 0
@@ -362,6 +363,10 @@ const sandbox = {
   console,
   setTimeout,
   clearTimeout,
+  // 真实浏览器有这两个全局；沙箱此前漏注入，导致「卸载 abort / 请求超时」
+  // 一类保护在测试里永远走 null 分支，测不出真实行为。
+  AbortController,
+  AbortSignal,
   setInterval: (fn) => {
     intervalHandle += 1
     intervalCallbacks.set(intervalHandle, fn)
@@ -449,7 +454,10 @@ async function render(component, props, skipEffects) {
     assertHookCountStable()
     lastHookCallCount = hookCallCount
     if (skipEffects !== true) {
-      for (const effect of effects) effect()
+      for (const effect of effects) {
+        const cleanup = effect()
+        if (typeof cleanup === 'function') effectCleanups.push(cleanup)
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, 5))
     if (!dirty) break
@@ -466,8 +474,22 @@ async function render(component, props, skipEffects) {
 function mount(component, props) {
   hookStates = []
 refSlots = {}
+  effectCleanups = []
   lastHookCallCount = null
   return render(component, props)
+}
+
+/** 模拟卸载：执行本次挂载记录到的全部 effect 清理函数。 */
+function unmount() {
+  const cleanups = effectCleanups
+  effectCleanups = []
+  for (const cleanup of cleanups) {
+    try {
+      cleanup()
+    } catch (_) {
+      /* 清理函数自身不该抛错；测试里兜住避免掩盖断言 */
+    }
+  }
 }
 
 /**
@@ -6166,7 +6188,72 @@ const r23Failures = []
   }
 }
 
-if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0 || r21Failures.length > 0 || r22Failures.length > 0 || r23Failures.length > 0 || r24Failures.length > 0) {
+// ---------- 第二十五轮审计的前端回归 ----------
+const r25Failures = []
+{
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+  // 1) 胶囊卸载必须 abort 在途读请求（卡片 R24 C-10 的同类，胶囊此前漏修）。
+  try {
+    const held = []
+    const restore = sandbox.fetch
+    try {
+      sandbox.fetch = (url, init) => new Promise((resolve, reject) => { held.push({ url, init, resolve, reject }) })
+      await mount(pill, { t: (key) => key, wide: true })
+      const light = held.find((call) => String(call.url).includes('light=1'))
+      if (light === undefined) throw new Error('胶囊没有发出轻量 GET')
+      if (light.init === undefined || light.init.signal === undefined) throw new Error('胶囊读请求没有取消信号')
+      unmount()
+      if (light.init.signal.aborted !== true) throw new Error('卸载后在途读请求未被 abort')
+      console.log('✓ 胶囊卸载时 abort 在途读请求')
+    } finally {
+      sandbox.fetch = restore
+    }
+  } catch (error) {
+    r25Failures.push('胶囊卸载 abort: ' + String(error && error.message ? error.message : error))
+    console.log('✗ 胶囊卸载 abort: ' + String(error && error.message ? error.message : error))
+  }
+
+  // 2) fetch 同步抛错时胶囊不能永久锁死 loading（卡片 R24 C-6 的同类）。
+  try {
+    const restore = sandbox.fetch
+    try {
+      sandbox.fetch = () => { throw new Error('fetch missing') }
+      const tree = await mount(pill, { t: (key) => key, wide: true })
+      const text = textOf(tree)
+      if (!text.includes('retry')) throw new Error('同步抛错后没有重试入口：' + text.slice(0, 120))
+      console.log('✓ 胶囊 fetch 同步抛错后给重试入口，不锁死 loading')
+    } finally {
+      sandbox.fetch = restore
+    }
+  } catch (error) {
+    r25Failures.push('胶囊同步抛错: ' + String(error && error.message ? error.message : error))
+    console.log('✗ 胶囊同步抛错: ' + String(error && error.message ? error.message : error))
+  }
+
+  // 3) 视觉语言：details 统一 rpc-details、胶囊有焦点环类、主题样式含新规则。
+  try {
+    const tree = await mount(card, { t: (key) => key })
+    await sleep(20)
+    const detailsNodes = findAll(tree, (node) => node.type === 'details')
+    if (detailsNodes.length === 0) throw new Error('卡片没有 details 分区')
+    const naked = detailsNodes.filter((node) => !String(node.props?.className || '').includes('rpc-details'))
+    if (naked.length > 0) throw new Error('仍有 details 用浏览器默认标记')
+    const css = injectedStyles.map((style) => style.textContent || '').join('\n')
+    if (!css.includes('.rpc-details>summary')) throw new Error('主题样式缺 rpc-details summary 规则')
+    if (!css.includes('.dsh-rpc-pill:focus-visible')) throw new Error('胶囊缺 focus-visible 焦点环')
+    if (!css.includes('--dsh-rpc-shadow')) throw new Error('缺主题自适应阴影变量')
+    const pillTree = await mount(pill, { t: (key) => key, wide: true })
+    const pillButton = find(pillTree, (node) => node.type === 'button' && String(node.props?.className || '').includes('dsh-rpc-pill'))
+    if (pillButton === undefined) throw new Error('胶囊按钮没有 dsh-rpc-pill 类')
+    console.log('✓ details / 胶囊焦点环 / 主题阴影样式齐备')
+  } catch (error) {
+    r25Failures.push('视觉语言: ' + String(error && error.message ? error.message : error))
+    console.log('✗ 视觉语言: ' + String(error && error.message ? error.message : error))
+  }
+}
+
+if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0 || r21Failures.length > 0 || r22Failures.length > 0 || r23Failures.length > 0 || r24Failures.length > 0 || r25Failures.length > 0) {
   if (r18Failures.length > 0) {
     console.error(`R18 前端回归 ${String(r18Failures.length)} 条失败：`)
     for (const line of r18Failures) console.error('- ' + line)
@@ -6194,6 +6281,10 @@ if (r18Failures.length > 0 || r19Failures.length > 0 || r20Failures.length > 0 |
   if (r24Failures.length > 0) {
     console.error(`R24 前端回归 ${String(r24Failures.length)} 条失败：`)
     for (const line of r24Failures) console.error('- ' + line)
+  }
+  if (r25Failures.length > 0) {
+    console.error(`R25 前端回归 ${String(r25Failures.length)} 条失败：`)
+    for (const line of r25Failures) console.error('- ' + line)
   }
   process.exitCode = 1
 } else {

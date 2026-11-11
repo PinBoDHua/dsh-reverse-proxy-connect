@@ -40,7 +40,8 @@ const profileDir = resolveProfile()
 const manifestPath = join(profileDir, 'package.json')
 const targetDir = join(profileDir, 'node_modules', PLUGIN_NAME)
 const dshHome = process.env.DSH_HOME ?? dirname(dirname(profileDir))
-const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14)
+// 精确到毫秒：同秒两次安装不覆盖前一份备份（R25）。
+const stamp = new Date().toISOString().replace(/[-:T.Z]/g, '').slice(0, 17)
 const backupDir = join(dshHome, `${PLUGIN_NAME}-backup-${stamp}`)
 
 /** 不进 profile 的东西：测试、临时脚本、点文件与下划线开头的本地草稿。 */

@@ -84,8 +84,8 @@ window.__ModuleLoader__.load({
         if (style === null || style === undefined) return
         style.id = THEME_STYLE_ID
         style.textContent = [
-          ':root{--dsh-rpc-warn:#9d5c00;--dsh-rpc-fill:rgba(20,28,45,.06)}',
-          'body[data-ds-dark-theme]{--dsh-rpc-warn:#f0a63c;--dsh-rpc-fill:rgba(255,255,255,.08)}',
+          ':root{--dsh-rpc-warn:#9d5c00;--dsh-rpc-fill:rgba(20,28,45,.06);--dsh-rpc-shadow:0 8px 24px rgba(16,29,54,.10)}',
+          'body[data-ds-dark-theme]{--dsh-rpc-warn:#f0a63c;--dsh-rpc-fill:rgba(255,255,255,.08);--dsh-rpc-shadow:0 10px 28px rgba(0,0,0,.45)}',
 
           /* ── 反代连接器 3.0 视觉系统 ─────────────────────────────────
              单一根容器 .dsh-rpc 提供全部设计变量；卡片、按钮、输入等
@@ -419,6 +419,30 @@ window.__ModuleLoader__.load({
           'max-height:260px;overflow:auto;white-space:pre-wrap;word-break:break-word;color:var(--rpc-text)}',
           '.rpc-sr{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}',
 
+          /* 折叠分区（高级 / 账号不支持 / 套餐包 / 最近请求）：去掉浏览器默认
+             三角，换成随开合旋转的 chevron；hover / focus 与按钮同一套语言。 */
+          '.rpc-details>summary{display:flex;align-items:center;gap:6px;list-style:none;cursor:pointer;',
+          'border-radius:8px;padding:2px 6px;margin:-2px -6px;transition:color .12s ease,background .12s ease}',
+          '.rpc-details>summary::-webkit-details-marker{display:none}',
+          '.rpc-details>summary::after{content:"";width:7px;height:7px;margin-left:auto;flex:0 0 auto;',
+          'border-right:1.6px solid currentColor;border-bottom:1.6px solid currentColor;',
+          'transform:rotate(-45deg);transition:transform .16s ease;opacity:.65}',
+          '.rpc-details[open]>summary::after{transform:rotate(45deg)}',
+          '.rpc-details>summary:hover{background:var(--rpc-surface-2)}',
+          '.rpc-details>summary:focus-visible{outline:2px solid color-mix(in srgb,var(--rpc-accent) 55%,transparent);outline-offset:1px}',
+
+          /* 键盘焦点：复选框 / 链接按钮 / 筛选胶囊补品牌色焦点环，
+             与 .rpc-btn / .rpc-provider 的 focus-visible 同一档。 */
+          '.rpc-check:focus-visible{outline:2px solid color-mix(in srgb,var(--rpc-accent) 55%,transparent);outline-offset:2px}',
+          '.rpc-btn-link:focus-visible{outline:2px solid color-mix(in srgb,var(--rpc-accent) 55%,transparent);outline-offset:2px;border-radius:4px}',
+          '.rpc-filter:focus-visible{outline:2px solid color-mix(in srgb,var(--rpc-accent) 55%,transparent);outline-offset:1px}',
+          '.rpc-btn-primary:active:not(:disabled){transform:translateY(.5px)}',
+          '.dsh-rpc ::selection{background:color-mix(in srgb,var(--rpc-accent) 22%,transparent)}',
+
+          /* 侧栏胶囊与内嵌面板：焦点环、入场动效、主题自适应阴影。 */
+          '.dsh-rpc-pill:focus-visible{outline:2px solid color-mix(in srgb,var(--dsw-alias-state-business-primary,#2154ce) 55%,transparent);outline-offset:2px}',
+          '.dsh-rpc-panel{animation:rpc-fade .16s ease}',
+
           /* 动效 / 响应式 */
           '@keyframes rpc-fade{from{opacity:0;transform:translateY(3px)}to{opacity:1;transform:none}}',
           '@container (max-width:760px){.rpc-overview{grid-template-columns:1fr}.rpc-detail-head{padding-top:14px}.rpc-provider-health{display:none}}',
@@ -464,7 +488,8 @@ window.__ModuleLoader__.load({
           '.rpc-pair-avg{grid-area:avg;text-align:right!important}',
           '.rpc-pair-status{grid-area:status;justify-self:end}',
           '}',
-          '@media (prefers-reduced-motion:reduce){.dsh-rpc *{animation:none!important;transition:none!important}}',
+          '@media (prefers-reduced-motion:reduce){.dsh-rpc *{animation:none!important;transition:none!important}',
+          '.dsh-rpc-pill,.dsh-rpc-panel{animation:none!important;transition:none!important}}',
           '.dsh-rpc *::-webkit-scrollbar{width:8px;height:8px}',
           '.dsh-rpc *::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--rpc-faint) 35%,transparent);border-radius:999px}',
           '.dsh-rpc *::-webkit-scrollbar-track{background:transparent}',
@@ -6191,7 +6216,7 @@ window.__ModuleLoader__.load({
       var creditItems = safeArray(credits.items)
       if (creditItems.length > 0) {
         creditsBody.push(
-          h('details', { key: 'pkgs' },
+          h('details', { key: 'pkgs', className: 'rpc-details' },
             h('summary', { className: 'rpc-label', style: Object.assign({}, S.hintTiny, { cursor: 'pointer' }) },
               bind(t, creditItems.length === 1 ? 'creditsPackagesOne' : 'creditsPackages', { count: creditItems.length })),
             h('ul', {
@@ -6825,7 +6850,7 @@ window.__ModuleLoader__.load({
 
         // 最近请求默认折叠：它是排障信息，不该占用卡片主视线。
         usageBody.push(
-          h('details', { key: 'recentbox', style: { marginTop: 2 } },
+          h('details', { key: 'recentbox', className: 'rpc-details', style: { marginTop: 2 } },
             h('summary', {
               style: Object.assign({}, S.sectionTitle, { cursor: 'pointer', userSelect: 'none' }),
             }, rpcIcon('clock', 13), bind(t, 'usageRecent') + ' · ' + String(recentRequests.length)),
@@ -7975,6 +8000,15 @@ window.__ModuleLoader__.load({
         var failedSeq = useRef(0)
         /** 那个 5s 定时器的句柄：卸载时要清掉，否则会在已卸载组件上 setState。 */
         var failedTimer = useRef(undefined)
+        // 卸载时取消在途读请求（卡片在 R24 C-10 修过，胶囊此前漏了同一类）：
+        // 侧栏随会话切换反复挂载/卸载，不 abort 的话轻量 GET 仍会跑完，
+        // 宿主的凭据探测白跑，回调也落在已卸载的组件上。
+        var readAbortRef = useRef(undefined)
+        if (readAbortRef.current === undefined) {
+          readAbortRef.current = typeof AbortController === 'function' ? new AbortController() : null
+        }
+        /** 卸载后 refresh 的回调不再 setState（abort 会触发 catch，不能当成刷新失败）。 */
+        var aliveRef = useRef(true)
 
         useEffect(function () {
           var disposed = false
@@ -7999,7 +8033,18 @@ window.__ModuleLoader__.load({
             if (loading || disposed) return
             loading = true
             var epoch = statusEpoch.current
-            fetchStatus(true)
+            var pending
+            try {
+              pending = fetchStatus(true, readAbortRef.current === null ? undefined : readAbortRef.current.signal)
+            } catch (failure) {
+              // fetchStatus 同步抛错（环境没有 fetch / 信号构造失败）：不释放
+              // 标记的话此后每一拍都在第一行 return，胶囊永久停在「读取中」
+              // 且没有重试入口（卡片 R24 C-6 的同类，胶囊此前漏了）。
+              loading = false
+              if (!disposed) setLoadFailed(true)
+              return
+            }
+            pending
               .then(function (document) {
                 loading = false
                 if (disposed) return
@@ -8049,6 +8094,7 @@ window.__ModuleLoader__.load({
 
           return function () {
             disposed = true
+            aliveRef.current = false
             retryRef.current = undefined
             if (typeof document !== 'undefined' && typeof document.removeEventListener === 'function') {
               document.removeEventListener('visibilitychange', onVisibility)
@@ -8062,6 +8108,14 @@ window.__ModuleLoader__.load({
             if (failedTimer.current !== undefined) {
               clearTimeout(failedTimer.current)
               failedTimer.current = undefined
+            }
+            // 在途的轻量 GET / 刷新 POST 一并取消（R24 C-10 同类）。
+            if (readAbortRef.current !== null && readAbortRef.current !== undefined) {
+              try {
+                readAbortRef.current.abort()
+              } catch (_) {
+                /* 已经中止过 */
+              }
             }
           }
         }, [])
@@ -8092,8 +8146,10 @@ window.__ModuleLoader__.load({
           busyRef.current = true
           setBusy(true)
           setFailed(false)
-          postJson(ACTION_PATH, { action: 'credits' }, status.key, REFRESH_TIMEOUT_MS)
+          postJson(ACTION_PATH, { action: 'credits' }, status.key, REFRESH_TIMEOUT_MS,
+            readAbortRef.current === null ? undefined : readAbortRef.current.signal)
             .then(function (document) {
+              if (aliveRef.current !== true) return
               // 手动刷新的结果永远落地：它比任何在途的轻量 GET 都新。
               // GET 那边用代数判旧（applyStatus 递增），两者配合才不会互相覆盖。
               applyStatus(document)
@@ -8105,6 +8161,8 @@ window.__ModuleLoader__.load({
               setFailed(false)
             })
             .catch(function (failure) {
+              // 卸载时的主动取消不是刷新失败：不能给已卸载的组件挂失败提示。
+              if (aliveRef.current !== true) return
               busyRef.current = false
               setBusy(false)
               // 刷新失败不能只靠 1.6 秒描边变色：面板底部给一条 5 秒的
@@ -8164,6 +8222,7 @@ window.__ModuleLoader__.load({
                 'button',
                 {
                   type: 'button',
+                  className: 'dsh-rpc-pill',
                   disabled: actionable !== true,
                   // 「读到了状态但没有服务商」不是额度问题，重试应当重读 /status
                   // 而不是打一轮六家的额度刷新（R24 的 C-12）。
@@ -8206,6 +8265,7 @@ window.__ModuleLoader__.load({
                 'button',
                 {
                   type: 'button',
+                  className: 'dsh-rpc-pill',
                   onClick: refresh,
                   style: {
                     font: 'inherit',
@@ -8244,6 +8304,7 @@ window.__ModuleLoader__.load({
               'button',
               {
                 type: 'button',
+                className: 'dsh-rpc-pill',
                 onClick: refresh,
                 style: {
                   font: 'inherit',
@@ -8460,6 +8521,7 @@ window.__ModuleLoader__.load({
           'button',
           {
             type: 'button',
+            className: 'dsh-rpc-pill',
             onClick: toggle,
             onMouseEnter: function () { setHovered(true) },
             onMouseLeave: function () { setHovered(false) },
@@ -8504,7 +8566,7 @@ window.__ModuleLoader__.load({
                   ? 'var(--dsh-rpc-fill, rgba(127,127,127,.08))'
                   : 'var(--dsw-alias-bg-layer-1, transparent)',
               boxShadow: hovered && expanded !== true ? '0 1px 4px rgba(0,0,0,.08)' : 'none',
-              color: 'var(--dsw-alias-label-secondary, var(--dsw-alias-label-secondary))',
+              color: 'var(--dsw-alias-label-secondary)',
               transition: 'background .12s ease, border-color .12s ease, box-shadow .12s ease',
               opacity: busy ? 0.72 : 1,
               // 这里**不能**再 `overflow:hidden` + `nowrap`：那会把放不下的
@@ -8576,6 +8638,7 @@ window.__ModuleLoader__.load({
           'div',
           {
             id: PANEL_ID,
+            className: 'dsh-rpc-panel',
             role: 'region',
             'aria-label': bind(t, 'credits'),
             style: {
@@ -8586,7 +8649,7 @@ window.__ModuleLoader__.load({
               borderRadius: 10,
               padding: '10px 12px 9px',
               background: 'var(--dsw-alias-bg-layer-1, transparent)',
-              boxShadow: '0 8px 24px rgba(0,0,0,.10)',
+              boxShadow: 'var(--dsh-rpc-shadow, 0 8px 24px rgba(0,0,0,.10))',
               maxHeight: '48vh',
               overflowY: 'auto',
               color: 'var(--dsw-alias-label-primary)',
@@ -8733,6 +8796,7 @@ window.__ModuleLoader__.load({
               : null,
             h('button', {
               type: 'button',
+              className: 'dsh-rpc-pill',
               onClick: refresh,
               disabled: busy === true,
               style: {

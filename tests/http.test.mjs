@@ -154,3 +154,93 @@ test('HTTP：超限请求返回 413；代理头与多字节密钥返回 403/413 
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('HTTP：半截 body 读超时回 408，不再误告 body-too-large（R25）', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dsh-rpc-http-slow-'))
+  const providers = Object.fromEntries(PROVIDER_IDS.map((provider) => [provider, { enabled: false, disabledModels: [] }]))
+  mkdirSync(join(root, DATA_DIR_NAME), { recursive: true })
+  writeFileSync(join(root, DATA_DIR_NAME, 'settings.json'), JSON.stringify({ version: 2, providers }))
+
+  const handlers = {}
+  const disposers = []
+  const ctx = {
+    get(name) { return name === 'profileContext' ? { dir: root } : undefined },
+    inject(names, callback) {
+      if (names.includes('webServer')) {
+        callback({
+          webServer: {
+            register(route) {
+              handlers[route.path] = route.handler
+              return () => { delete handlers[route.path] }
+            },
+          },
+          effect(fn) {
+            const dispose = fn()
+            disposers.push(dispose)
+            return dispose
+          },
+        })
+      }
+    },
+    effect(fn) {
+      const dispose = fn()
+      disposers.push(dispose)
+      return dispose
+    },
+    llm: { registerAdapter: () => () => {} },
+    emit() {},
+    logger: { info() {}, warn() {} },
+  }
+
+  const server = createServer((req, res) => {
+    const handler = handlers[req.url.split('?')[0]]
+    if (handler === undefined) {
+      res.statusCode = 404
+      res.end('not found')
+      return
+    }
+    handler(req, res)
+  })
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve))
+  const port = server.address().port
+  try {
+    apply(ctx, {})
+    const status = await send(port, { path: STATUS_PATH, headers: { host: `127.0.0.1:${port}` } })
+    const key = JSON.parse(status.body).key
+
+    // 声明 100 字节只发 10 字节，然后挂着不结束：30s 读超时必须回 408。
+    const slow = await new Promise((resolve, reject) => {
+      const req = request({
+        host: '127.0.0.1',
+        port,
+        method: 'POST',
+        path: SETTINGS_PATH,
+        headers: {
+          host: `127.0.0.1:${port}`,
+          'x-rpc-key': key,
+          'content-type': 'application/json',
+          'content-length': 100,
+        },
+      }, (res) => {
+        const chunks = []
+        res.on('data', (chunk) => chunks.push(chunk))
+        res.on('end', () => resolve({ status: res.statusCode, body: Buffer.concat(chunks).toString('utf8') }))
+      })
+      req.on('error', reject)
+      req.write('{"display"')
+      // 不 req.end()：让服务端读超时。
+    })
+    assert.equal(slow.status, 408)
+    assert.doesNotMatch(slow.body, /body-too-large/)
+  } finally {
+    for (const dispose of disposers.reverse()) {
+      try {
+        if (typeof dispose === 'function') dispose()
+      } catch {
+        /* 忽略清理失败 */
+      }
+    }
+    await new Promise((resolve) => server.close(resolve))
+    rmSync(root, { recursive: true, force: true })
+  }
+})
