@@ -37,6 +37,8 @@ import {
   buildChatBody,
   checkinStatus,
   claimCheckin,
+  expandMaxModels,
+  fetchCatalog,
   fetchCredits,
   interpretCheckinStatus,
   interpretClaim,
@@ -372,12 +374,76 @@ test('Trae：请求体固定 stream=true，并带 request_id 与 session_id', ()
   const body = buildChatBody({ messages: [{ role: 'user', content: 'hi' }], model: 'glm-5.2', maxTokens: 1234 })
   assert.equal(body.stream, true)
   assert.equal(body.function, 'solo_work_lite')
-  assert.equal(body.model, 'glm-5.2')
   assert.equal(body.max_tokens, 1234)
   assert.ok(typeof body.request_id === 'string' && body.request_id !== '')
   assert.ok(typeof body.session_id === 'string' && body.session_id !== '')
   // 没给 tools 时不能出现空数组：上游对空 tools 的处理与「没有这个字段」不同。
   assert.equal(body.tools, undefined)
+})
+
+test('Trae：模型路由必须带 config_name + model_name，model 与 wire 名同值', () => {
+  // 复现 R27 的 P1：只发 model 时上游忽略它，一律按账号默认模型（Doubao-Seed-2.1-
+  // Turbo）回答 —— 用户选什么都路由到 Seed-2.1。路由键是 config_name（=目录
+  // config_name）+ model_name（目录 model_detail_list[].model_name，带 __dev）。
+  const row = { id: 'kimi-k3', name: 'Kimi-K3', wireName: 'kimi-k3__dev', configSource: 1 }
+  const body = buildChatBody({ messages: [{ role: 'user', content: 'hi' }], model: 'kimi-k3', modelRow: row })
+  assert.equal(body.config_name, 'kimi-k3')
+  assert.equal(body.model_name, 'kimi-k3__dev')
+  assert.equal(body.model, 'kimi-k3__dev')
+  assert.equal(body.config_source, 1)
+  assert.equal(body.is_custom_model, false)
+  assert.equal(body.provider, '')
+  assert.equal(body.conversation_id, body.session_id)
+  assert.equal(body.request_seq, 1)
+  // 模型行缺 wireName（旧缓存 / 兜底清单）时按 Trae 命名规则派生，路由仍要成立。
+  const derived = buildChatBody({ messages: [{ role: 'user', content: 'hi' }], model: 'glm-5.2', modelRow: { id: 'glm-5.2', name: 'GLM-5.2' } })
+  assert.equal(derived.config_name, 'glm-5.2')
+  assert.equal(derived.model_name, 'glm-5.2__dev')
+  assert.equal(derived.model, 'glm-5.2__dev')
+  assert.equal(derived.config_source, 1)
+  // 连模型行都没有（测试/极端路径）：从 model 字符串派生，绝不能丢 config_name。
+  const bare = buildChatBody({ messages: [{ role: 'user', content: 'hi' }], model: 'DeepSeek-V4-Pro-Official' })
+  assert.equal(bare.config_name, 'DeepSeek-V4-Pro-Official')
+  assert.equal(bare.model_name, 'DeepSeek-V4-Pro-Official__dev')
+})
+
+test('Trae：Max 模型行走 solo_agent_lite + __max，并带 Max 策略字段', () => {
+  const row = {
+    id: 'deepseek-v4.1-flash__max',
+    baseId: 'deepseek-v4.1-flash',
+    name: 'DeepSeek-V4.1-Flash · Max',
+    wireName: 'deepseek-v4.1-flash__max',
+    chatFunction: 'solo_agent_lite',
+    maxMode: true,
+    contextWindow: 1_000_000,
+    configSource: 1,
+  }
+  const body = buildChatBody({ messages: [{ role: 'user', content: 'hi' }], model: row.id, modelRow: row })
+  // config_name 必须是目录里的原值，不能带 __max 后缀。
+  assert.equal(body.config_name, 'deepseek-v4.1-flash')
+  assert.equal(body.model_name, 'deepseek-v4.1-flash__max')
+  assert.equal(body.model, 'deepseek-v4.1-flash__max')
+  assert.equal(body.function, 'solo_agent_lite')
+  assert.deepEqual(body.model_auto_selection, { strategy: 'max' })
+  assert.equal(body.context_window_size, 1_000_000)
+
+  // 标准行仍然走原来的 function，且不带 Max 字段。
+  const standard = buildChatBody({
+    messages: [{ role: 'user', content: 'hi' }],
+    model: 'deepseek-v4.1-flash',
+    modelRow: { id: 'deepseek-v4.1-flash', wireName: 'deepseek-v4.1-flash__dev', contextWindow: 200_000 },
+  })
+  assert.equal(standard.function, 'solo_work_lite')
+  assert.equal(standard.model_auto_selection, undefined)
+  assert.equal(standard.context_window_size, undefined)
+
+  // 旧缓存里缺 baseId 时从 __max 后缀还原 config_name。
+  const legacy = buildChatBody({
+    messages: [{ role: 'user', content: 'hi' }],
+    model: 'glm-5.3__max',
+    modelRow: { id: 'glm-5.3__max', wireName: 'glm-5.3__max', maxMode: true, contextWindow: 1_000_000 },
+  })
+  assert.equal(legacy.config_name, 'glm-5.3')
 })
 
 // ---------- 目录 ----------
@@ -392,6 +458,8 @@ test('Trae：目录跳过内部 agent、自定义模型槽位与关掉的模型'
         display_config: { display_name: 'GLM-5.2', model_capability: 'reasoning_model', multimodal: false },
         display_contact_config: JSON.stringify({ consumption_rate: { enable: true, data: { rate: 0.78 } } }),
         reasoning_effort_config: { support_thinking: false },
+        model_detail_list: [{ model_name: 'glm-5.2__dev' }],
+        config_source: 1,
       },
       { config_name: 'browser_use_subagent', config_switch: true, is_invisible_to_user: true, context_window_tokens: { dev: 184_000 }, display_config: { display_name: '' } },
       { config_name: 'custom_model_1M', config_switch: true, context_window_tokens: { dev: 1_000_000 }, display_config: { display_name: '' } },
@@ -408,6 +476,171 @@ test('Trae：目录跳过内部 agent、自定义模型槽位与关掉的模型'
   assert.equal(model.supportsImages, false)
   assert.equal(model.credits, 'x0.78')
   assert.deepEqual(model.reasoningEfforts, [])
+  // wire 名是聊天路由键之一，目录必须把它带出来。
+  assert.equal(model.wireName, 'glm-5.2__dev')
+  assert.equal(model.configSource, 1)
+})
+
+test('Trae：目录的 wire 名优先取标准档，跳过 max_mode 后端', () => {
+  // custom_model_* 之类会出现 __max + __dev 两条 detail；窗口按 dev 记的模型
+  // 必须拿 dev 那条，否则请求会被路由到 Max 后端（窗口/倍率都不对）。
+  const models = parseCatalog({
+    config_info_list: [
+      {
+        config_name: 'both',
+        config_switch: true,
+        context_window_tokens: { dev: 200_000, max: 1_000_000 },
+        display_config: { display_name: 'Both' },
+        model_detail_list: [{ model_name: 'both__max', max_mode: true }, { model_name: 'both__dev' }],
+      },
+      {
+        config_name: 'only-dev',
+        config_switch: true,
+        context_window_tokens: { dev: 128_000 },
+        display_config: { display_name: 'Dev' },
+        model_detail_list: [{ model_name: 'only-dev__dev' }],
+      },
+      {
+        config_name: 'no-details',
+        config_switch: true,
+        context_window_tokens: { dev: 128_000 },
+        display_config: { display_name: 'NoDetails' },
+      },
+    ],
+  })
+  assert.equal(models.length, 3)
+  assert.equal(models[0].wireName, 'both__dev')
+  // Max 元数据与标准 wire 名分开保存，由 expandMaxModels() 展开成独立行。
+  assert.equal(models[0].maxContextWindow, 1_000_000)
+  assert.equal(models[0].maxWireName, 'both__max')
+  assert.equal(models[1].wireName, 'only-dev__dev')
+  assert.equal(models[1].maxContextWindow, undefined)
+  // 没有 model_detail_list 的行不带 wireName：请求侧按 <id>__dev 派生。
+  assert.equal(models[2].wireName, undefined)
+})
+
+test('Trae：Max 档展开成独立模型行，max 等于 dev 时不重复', () => {
+  const models = parseCatalog({
+    config_info_list: [
+      {
+        config_name: 'deepseek-v4.1-flash',
+        config_switch: true,
+        context_window_tokens: { dev: 200_000, max: 1_000_000 },
+        display_config: { display_name: 'DeepSeek-V4.1-Flash', max_mode: true },
+        model_detail_list: [{ model_name: 'deepseek-v4.1-flash__dev' }, { model_name: 'deepseek-v4.1-flash__max', max_mode: true }],
+        config_source: 1,
+      },
+      {
+        config_name: 'Doubao-Seed-2.1-Turbo',
+        config_switch: true,
+        context_window_tokens: { dev: 256_000, max: 256_000 },
+        display_config: { display_name: 'Seed-2.1-Turbo' },
+        model_detail_list: [{ model_name: 'Doubao-Seed-2.1-Turbo__dev' }],
+      },
+      {
+        config_name: 'glm-5.3',
+        config_switch: true,
+        context_window_tokens: { dev: 200_000, max: 1_000_000 },
+        display_config: { display_name: 'GLM-5.3' },
+        model_detail_list: [{ model_name: 'glm-5.3__dev' }],
+      },
+    ],
+  })
+  const expanded = expandMaxModels(models)
+  assert.deepEqual(expanded.map((model) => model.id), [
+    'deepseek-v4.1-flash',
+    'deepseek-v4.1-flash__max',
+    'Doubao-Seed-2.1-Turbo',
+    'glm-5.3',
+    'glm-5.3__max',
+  ])
+  const max = expanded[1]
+  assert.equal(max.name, 'DeepSeek-V4.1-Flash · Max')
+  assert.equal(max.contextWindow, 1_000_000)
+  assert.equal(max.wireName, 'deepseek-v4.1-flash__max')
+  assert.equal(max.chatFunction, 'solo_agent_lite')
+  assert.equal(max.maxMode, true)
+  assert.equal(max.baseId, 'deepseek-v4.1-flash')
+  assert.equal(max.configSource, 1)
+  // 展开后的行不再带元数据，重复展开不会产生第二层 Max。
+  assert.equal(max.maxContextWindow, undefined)
+  assert.equal(max.maxWireName, undefined)
+  assert.equal(expandMaxModels(expanded).length, expanded.length)
+  // 没有 __max detail 时按命名规则派生。
+  assert.equal(expanded[4].wireName, 'glm-5.3__max')
+})
+
+test('Trae：目录请求使用带 Max 档的 solo_agent_lite', async () => {
+  const original = globalThis.fetch
+  let seen
+  globalThis.fetch = async (_url, init) => {
+    seen = JSON.parse(init.body)
+    return {
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({
+          config_info_list: [{
+            config_name: 'deepseek-v4.1-flash',
+            config_switch: true,
+            context_window_tokens: { dev: 200_000, max: 1_000_000 },
+            display_config: { display_name: 'DeepSeek-V4.1-Flash', max_mode: true },
+            model_detail_list: [{ model_name: 'deepseek-v4.1-flash__dev' }, { model_name: 'deepseek-v4.1-flash__max', max_mode: true }],
+          }],
+        })
+      },
+    }
+  }
+  try {
+    const models = await fetchCatalog('trae', { jwt: 'jwt-1', userId: 'u1' })
+    assert.equal(seen.function, 'solo_agent_lite')
+    assert.deepEqual(models.map((model) => model.id), ['deepseek-v4.1-flash', 'deepseek-v4.1-flash__max'])
+  } finally {
+    globalThis.fetch = original
+  }
+})
+
+test('Trae：solo_agent_lite 不可用时退回 solo_work_lite，鉴权失败不重试', async () => {
+  const original = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (_url, init) => {
+    const fn = JSON.parse(init.body).function
+    calls.push(fn)
+    if (fn === 'solo_agent_lite') {
+      return { ok: false, status: 400, async text() { return 'unsupported function' } }
+    }
+    return {
+      ok: true,
+      status: 200,
+      async text() {
+        return JSON.stringify({
+          config_info_list: [{
+            config_name: 'glm-5.2',
+            config_switch: true,
+            context_window_tokens: { dev: 200_000 },
+            display_config: { display_name: 'GLM-5.2' },
+            model_detail_list: [{ model_name: 'glm-5.2__dev' }],
+          }],
+        })
+      },
+    }
+  }
+  try {
+    const models = await fetchCatalog('trae', { jwt: 'jwt-1', userId: 'u1' })
+    assert.deepEqual(calls, ['solo_agent_lite', 'solo_work_lite'])
+    assert.deepEqual(models.map((model) => model.id), ['glm-5.2'])
+
+    // 401 是鉴权问题：换 function 也不会变好，不能打第二次。
+    let authCalls = 0
+    globalThis.fetch = async () => {
+      authCalls++
+      return { ok: false, status: 401, async text() { return 'unauthorized' } }
+    }
+    await assert.rejects(() => fetchCatalog('trae', { jwt: 'jwt-1', userId: 'u1' }))
+    assert.equal(authCalls, 1, '401 不能回退重试')
+  } finally {
+    globalThis.fetch = original
+  }
 })
 
 test('Trae：多模态模型声明图片能力，max 窗口作为兜底', () => {

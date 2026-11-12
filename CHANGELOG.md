@@ -1,5 +1,64 @@
 # 更新记录
 
+## 0.12.0 — 2026-11-12
+
+Trae 的 Max 上下文档（1M）落地。根因不是模型不支持，而是插件一直用
+`solo_work_lite` 拉目录：同一账号下这套目录只下发 `context_window_tokens.dev`
+（Seed 256K / 其它 200K），而 `solo_agent_lite` 才下发 `context_window_tokens.max`
+与 `model_detail_list[].max_mode / __max`。实测 `solo_work_lite` + `__max`
+会被上游回 `4023 model is unknown`，`solo_agent_lite` + `__max` 正常出字。
+DSH 的模型信息只有单个 `contextWindow`，所以 Max 档做成独立模型行。
+
+- **目录切到 `solo_agent_lite`**：实时目录现在能拿到 Max 元数据；标准模型集合
+  不变（17 个，另补一个 Seed-Code）。 [lib/trae/transport.js](lib/trae/transport.js)
+- **Max 元数据解析**：`parseCatalog()` 读 `context_window_tokens.max` 与 Max 档
+  wire 名，只有 `max > dev` 才保留；等于 dev 的 max（如 Seed-2.1-Turbo 的
+  256K→256K）不会产生重复项。 [lib/trae/transport.js](lib/trae/transport.js)
+- **独立 Max 模型行**：`expandMaxModels()` 展开出 `<id>__max`，展示名为
+  `原名 · Max`，窗口按上游 max 记（DeepSeek-V4.1-Flash / GLM-5.3 / Kimi-K3 等
+  200K→1M，MiMo-V2.6 200K→981,504）。重复展开不会产生第二层 Max。
+  [lib/trae/transport.js](lib/trae/transport.js)
+- **Max 聊天请求**：`config_name` 回到目录原值，`model_name` 用 `__max`，
+  `function` 切到 `solo_agent_lite`，并带 `model_auto_selection.strategy='max'`
+  与 `context_window_size`；标准档仍走 `solo_work_lite`。 [lib/trae/transport.js](lib/trae/transport.js)
+- **目录缓存**：白名单放行 `maxContextWindow` / `maxWireName` / `maxMode` /
+  `baseId` / `chatFunction`，其中 `chatFunction` 只接受两个已知值。
+  [lib/catalog-cache.js](lib/catalog-cache.js)
+- **目录回退**：`solo_agent_lite` 不被账号/套餐识别（400/404 等）时退回
+  `solo_work_lite`，至少保留标准模型；鉴权、额度、限流与超时不回退，避免同一份
+  错误打两遍。 [lib/trae/transport.js](lib/trae/transport.js)
+- **测试**：新增目录 function、Max 展开、重复展开幂等、Max 请求体、目录回退与
+  缓存字段用例；`node --test tests/trae.test.mjs tests/catalog-cache.test.mjs`
+  61 条全绿，客户端脚本 `client-credits` 全绿。全量 `npm test` 中 audit-r24 B-5
+  仍是已知的并发偶发超时（单跑通过，与本次改动无关）。版本 0.12.0。
+
+## 0.11.1 — 2026-11-12
+
+热修：Trae 的模型选择从 1.7.0 起就一直没真正生效。根因是一个**协议层的
+路由键**问题，不是选择器或缓存：`llm_utils_chat` 的上游按 `config_name` +
+`model_name`（目录 `model_detail_list[].model_name`，标准档带 `__dev` 后缀）
+选模型，请求体里的 `model` 字段会被直接忽略。旧实现只发 `model`，于是无论
+选什么，上游都按「账号默认模型」回答——实测本机账号下选 kimi-k3 / glm-5.3，
+自报家门全是豆包（Doubao-Seed-2.1-Turbo）；带上两个路由键后 kimi-k3 回
+Moonshot、glm-5.3 回 GLM、Seed-2.1 回字节跳动，选择才真正生效。
+
+- **请求体带全路由键**（P1 T-3）：`buildChatBody` 现在发 `config_name`（=目录
+  config_name）、`model_name`（标准档 wire 名）、`model`（与官方客户端一样
+  带 wire 名）、`config_source`、`is_custom_model: false`、`provider`、
+  `conversation_id` 与 `request_seq`。旧缓存 / 兜底清单里没有 wire 名的行按
+  Trae 的 `<config_name>__dev` 命名规则派生（实测在架内置模型全部符合）。
+  [lib/trae/transport.js](lib/trae/transport.js) [lib/runtime.js](lib/runtime.js)
+- **目录带出 wire 名**：`parseCatalog` 从 `model_detail_list` 里读标准档
+  `model_name`（跳过 `__max` / `max_mode` 的 Max 后端——窗口与输出上限一直按
+  dev 档记，路由也必须对齐同一档），并透传 `config_source`；目录缓存的白名单
+  同步放行这两个字段，重启后不再丢。
+  [lib/trae/transport.js](lib/trae/transport.js) [lib/catalog-cache.js](lib/catalog-cache.js)
+- 测试：新增「路由键必须成对出现」与「wire 名优先取标准档」两组断言，
+  原有请求体断言按新形状更新。531 后端用例全绿（audit-r24 的 B-5 轮询
+  超时在 0.11.0 上同样偶发，与本修复无关，单跑通过）。
+- 已知（记录不修）：`tests/audit-r24.test.mjs` 的 B-5 用 3 秒轮询等异步
+  响应，全套并发跑时偶发超时；单文件运行稳定通过。
+
 ## 0.11.0 — 2026-11-12
 
 第二十六轮前后端打磨（R26 审计落地）+ 前端 UI/UX 大升级。主题仍是「修过的地方

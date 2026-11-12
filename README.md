@@ -760,7 +760,11 @@ Trae 的协议本身不复杂（事件流 + 一组请求头），难的是三处
   会被跳过，不会在选择器里出现一个点了就 400 的空行。
 - **聊天**：`/api/agent/v3/llm_utils_chat` 的事件流（`event: output` +
   `{response, reasoning_content, tool_calls}`），正文 / 思考 / 工具调用 / usage
-  都翻成与另外两家一致的事件。
+  都翻成与另外两家一致的事件。模型路由的键是请求体里的 **`config_name` +
+  `model_name`**（后者取目录 `model_detail_list[].model_name`，标准档带 `__dev`
+  后缀）：只发 `model` 会被上游忽略并按账号默认模型回答（0.11.1 修的就是这个
+  ——此前无论选什么都路由到 Seed-2.1-Turbo）。`messages[].content` 必须是块
+  数组，字符串会被 400 拒绝。
 - **工具调用**：Trae 要求 `parameters` 是**字符串**（上游是 Go 的
   `FunctionDefinition.parameters string`），传对象会 400。插件自动序列化；
   工具分片按 `index` 累积，且**首片等 `name` 到位再发**（与 1.4.0 给 WorkBuddy

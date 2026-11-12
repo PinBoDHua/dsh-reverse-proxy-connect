@@ -23,6 +23,8 @@ const MODEL = {
   defaultEffort: 'medium',
   credits: 'x0.79',
   contextOptions: { '200K': { tokenCount: 200_000, isDefault: true } },
+  maxContextWindow: 1_000_000,
+  maxWireName: 'glm-5.3__max',
   source: 'system',
 }
 
@@ -40,6 +42,8 @@ test('目录缓存：按 provider::account 存取，模型行完整保留', () =
     assert.deepEqual(entry.models[0].reasoningEfforts, ['low', 'medium'])
     assert.equal(entry.models[0].defaultEffort, 'medium')
     assert.equal(entry.models[0].contextOptions['200K'].isDefault, true)
+    assert.equal(entry.models[0].maxContextWindow, 1_000_000)
+    assert.equal(entry.models[0].maxWireName, 'glm-5.3__max')
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }
@@ -89,13 +93,21 @@ test('目录缓存：单行归一化剥掉未知字段并修正常见错值', ()
     reasoningEfforts: ['max', 'bogus', 'low', 'max'],
     defaultEffort: 'bogus',
     contextOptions: { a: { tokenCount: 5 }, b: { tokenCount: 0 }, c: 'nope' },
+    maxMode: true,
+    baseId: 'm-base',
+    chatFunction: 'solo_agent_lite',
     unknown: 'drop-me',
   })
   assert.equal(model.name, 'm')
   assert.deepEqual(model.reasoningEfforts, ['max', 'low'])
   assert.equal(model.defaultEffort, undefined)
   assert.deepEqual(model.contextOptions, { a: { tokenCount: 5, isDefault: false } })
+  assert.equal(model.maxMode, true)
+  assert.equal(model.baseId, 'm-base')
+  assert.equal(model.chatFunction, 'solo_agent_lite')
   assert.equal(model.unknown, undefined)
+  // 缓存是外部数据：非白名单的 function 不能进请求体。
+  assert.equal(normalizeCachedModel({ id: 'x', contextWindow: 1, maxTokens: 1, chatFunction: 'evil' }).chatFunction, undefined)
   assert.equal(normalizeCachedModel({ id: '' }), undefined)
 })
 
