@@ -87,15 +87,22 @@ window.__ModuleLoader__.load({
           ':root{--dsh-rpc-warn:#9d5c00;--dsh-rpc-fill:rgba(20,28,45,.06);--dsh-rpc-shadow:0 8px 24px rgba(16,29,54,.10)}',
           'body[data-ds-dark-theme]{--dsh-rpc-warn:#f0a63c;--dsh-rpc-fill:rgba(255,255,255,.08);--dsh-rpc-shadow:0 10px 28px rgba(0,0,0,.45)}',
 
-          /* ── 反代连接器 3.0 视觉系统 ─────────────────────────────────
+          /* ── 反代连接器 4.0 视觉系统 · 现代科技仪表盘 ───────────────
              单一根容器 .dsh-rpc 提供全部设计变量；卡片、按钮、输入等
-             只用 class，主题切换只改变量，不再在每处内联兜底。 */
+             只用 class，主题切换只改变量，不再在每处内联兜底。
+             4.0 引入品牌蓝→青渐变、玻璃质感卡面、分层主题阴影与统一
+             动效令牌；所有新增变量都保留旧名别名，旧使用点不回归。 */
           '.dsh-rpc{',
-          '--rpc-accent:#2154ce;--rpc-accent-soft:color-mix(in srgb,var(--rpc-accent) 9%,transparent);',
+          '--rpc-accent:#2563eb;--rpc-accent-2:#06b6d4;',
+          '--rpc-accent-soft:color-mix(in srgb,var(--rpc-accent) 9%,transparent);',
+          '--rpc-grad:linear-gradient(135deg,var(--rpc-accent),var(--rpc-accent-2));',
+          '--rpc-grad-soft:linear-gradient(135deg,color-mix(in srgb,var(--rpc-accent) 14%,transparent),color-mix(in srgb,var(--rpc-accent-2) 10%,transparent));',
           '--rpc-bg:var(--dsw-alias-bg-layer-1,#fff);',
           '--rpc-bg-base:var(--dsw-alias-bg-base,#f6f8fc);',
           '--rpc-surface:color-mix(in srgb,var(--dsw-alias-bg-layer-1,#fff) 70%,var(--dsw-alias-bg-base,#f6f8fc));',
           '--rpc-surface-2:color-mix(in srgb,var(--dsw-alias-bg-base,#f6f8fc) 78%,var(--dsw-alias-bg-layer-1,#fff));',
+          '--rpc-glass:color-mix(in srgb,var(--dsw-alias-bg-layer-1,#fff) 82%,transparent);',
+          '--rpc-glass-hi:color-mix(in srgb,#fff 65%,transparent);',
           '--rpc-border:var(--dsw-alias-border-l2,#1b2a4a1a);',
           '--rpc-border-strong:var(--dsw-alias-border-l3,#1b2a4a24);',
           '--rpc-text:var(--dsw-alias-label-primary,#0e1626);',
@@ -106,7 +113,9 @@ window.__ModuleLoader__.load({
           '--rpc-warn:var(--dsh-rpc-warn,#9d5c00);',
           '--rpc-shadow:var(--dsw-shadow-lv2,0 4px 12px rgba(16,29,54,.06));',
           '--rpc-shadow-sm:var(--dsw-shadow-lv1,0 1px 2px rgba(16,29,54,.04));',
-          '--rpc-radius:18px;',
+          '--rpc-shadow-lift:0 10px 30px rgba(16,29,54,.12),0 2px 8px rgba(16,29,54,.06);',
+          '--rpc-radius:18px;--rpc-radius-card:16px;--rpc-radius-inner:12px;',
+          '--rpc-ease:cubic-bezier(.22,.61,.36,1);--rpc-dur:.18s;',
           'display:flex;flex-direction:column;min-width:0;max-width:100%;box-sizing:border-box;',
           'flex:0 0 auto;',
           'border:1px solid var(--rpc-border);border-radius:var(--rpc-radius);',
@@ -114,24 +123,32 @@ window.__ModuleLoader__.load({
           'container-type:inline-size;',
           '}',
           'body[data-ds-dark-theme] .dsh-rpc{',
+          '--rpc-accent:#3b82f6;--rpc-accent-2:#22d3ee;',
           '--rpc-bg:var(--dsw-alias-bg-layer-1,#232324);',
           '--rpc-bg-base:var(--dsw-alias-bg-base,#151517);',
+          '--rpc-glass:color-mix(in srgb,var(--dsw-alias-bg-layer-1,#232324) 78%,transparent);',
+          '--rpc-glass-hi:color-mix(in srgb,#fff 7%,transparent);',
           '--rpc-border:var(--dsw-alias-border-l2,rgba(255,255,255,.12));',
           '--rpc-border-strong:var(--dsw-alias-border-l3,rgba(255,255,255,.18));',
           '--rpc-text:var(--dsw-alias-label-primary,#ebeef2);',
           '--rpc-muted:var(--dsw-alias-label-secondary,#cfd3d6);',
           '--rpc-faint:var(--dsw-alias-label-caption,#adb2b8);',
           '--rpc-shadow:0 6px 20px rgba(0,0,0,.30);--rpc-shadow-sm:0 1px 2px rgba(0,0,0,.24);',
+          '--rpc-shadow-lift:0 12px 32px rgba(0,0,0,.45),0 2px 8px rgba(0,0,0,.3);',
           '}',
 
           /* 页头 */
           '.rpc-hero{position:relative;display:flex;align-items:flex-start;gap:13px;padding:18px 20px 16px;',
           'border-bottom:1px solid var(--rpc-border);',
-          'background:radial-gradient(120% 160% at 100% 0%,color-mix(in srgb,var(--rpc-accent) 10%,transparent),transparent 58%),',
+          'background:radial-gradient(120% 160% at 100% 0%,color-mix(in srgb,var(--rpc-accent-2) 9%,transparent),transparent 55%),',
+          'radial-gradient(90% 140% at 0% 0%,color-mix(in srgb,var(--rpc-accent) 10%,transparent),transparent 60%),',
           'linear-gradient(180deg,var(--rpc-bg),var(--rpc-surface));}',
-          '.rpc-hero-icon{width:38px;height:38px;flex:0 0 auto;border-radius:11px;display:grid;place-items:center;color:#fff;',
-          'background:linear-gradient(145deg,color-mix(in srgb,var(--rpc-accent) 82%,#fff),var(--rpc-accent));',
-          'box-shadow:0 6px 16px color-mix(in srgb,var(--rpc-accent) 30%,transparent);}',
+          '.rpc-hero::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:2px;pointer-events:none;',
+          'background:var(--rpc-grad);opacity:.5;',
+          '-webkit-mask:linear-gradient(90deg,transparent,#000 18%,#000 82%,transparent);mask:linear-gradient(90deg,transparent,#000 18%,#000 82%,transparent)}',
+          '.rpc-hero-icon{width:40px;height:40px;flex:0 0 auto;border-radius:12px;display:grid;place-items:center;color:#fff;',
+          'background:var(--rpc-grad);',
+          'box-shadow:0 6px 18px color-mix(in srgb,var(--rpc-accent) 35%,transparent),inset 0 1px 0 var(--rpc-glass-hi);}',
           '.rpc-hero-main{min-width:0;flex:1 1 auto;display:flex;flex-direction:column;gap:4px}',
           '.rpc-hero-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0}',
           '.rpc-hero-title h3{margin:0;font-size:19px;line-height:26px;font-weight:650;letter-spacing:-.01em;color:var(--rpc-text)}',
@@ -146,31 +163,33 @@ window.__ModuleLoader__.load({
           '.rpc-rail{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));align-items:stretch;gap:8px;',
           'padding:12px 20px 13px;border-bottom:1px solid var(--rpc-border);background:var(--rpc-bg);overflow:visible}',
           '.rpc-provider{position:relative;appearance:none;font:inherit;text-align:left;display:flex;flex-direction:column;gap:5px;',
-          'min-width:0;max-width:none;width:100%;padding:9px 11px 8px;border:1px solid var(--rpc-border);border-radius:12px;background:var(--rpc-bg);',
-          'color:var(--rpc-text);cursor:pointer;overflow:hidden;transition:background .14s ease,border-color .14s ease,box-shadow .14s ease,transform .14s ease}',
-          '.rpc-provider::before{content:"";position:absolute;left:0;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;',
-          'background:var(--rpc-provider-accent,var(--rpc-accent));opacity:0;transition:opacity .14s ease}',
-          '.rpc-provider:hover{background:var(--rpc-surface);border-color:var(--rpc-border-strong);transform:translateY(-1px);box-shadow:var(--rpc-shadow-sm)}',
+          'min-width:0;max-width:none;width:100%;padding:10px 12px 9px;border:1px solid var(--rpc-border);border-radius:var(--rpc-radius-inner);',
+          'background:linear-gradient(180deg,var(--rpc-glass),var(--rpc-bg));',
+          'color:var(--rpc-text);cursor:pointer;overflow:hidden;transition:background var(--rpc-dur) var(--rpc-ease),border-color var(--rpc-dur) var(--rpc-ease),box-shadow var(--rpc-dur) var(--rpc-ease),transform var(--rpc-dur) var(--rpc-ease)}',
+          '.rpc-provider::before{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;',
+          'background:var(--rpc-grad);opacity:0;transition:opacity var(--rpc-dur) var(--rpc-ease)}',
+          '.rpc-provider:hover{background:var(--rpc-surface);border-color:var(--rpc-border-strong);transform:translateY(-2px);box-shadow:var(--rpc-shadow-lift)}',
           '.rpc-provider:focus-visible{outline:2px solid color-mix(in srgb,var(--rpc-accent) 55%,transparent);outline-offset:1px}',
-          '.rpc-provider[aria-selected="true"]{background:color-mix(in srgb,var(--rpc-provider-accent,var(--rpc-accent)) 7%,var(--rpc-bg));',
+          '.rpc-provider[aria-selected="true"]{background:linear-gradient(180deg,color-mix(in srgb,var(--rpc-provider-accent,var(--rpc-accent)) 8%,var(--rpc-glass)),var(--rpc-bg));',
           'border-color:color-mix(in srgb,var(--rpc-provider-accent,var(--rpc-accent)) 46%,var(--rpc-border));box-shadow:var(--rpc-shadow-sm)}',
           '.rpc-provider[aria-selected="true"]::before{opacity:1}',
-          '.rpc-provider-top{display:flex;align-items:center;gap:5px;min-width:0}',
-          '.rpc-provider-dot{width:6px;height:6px;border-radius:999px;flex:0 0 auto;background:var(--rpc-provider-accent,var(--rpc-accent))}',
+          '.rpc-provider-top{display:flex;align-items:center;gap:6px;min-width:0}',
+          '.rpc-provider-dot{width:7px;height:7px;border-radius:999px;flex:0 0 auto;background:var(--rpc-provider-accent,var(--rpc-accent))}',
           '.rpc-provider-name{font-size:12px;font-weight:600;line-height:17px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto}',
           '.rpc-provider-health{font-size:10.5px;line-height:14px;white-space:nowrap;color:var(--rpc-muted);flex:0 0 auto}',
           '.rpc-provider-value{display:flex;align-items:baseline;gap:4px;min-width:0}',
           '.rpc-provider-meta{font-size:10.5px;line-height:15px;color:var(--rpc-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0}',
-          '.rpc-provider-bar{height:3px;border-radius:999px;background:var(--rpc-surface-2);overflow:hidden;margin-top:1px}',
-          '.rpc-provider-bar>i{display:block;height:100%;border-radius:inherit;background:var(--rpc-provider-accent,var(--rpc-accent));opacity:.85}',
+          '.rpc-provider-bar{height:4px;border-radius:999px;background:var(--rpc-surface-2);overflow:hidden;margin-top:2px}',
+          '.rpc-provider-bar>i{display:block;height:100%;border-radius:inherit;background:var(--rpc-grad);opacity:.9;transition:width .35s var(--rpc-ease)}',
 
           /* 通用卡片与分区 */
-          '.rpc-page{display:flex;flex-direction:column;gap:12px;padding:14px 20px 20px;min-width:0;flex:0 0 auto;animation:rpc-fade .16s ease}',
+          '.rpc-page{display:flex;flex-direction:column;gap:12px;padding:14px 20px 20px;min-width:0;flex:0 0 auto;animation:rpc-fade .2s var(--rpc-ease)}',
           '.rpc-overview{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:12px;align-items:start}',
           '.rpc-overview-main,.rpc-overview-side{display:flex;flex-direction:column;gap:12px;min-width:0;flex:0 0 auto}',
           '.rpc-section{display:flex;flex-direction:column;gap:11px;min-width:0;flex:0 0 auto;padding:14px 16px 15px;',
-          'border:1px solid var(--rpc-border);border-radius:14px;background:var(--rpc-bg);',
-          'box-shadow:var(--rpc-shadow-sm);box-sizing:border-box}',
+          'border:1px solid var(--rpc-border);border-radius:var(--rpc-radius-card);',
+          'background:linear-gradient(180deg,var(--rpc-glass),var(--rpc-bg));',
+          'box-shadow:var(--rpc-shadow-sm),inset 0 1px 0 var(--rpc-glass-hi);box-sizing:border-box}',
           '.rpc-section.flush{padding:0;overflow:hidden}',
           '.rpc-section-head{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-height:22px;min-width:0}',
           '.rpc-section-title{display:inline-flex;align-items:center;gap:6px;font-size:12.5px;line-height:19px;font-weight:650;letter-spacing:.02em;color:var(--rpc-muted)}',
@@ -186,9 +205,9 @@ window.__ModuleLoader__.load({
           '.rpc-btn:active:not(:disabled){transform:translateY(.5px)}',
           '.rpc-btn:focus-visible{outline:2px solid color-mix(in srgb,var(--rpc-accent) 60%,transparent);outline-offset:1px}',
           '.rpc-btn[disabled]{opacity:.48;cursor:not-allowed}',
-          '.rpc-btn-primary{border-color:transparent;background:var(--rpc-accent);color:#fff;font-weight:600;',
-          'box-shadow:0 1px 2px color-mix(in srgb,var(--rpc-accent) 35%,transparent)}',
-          '.rpc-btn-primary:hover:not(:disabled){background:color-mix(in srgb,var(--rpc-accent) 87%,#000);border-color:transparent}',
+          '.rpc-btn-primary{border-color:transparent;background:var(--rpc-grad);color:#fff;font-weight:600;',
+          'box-shadow:0 2px 8px color-mix(in srgb,var(--rpc-accent) 35%,transparent),inset 0 1px 0 var(--rpc-glass-hi)}',
+          '.rpc-btn-primary:hover:not(:disabled){background:var(--rpc-grad);filter:brightness(1.07);border-color:transparent;box-shadow:0 4px 14px color-mix(in srgb,var(--rpc-accent) 42%,transparent)}',
           '.rpc-btn-ghost{border-color:transparent;background:transparent;color:var(--rpc-muted);padding:0 8px}',
           '.rpc-btn-ghost:hover:not(:disabled){background:var(--rpc-surface-2);color:var(--rpc-text)}',
           '.rpc-btn-sm{height:26px;font-size:11.5px;padding:0 9px;border-radius:7px;gap:5px}',
@@ -263,16 +282,17 @@ window.__ModuleLoader__.load({
              以前靠隐藏滚动条横向滚动 —— 用户看不到后面还有页签。
              允许换行，宽容器仍是一行。 */
           '.rpc-pagenav{display:flex;align-items:center;gap:2px;padding:4px;margin:13px 20px 0;flex-wrap:wrap;',
-          'background:var(--rpc-surface-2);border:1px solid var(--rpc-border);border-radius:11px;width:fit-content;max-width:calc(100% - 40px);',
-          'box-sizing:border-box}',
-          '.rpc-pagetab{font:inherit;font-size:12.5px;line-height:1;height:29px;padding:0 10px;border:0;border-radius:8px;',
+          'background:var(--rpc-glass);border:1px solid var(--rpc-border);border-radius:12px;width:fit-content;max-width:calc(100% - 40px);',
+          'box-sizing:border-box;box-shadow:inset 0 1px 0 var(--rpc-glass-hi)}',
+          '.rpc-pagetab{font:inherit;font-size:12.5px;line-height:1;height:29px;padding:0 11px;border:0;border-radius:9px;',
           'background:transparent;color:var(--rpc-muted);cursor:pointer;display:inline-flex;align-items:center;gap:6px;white-space:nowrap;flex:0 0 auto;',
-          'transition:background .12s,color .12s,box-shadow .12s}',
+          'transition:background var(--rpc-dur) var(--rpc-ease),color var(--rpc-dur) var(--rpc-ease),box-shadow var(--rpc-dur) var(--rpc-ease)}',
           '.rpc-pagetab:hover{color:var(--rpc-text);background:color-mix(in srgb,var(--rpc-bg) 55%,transparent)}',
           '.rpc-pagetab:focus-visible{outline:2px solid color-mix(in srgb,var(--rpc-accent) 55%,transparent);outline-offset:1px}',
-          '.rpc-pagetab[aria-current="page"]{background:var(--rpc-bg);color:var(--rpc-text);font-weight:600;box-shadow:var(--rpc-shadow-sm)}',
+          '.rpc-pagetab[aria-current="page"]{background:var(--rpc-grad-soft);color:var(--rpc-accent);font-weight:600;',
+          'box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--rpc-accent) 28%,transparent),var(--rpc-shadow-sm)}',
           '.rpc-pagetab-count{font-size:10px;line-height:1;padding:2px 5px;border-radius:999px;background:var(--rpc-surface-2);color:var(--rpc-muted);font-variant-numeric:tabular-nums}',
-          '.rpc-pagetab[aria-current="page"] .rpc-pagetab-count{background:color-mix(in srgb,var(--rpc-accent) 9%,transparent);color:var(--rpc-accent)}',
+          '.rpc-pagetab[aria-current="page"] .rpc-pagetab-count{background:color-mix(in srgb,var(--rpc-accent) 12%,transparent);color:var(--rpc-accent)}',
 
           /* 服务状态 KV */
           '.rpc-kv{display:grid;grid-template-columns:100px minmax(0,1fr);gap:8px 12px;align-items:baseline;font-size:13px;line-height:20px}',
@@ -285,19 +305,32 @@ window.__ModuleLoader__.load({
           '.rpc-credit-value{font-size:38px;line-height:40px;font-weight:650;letter-spacing:-.025em;font-variant-numeric:tabular-nums;color:var(--rpc-text)}',
           '.rpc-credit-unit{font-size:12.5px;line-height:19px;color:var(--rpc-muted);padding-bottom:5px}',
           '.rpc-progress{height:8px;border-radius:999px;background:var(--rpc-surface-2);overflow:hidden;max-width:520px}',
-          '.rpc-progress>i{display:block;height:100%;border-radius:inherit;background:var(--rpc-accent);transition:width .35s ease}',
+          '.rpc-progress>i{display:block;height:100%;border-radius:inherit;background:var(--rpc-grad);transition:width .35s var(--rpc-ease)}',
+          /* 环形额度仪表：SVG 圆环 + 渐变描边 + 中心数字。读不到/不限量时
+             退回线性进度条，不画一个误导性满环。 */
+          '.rpc-gauge-row{display:flex;align-items:center;gap:16px;min-width:0;flex-wrap:wrap}',
+          '.rpc-gauge{position:relative;width:108px;height:108px;flex:0 0 auto}',
+          '.rpc-gauge-svg{display:block;width:100%;height:100%;transform:rotate(-90deg)}',
+          '.rpc-gauge-track{fill:none;stroke:var(--rpc-surface-2);stroke-width:9}',
+          '.rpc-gauge-fill{fill:none;stroke-width:9;stroke-linecap:round;transition:stroke-dashoffset .6s var(--rpc-ease)}',
+          '.rpc-gauge-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;text-align:center}',
+          '.rpc-gauge-pct{font-size:22px;line-height:26px;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--rpc-text)}',
+          '.rpc-gauge-cap{font-size:10px;line-height:14px;color:var(--rpc-faint)}',
+          '.rpc-gauge-side{display:flex;flex-direction:column;gap:6px;min-width:0;flex:1 1 200px}',
           '.rpc-trend{display:flex;flex-direction:column;gap:7px;padding-top:10px;border-top:1px solid var(--rpc-border);min-width:0}',
           '.rpc-trend-head{display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0}',
-          '.rpc-spark{display:block;width:100%;height:30px}',
+          '.rpc-spark{display:block;width:100%;height:44px}',
+          /* KPI 瓦片行：今日消耗 / 近 7 天 / 消耗速度 / 预计还能用。 */
+          '.rpc-kpirow{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;min-width:0}',
 
           /* 账号表 */
           '.rpc-table{border:1px solid var(--rpc-border);border-radius:12px;overflow:hidden;background:var(--rpc-bg);min-width:0}',
           '.rpc-table-scroll{overflow-x:auto;max-width:100%}',
           '.rpc-table-head{display:grid;align-items:center;gap:10px;padding:9px 13px;background:var(--rpc-surface-2);',
           'border-bottom:1px solid var(--rpc-border);font-size:11px;font-weight:650;letter-spacing:.045em;color:var(--rpc-muted)}',
-          '.rpc-table-row{display:grid;align-items:start;gap:10px;padding:12px 13px;min-width:0;transition:background .12s ease}',
+          '.rpc-table-row{display:grid;align-items:start;gap:10px;padding:12px 13px;min-width:0;transition:background var(--rpc-dur) var(--rpc-ease)}',
           '.rpc-table-row:hover{background:var(--rpc-surface)}',
-          '.rpc-table-row[data-active="true"]{background:color-mix(in srgb,var(--rpc-accent) 5%,transparent);box-shadow:inset 3px 0 0 var(--rpc-accent)}',
+          '.rpc-table-row[data-active="true"]{background:linear-gradient(90deg,color-mix(in srgb,var(--rpc-accent) 7%,transparent),transparent 70%);box-shadow:inset 3px 0 0 var(--rpc-accent)}',
           '.rpc-cell{display:flex;flex-direction:column;gap:2px;min-width:0}',
           '.rpc-cell-actions{display:flex;align-items:center;justify-content:flex-end;gap:5px;flex-wrap:wrap}',
           '.rpc-mini-bar{display:block;height:3px;width:100%;max-width:104px;border-radius:999px;background:var(--rpc-surface-2);overflow:hidden;margin-top:3px}',
@@ -378,12 +411,12 @@ window.__ModuleLoader__.load({
           '.rpc-select:disabled{opacity:.55;cursor:not-allowed}',
           '.rpc-testresult{display:flex;align-items:center;gap:7px;flex-wrap:wrap;min-width:0;font-size:11.5px;line-height:17px;color:var(--rpc-muted)}',
           '.rpc-inline-note{display:flex;align-items:flex-start;gap:6px;font-size:11.5px;line-height:17px;color:var(--rpc-muted);margin:0}',
-          '.rpc-kpi{position:relative;display:flex;flex-direction:column;gap:2px;min-width:0;padding:13px 14px 11px;',
-          'border:1px solid var(--rpc-border);border-radius:13px;overflow:hidden;',
-          'background:linear-gradient(180deg,var(--rpc-bg),var(--rpc-surface-2));box-shadow:var(--rpc-shadow-sm)}',
-          '.rpc-kpi::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--rpc-accent);opacity:.45}',
+          '.rpc-kpi{position:relative;display:flex;flex-direction:column;gap:2px;min-width:0;padding:12px 13px 10px;',
+          'border:1px solid var(--rpc-border);border-radius:var(--rpc-radius-inner);overflow:hidden;',
+          'background:linear-gradient(180deg,var(--rpc-glass),var(--rpc-surface-2));box-shadow:var(--rpc-shadow-sm),inset 0 1px 0 var(--rpc-glass-hi)}',
+          '.rpc-kpi::before{content:"";position:absolute;left:0;right:0;top:0;height:2px;background:var(--rpc-grad);opacity:.6}',
           '.rpc-kpi-label{font-size:10.5px;line-height:16px;font-weight:650;letter-spacing:.05em;color:var(--rpc-muted)}',
-          '.rpc-kpi-value{font-size:26px;line-height:32px;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--rpc-text)}',
+          '.rpc-kpi-value{font-size:24px;line-height:30px;font-weight:650;letter-spacing:-.02em;font-variant-numeric:tabular-nums;color:var(--rpc-text)}',
           '.rpc-kpi-metrics{display:grid;grid-template-columns:auto minmax(0,1fr);column-gap:10px;row-gap:1px;margin-top:6px;',
           'padding-top:7px;border-top:1px solid var(--rpc-border);min-width:0;font-size:11px;line-height:16px;color:var(--rpc-muted)}',
           '.rpc-heat{display:flex;align-items:flex-end;gap:4px;height:44px;padding-top:4px;min-width:0}',
@@ -835,6 +868,11 @@ window.__ModuleLoader__.load({
       trendEta: '预计还能用 {duration}',
       trendEtaUnknown: '样本不足，暂不估算',
       trendTopup: '今日补充 {value}',
+      gaugeRemain: '剩余',
+      kpiToday: '今日消耗',
+      kpiWeek: '近 7 天',
+      kpiRate: '消耗速度',
+      kpiEta: '预计还能用',
       trendHint: '按最近成功读取的额度估算，充值不会算进消耗。',
       alertLow: '额度偏低',
       alertExhausted: '额度已用尽',
@@ -1305,6 +1343,11 @@ window.__ModuleLoader__.load({
       trendEta: '~{duration} left',
       trendEtaUnknown: 'Not enough samples yet',
       trendTopup: 'Added today {value}',
+      gaugeRemain: 'left',
+      kpiToday: 'Today',
+      kpiWeek: '7 days',
+      kpiRate: 'Burn rate',
+      kpiEta: 'Est. left',
       trendHint: 'Estimated from successful credit reads; top-ups are not counted as spend.',
       alertLow: 'Low credits',
       alertExhausted: 'Out of credits',
@@ -1864,6 +1907,7 @@ window.__ModuleLoader__.load({
      * @param color - 线色。
      * @returns SVG 节点，或 undefined（少于两个点）。
      */
+    var sparkSeq = 0
     function sparkline(points, color) {
       var valid = (Array.isArray(points) ? points : []).filter(function (point) {
         return point !== null && typeof point === 'object' && isFiniteNumber(point.remain)
@@ -1880,32 +1924,71 @@ window.__ModuleLoader__.load({
         var x = valid.length === 1 ? 50 : (index / (valid.length - 1)) * 100
         // `max - min` 在 1e308 / -1e308 这种两端极值上会溢出成 Infinity，
         // 归一化后得到 `Infinity / Infinity = NaN`，SVG 的 points 直接坏掉。
-        var y = (!isFiniteNumber(span) || span <= 0) ? 12 : 22 - ((point.remain - min) / span) * 20
-        if (!isFiniteNumber(y)) y = 12
-        return String(Math.round(x * 10) / 10) + ',' + String(Math.round(y * 10) / 10)
+        var y = (!isFiniteNumber(span) || span <= 0) ? 20 : 34 - ((point.remain - min) / span) * 28
+        if (!isFiniteNumber(y)) y = 20
+        return [Math.round(x * 10) / 10, Math.round(y * 10) / 10]
       })
+      var line = coordinates.map(function (pair) { return pair[0] + ',' + pair[1] }).join(' ')
+      var last = coordinates[coordinates.length - 1]
+      var gradId = 'rpc-spark-grad-' + (++sparkSeq)
+      var stroke = color === undefined ? 'currentColor' : color
       return h('svg', {
-        viewBox: '0 0 100 24',
+        viewBox: '0 0 100 40',
         preserveAspectRatio: 'none',
         'aria-hidden': 'true',
         focusable: 'false',
-        style: { display: 'block', width: '100%', height: 26, overflow: 'visible' },
+        style: { display: 'block', width: '100%', height: 44, overflow: 'visible' },
       },
+      h('defs', {},
+        h('linearGradient', { id: gradId, x1: '0', y1: '0', x2: '0', y2: '1' },
+          h('stop', { offset: '0%', stopColor: stroke, stopOpacity: 0.26 }),
+          h('stop', { offset: '100%', stopColor: stroke, stopOpacity: 0.02 }))),
       h('polygon', {
-        points: '0,24 ' + coordinates.join(' ') + ' 100,24',
-        fill: color === undefined ? 'currentColor' : color,
+        points: '0,40 ' + line + ' 100,40',
+        fill: 'url(#' + gradId + ')',
         stroke: 'none',
-        opacity: 0.10,
       }),
       h('polyline', {
-        points: coordinates.join(' '),
+        points: line,
         fill: 'none',
-        stroke: color === undefined ? 'currentColor' : color,
-        strokeWidth: 1.6,
+        stroke: stroke,
+        strokeWidth: 1.8,
         strokeLinecap: 'round',
         strokeLinejoin: 'round',
         vectorEffect: 'non-scaling-stroke',
+      }),
+      h('circle', {
+        cx: last[0], cy: last[1], r: 2.4,
+        fill: stroke, stroke: 'var(--rpc-bg, #fff)', strokeWidth: 1,
+        vectorEffect: 'non-scaling-stroke',
       }))
+    }
+
+    /** 环形额度仪表：渐变描边圆环 + 中心百分比。low 时用警告色。 */
+    var gaugeSeq = 0
+    function creditGauge(ratio, low, cap) {
+      var gradId = 'rpc-gauge-grad-' + (++gaugeSeq)
+      var radius = 44
+      var circumference = 2 * Math.PI * radius
+      var offset = circumference * (1 - Math.max(0, Math.min(1, ratio)))
+      var stroke = low ? 'var(--rpc-warn, #9d5c00)' : 'url(#' + gradId + ')'
+      return h('div', { className: 'rpc-gauge' },
+        h('svg', { className: 'rpc-gauge-svg', viewBox: '0 0 100 100', 'aria-hidden': 'true', focusable: 'false' },
+          h('defs', {},
+            h('linearGradient', { id: gradId, x1: '0', y1: '0', x2: '1', y2: '1' },
+              h('stop', { offset: '0%', stopColor: 'var(--rpc-accent, #2563eb)' }),
+              h('stop', { offset: '100%', stopColor: 'var(--rpc-accent-2, #06b6d4)' }))),
+          h('circle', { className: 'rpc-gauge-track', cx: 50, cy: 50, r: radius }),
+          h('circle', {
+            className: 'rpc-gauge-fill', cx: 50, cy: 50, r: radius,
+            stroke: stroke,
+            strokeDasharray: circumference,
+            strokeDashoffset: offset,
+          })),
+        h('div', { className: 'rpc-gauge-center' },
+          h('span', { className: 'rpc-gauge-pct', style: low ? { color: 'var(--rpc-warn, #9d5c00)' } : undefined },
+            Math.round(ratio * 100) + '%'),
+          h('span', { className: 'rpc-gauge-cap' }, cap)))
     }
 
     /** 额度百分比（读不到 / 不限量 / 没有总量 / 余额或总量非有限时返回 undefined）。 */
@@ -2401,9 +2484,9 @@ window.__ModuleLoader__.load({
         minWidth: 0,
         padding: '14px 16px 15px',
         border: '1px solid var(--rpc-border, var(--dsw-alias-border-l2))',
-        borderRadius: 14,
-        background: 'var(--rpc-bg, var(--dsw-alias-bg-layer-1))',
-        boxShadow: 'var(--rpc-shadow-sm, none)',
+        borderRadius: 16,
+        background: 'linear-gradient(180deg,var(--rpc-glass, var(--dsw-alias-bg-layer-1)),var(--rpc-bg, var(--dsw-alias-bg-layer-1)))',
+        boxShadow: 'var(--rpc-shadow-sm, none), inset 0 1px 0 var(--rpc-glass-hi, transparent)',
         boxSizing: 'border-box',
       },
       sectionHead: { display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', minHeight: 22, minWidth: 0 },
@@ -4856,7 +4939,7 @@ window.__ModuleLoader__.load({
           h('span', { className: 'rpc-provider-top' },
             h('span', {
               className: 'rpc-provider-dot',
-              style: { background: healthTone },
+              style: { background: healthTone, boxShadow: '0 0 0 3px color-mix(in srgb, ' + healthTone + ' 16%, transparent)' },
               title: disabled ? bind(t, 'disabled') : !signed ? bind(t, 'signedOut') : bind(t, healthTextKey(healthState)),
             }),
             h('span', { className: 'rpc-provider-name' }, providerNameOf(entry)),
@@ -6081,7 +6164,7 @@ window.__ModuleLoader__.load({
           || !isFiniteNumber(credits.remain)
           ? undefined
           : Math.max(0, Math.min(1, credits.remain / credits.total))
-        creditsBody.push(
+        var creditLine =
           h('div', { key: 'stat', className: 'rpc-credit-line' },
             h('span', {
               className: 'rpc-credit-value',
@@ -6106,8 +6189,7 @@ window.__ModuleLoader__.load({
                 className: 'rpc-chip',
                 title: typeof credits.error === 'string' && credits.error !== '' ? credits.error : undefined,
               }, bind(t, isBusy('credits:' + active.provider) ? 'creditsStale' : 'creditsCachedHint'))
-              : null),
-        )
+              : null)
         // 保留旧数字时也必须说清「这一次读失败了」：旧实现只在 state==='error'
         // 分支渲染原因，state 仍是 ok 的 stale 快照会一直挂着「正在刷新…」，
         // 用户既看不到失败原因，也不知道插件其实已经不再重试。
@@ -6123,18 +6205,14 @@ window.__ModuleLoader__.load({
           })))
         }
         if (creditsRatio !== undefined) {
+          // 有总量才画环形仪表：环 + 中心百分比在左，数字/单位/套餐在右。
           creditsBody.push(
-            h('div', {
-              key: 'bar',
-              className: 'rpc-progress',
-            },
-            h('i', {
-              style: {
-                width: Math.round(creditsRatio * 100) + '%',
-                background: creditsLow ? 'var(--rpc-warn, #9d5c00)' : 'var(--rpc-accent)',
-              },
-            })),
+            h('div', { key: 'gauge', className: 'rpc-gauge-row' },
+              creditGauge(creditsRatio, creditsLow, bind(t, 'gaugeRemain')),
+              h('div', { className: 'rpc-gauge-side' }, creditLine)),
           )
+        } else {
+          creditsBody.push(creditLine)
         }
         if (isFiniteNumber(credits.resetAtMs) && credits.resetAtMs > 0) {
           creditsBody.push(h('p', { key: 'reset', className: 'rpc-tiny', style: S.hintTiny }, bind(t, 'creditsReset') + ' ' + formatTime(credits.resetAtMs)))
@@ -6152,32 +6230,48 @@ window.__ModuleLoader__.load({
         // NaN 都是「算不出来」，界面不能因此显示得跟完全没数据一样。
         var etaUsable = trend !== null && typeof trend === 'object' && isFiniteNumber(trend.etaMs) && trend.etaMs > 0
         if (trend !== null && typeof trend === 'object' && (trend.sampleCount > 0 || trendPoints.length > 1)) {
-          var trendChips = []
-          trendChips.push(h('span', { key: 'td', className: 'rpc-chip' }, bind(t, 'trendToday', { value: formatCreditsNumber(trend.spentToday || 0, credits) })))
-          if (isFiniteNumber(trend.spent7d) && trend.spent7d > 0) {
-            trendChips.push(h('span', { key: 'tw', className: 'rpc-chip' }, bind(t, 'trendWeek', { value: formatCreditsNumber(trend.spent7d, credits) })))
-          }
+          var headChips = []
           if (isFiniteNumber(trend.topupToday) && trend.topupToday > 0) {
-            trendChips.push(h('span', { key: 'tu', className: 'rpc-chip' }, bind(t, 'trendTopup', { value: formatCreditsNumber(trend.topupToday, credits) })))
+            headChips.push(h('span', { key: 'tu', className: 'rpc-chip rpc-chip-ok' }, bind(t, 'trendTopup', { value: formatCreditsNumber(trend.topupToday, credits) })))
+          }
+          // KPI 瓦片：小标签 + 大数字；完整句子放进读屏隐藏 span，
+          // 既保留趋势文案键（回归测试锚点）又给读屏完整上下文。
+          var kpiTiles = []
+          kpiTiles.push(h('div', { key: 'k-today', className: 'rpc-kpi' },
+            h('span', { className: 'rpc-kpi-label' }, bind(t, 'kpiToday')),
+            h('span', { className: 'rpc-kpi-value' }, formatCreditsNumber(trend.spentToday || 0, credits)),
+            h('span', { className: 'rpc-sr' }, bind(t, 'trendToday', { value: formatCreditsNumber(trend.spentToday || 0, credits) }))))
+          if (isFiniteNumber(trend.spent7d) && trend.spent7d > 0) {
+            kpiTiles.push(h('div', { key: 'k-week', className: 'rpc-kpi' },
+              h('span', { className: 'rpc-kpi-label' }, bind(t, 'kpiWeek')),
+              h('span', { className: 'rpc-kpi-value' }, formatCreditsNumber(trend.spent7d, credits)),
+              h('span', { className: 'rpc-sr' }, bind(t, 'trendWeek', { value: formatCreditsNumber(trend.spent7d, credits) }))))
           }
           if (isFiniteNumber(trend.burnPerHour) && trend.burnPerHour > 0) {
-            trendChips.push(h('span', { key: 'tr', className: 'rpc-chip' }, bind(t, 'trendRate', { value: formatCreditsNumber(trend.burnPerHour, credits) })))
+            kpiTiles.push(h('div', { key: 'k-rate', className: 'rpc-kpi' },
+              h('span', { className: 'rpc-kpi-label' }, bind(t, 'kpiRate')),
+              h('span', { className: 'rpc-kpi-value' }, formatCreditsNumber(trend.burnPerHour, credits) + '/h'),
+              h('span', { className: 'rpc-sr' }, bind(t, 'trendRate', { value: formatCreditsNumber(trend.burnPerHour, credits) }))))
           }
           if (etaUsable) {
-            trendChips.push(h('span', { key: 'te', className: 'rpc-chip rpc-chip-warn' }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) })))
+            kpiTiles.push(h('div', { key: 'k-eta', className: 'rpc-kpi' },
+              h('span', { className: 'rpc-kpi-label' }, bind(t, 'kpiEta')),
+              h('span', { className: 'rpc-kpi-value', style: { color: 'var(--rpc-warn, #9d5c00)' } }, formatCompactDuration(trend.etaMs)),
+              h('span', { className: 'rpc-sr' }, bind(t, 'trendEta', { duration: formatCompactDuration(trend.etaMs) }))))
           }
           creditsBody.push(
             h('div', { key: 'trend', className: 'rpc-trend' },
               h('div', { className: 'rpc-trend-head' },
                 h('span', { className: 'rpc-label' }, bind(t, 'trend')),
                 h('span', { style: S.grow }),
-                ...trendChips),
+                ...headChips),
               // 少于两个有效点不画折线：空 SVG 容器会留下一条空白，用户
               // 看不出是「没数据」还是「画坏了」。
               trendPoints.length >= 2
                 ? h('div', { className: 'rpc-spark' },
                     sparkline(trend.points, creditsLow ? 'var(--dsh-rpc-warn, #9d5c00)' : (PROVIDER_ACCENT[active.provider] || 'currentColor')))
                 : null,
+              kpiTiles.length > 0 ? h('div', { className: 'rpc-kpirow' }, kpiTiles) : null,
               !etaUsable
                 ? h('span', { className: 'rpc-tiny' }, bind(t, 'trendEtaUnknown'))
                 : null),

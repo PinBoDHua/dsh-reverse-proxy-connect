@@ -1,5 +1,61 @@
 # 更新记录
 
+## 0.11.0 — 2026-11-12
+
+第二十六轮前后端打磨（R26 审计落地）+ 前端 UI/UX 大升级。主题仍是「修过的地方
+再修一遍」：本轮 3 个 P1 全部是 R25 修复自身的回归或漏网同类——全停用账号把
+`/status` 打成 500、墓碑撤销被深合并并集吃掉、forget 漏清在途续期导致跨账号凭证
+污染。另修 4 个 P2（PAT 清不掉、action 成功却 500、账号满 100 静默丢弃、Trae 流
+字符串 code 不认）与 2 个 P3。前端无新增行为级缺陷，主工作为**现代科技仪表盘**
+视觉+布局大升级。状态接口仍 v8、设置文件仍 v2。测试 **529 后端 + 182 前端**。
+
+### 后端
+
+- **全停用不再打挂状态**（P1 B-1）：`activeAccountFor` 全停用返回 undefined 时，
+  buildStatus 探测降级 `no-account`、`activeAccount?.id` 守卫；runProbe/cmdProbe/
+  cmdDoctor 同步跳过。停用最后一个账号不再让卡片/侧栏/诊断全 500。
+  [lib/index.js](lib/index.js) [lib/bin.js](lib/bin.js)
+- **墓碑撤销真正落盘**（P1 B-2）：`#patchLocked` 对 `removedAccountAt` 整键替换
+  （补丁已是完整意图表），mergeDeep 并集不再把「删键撤销」并回来。删除默认账号后
+  重配 PAT/路径，续期写回恢复可用。回归改驱动真实 SettingsStore。
+  [lib/settings.js](lib/settings.js)
+- **forget 清在途续期**（P1 T-1）：`forgetCredentialState` 补摘 `credentialRefreshing`
+  登记，换凭证后新请求不再 join 旧账号续期任务、旧令牌不再写进新账号行。
+  [lib/runtime.js](lib/runtime.js)
+- **PAT 清空语义**（P2 B-3）：legacy `qoder.pat:''` 改走 forget 清掉物化池旧 PAT。
+  [lib/accounts.js](lib/accounts.js)
+- **action 兜底文档**（P2 B-4）：新增 `safeActionStatus()`，动作已生效但状态构建
+  失败不再回 500（与 /settings B-9 同形状）。[lib/index.js](lib/index.js)
+- **账号上限显式拒绝**（P2 B-5）：merge 后超 100 回 400，不再静默截断回 200。
+  [lib/index.js](lib/index.js)
+- **labelKey 不落盘**（P3 B-7）：merge 输出剥离纯渲染派生字段。[lib/accounts.js](lib/accounts.js)
+- **探路门时钟回拨**（P3 T-4）：补 `lastAttempt <= now`。[lib/index.js](lib/index.js)
+- **CLI 注释纠偏**（P2 B-6 记录）：bin.js 头注与 index.js sync() 注释不再声称
+  CLI checkin 落盘；记为已知限制。[lib/bin.js](lib/bin.js) [lib/index.js](lib/index.js)
+
+### 上游传输层
+
+- **Trae 流字符串 code 归一**（P2 T-2）：classifyStreamError 与 interpretClaim 同一
+  归一，`"1001"/"401"→auth`、`"1005"→quota`，恢复换号与冷却。[lib/trae/transport.js](lib/trae/transport.js)
+
+### 前端（UI/UX 大升级 · 现代科技仪表盘）
+
+- 设计令牌 4.0：品牌蓝→青渐变、玻璃卡面、分层主题阴影、统一动效令牌
+  （reduced-motion 全覆盖）；亮/暗双主题对齐。
+- 总览仪表盘化：环形额度仪表（渐变描边+中心百分比）、渐变面积趋势图（端点圆点）、
+  KPI 瓦片行（今日/近7天/速度/预计还能用；读屏隐藏完整句保留趋势文案键）。
+- provider 条状态点光环/选中渐变下划线/hover 提升；页内导航分段胶囊+渐变 active；
+  主按钮渐变；表格选中行渐变 inset。单文件/无 innerHTML/双语/a11y/契约不变。
+  [client/client.js](client/client.js)
+
+### 工具与验证
+
+- 预览序列化器补 SVG camelCase 属性映射（stopColor/strokeDashoffset/vectorEffect/
+  preserveAspectRatio 等），截图忠实反映渐变。[scripts/preview-ui.mjs](scripts/preview-ui.mjs)
+- 新增 `tests/audit-r26.test.mjs`（8 条，驱动真实 HTTP/SettingsStore/Runtime/parseStream）。
+- 审计报告：`D:\Questions\AUDIT-r26-dsh-reverse-proxy-connect.md`；
+  验证报告：`D:\Questions\dsh-reverse-proxy-connect-0.11.0-验证报告.md`。
+
 ## 0.10.0 — 2026-11-11
 
 第二十五轮前后端打磨（R25 审计落地）。主题是「修过的地方再修一遍，说过的话
